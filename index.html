@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Webware Inventory Manager</title>
+    
+    <!-- External Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <style>
+        /* --- THEME & VARIABLES --- */
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --background: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --danger: #ef4444;
+            --console-bg: #1e293b;
+            --console-text: #4ade80;
+        }
+
+        [data-theme="dark"] {
+            --background: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        
+        body { background-color: var(--background); color: var(--text-main); transition: background 0.3s, color 0.3s; padding-bottom: 60px; /* Space for console */ }
+        
+        /* --- LAYOUT & HEADER --- */
+        header { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--card-bg); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .logo-container { display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 1.2rem; }
+        .logo-container img { height: 32px; max-width: 100px; object-fit: contain; border-radius: 4px; }
+        .header-actions { display: flex; gap: 10px; align-items: center; }
+        .icon-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-main); padding: 4px; border-radius: 50%; }
+        .icon-btn:hover { background: var(--border); }
+
+        .container { max-width: 800px; margin: 1rem auto; padding: 0 1rem; }
+        .card { background: var(--card-bg); border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 1rem; }
+        .hidden { display: none !important; }
+
+        /* --- FORMS & BUTTONS --- */
+        input[type="password"], input[type="text"], input[type="file"], select { width: 100%; padding: 0.85rem; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 1rem; font-size: 1rem; background: var(--card-bg); color: var(--text-main); }
+        button { background-color: var(--primary); color: white; border: none; padding: 0.85rem 1.5rem; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
+        button:hover { opacity: 0.9; }
+        button.secondary { background-color: var(--border); color: var(--text-main); }
+        button.danger { background-color: var(--danger); }
+        button.full-width { width: 100%; }
+
+        /* --- LIST VIEW --- */
+        .list-header-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px; }
+        .item-row { padding: 1rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1rem; transition: background 0.2s; }
+        .item-row:hover { background-color: var(--border); }
+        .item-row:last-child { border-bottom: none; }
+        .item-checkbox { width: 20px; height: 20px; cursor: pointer; accent-color: var(--primary); }
+        .item-info { flex-grow: 1; cursor: pointer; }
+        .item-title { font-weight: bold; margin-bottom: 4px; }
+        .item-sub { font-size: 0.8rem; color: var(--text-muted); }
+        
+        .floating-action { position: fixed; bottom: 40px; right: 20px; z-index: 90; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 50px; padding: 1rem 2rem; }
+
+        /* --- PREVIEW & LABELS (Screen) --- */
+        .preview-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); margin-top: 1rem; background: #e2e8f0; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+        
+        /* The exact Brother QL 29x90 format */
+        .label-card {
+            width: 90mm;
+            height: 29mm;
+            background: white;
+            color: black;
+            display: flex;
+            align-items: center;
+            box-sizing: border-box;
+            padding: 1mm;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            position: relative;
+            overflow: hidden;
+            margin: 0 auto; /* Center in grid cells */
+        }
+        .label-qr { width: 28mm; height: 28mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .label-text { flex-grow: 1; padding-left: 2mm; display: flex; flex-direction: column; justify-content: center; overflow: hidden; height: 100%; }
+        .label-text div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+        .l-num1 { font-size: 10pt; font-weight: bold; }
+        .l-num2 { font-size: 8pt; color: #333; }
+        .l-num3 { font-size: 8pt; color: #555; }
+        .l-name { font-size: 7pt; margin-top: auto; padding-top: 1mm; font-style: italic; border-top: 1px solid #ccc; }
+
+        /* --- LOGGING CONSOLE --- */
+        #dev-console { position: fixed; bottom: 0; left: 0; right: 0; background: var(--console-bg); color: var(--console-text); font-family: monospace; z-index: 1000; display: flex; flex-direction: column; transition: height 0.3s; height: 35px; }
+        #dev-console.expanded { height: 250px; }
+        .console-header { display: flex; justify-content: space-between; padding: 5px 15px; background: #0f172a; cursor: pointer; border-top: 1px solid #334155; align-items: center; height: 35px; }
+        .console-body { flex-grow: 1; overflow-y: auto; padding: 10px; font-size: 0.85rem; display: none; }
+        #dev-console.expanded .console-body { display: block; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px dashed #334155; padding-bottom: 2px; word-wrap: break-word; }
+        .console-btn { background: #334155; color: white; border: none; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+        
+        /* --- PRINT STYLES --- */
+        @media print {
+            body * { display: none !important; }
+            #preview-view, #preview-view .preview-grid, #preview-view .label-card, #preview-view .label-card * { display: flex !important; }
+            
+            #preview-view { position: absolute; left: 0; top: 0; margin: 0; padding: 0; width: 100%; background: white;}
+            .preview-grid { display: block !important; margin: 0; padding: 0; background: none; gap: 0; }
+            
+            /* Print settings specific to Brother QL */
+            @page { size: 90mm 29mm; margin: 0; }
+            .label-card { box-shadow: none; margin: 0; page-break-after: always; width: 90mm; height: 29mm; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="logo-container">
+        <!-- Add your logo.png in the same folder -->
+        <img src="logo.png" alt="Logo" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzI1NjNlYiIvPjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjQwIiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+V1c8L3RleHQ+PC9zdmc+'" />
+        Webware
+    </div>
+    <div class="header-actions">
+        <button class="icon-btn" onclick="toggleTheme()" title="Toggle Theme">🌓</button>
+        <button class="icon-btn" onclick="showSettings()" title="Settings">⚙️</button>
+    </div>
+</header>
+
+<div class="container">
+    <!-- View 1: Auth -->
+    <div id="auth-view" class="card">
+        <h2>Secure Unlock</h2>
+        <p style="margin-bottom: 1rem; color: var(--text-muted);">Enter decryption key to load database.</p>
+        <input type="password" id="decryption-key" placeholder="Enter key (e.g., varuhuset)">
+        <button class="full-width" onclick="attemptManualDecryption()">Unlock</button>
+        <p id="auth-error" style="color: var(--danger); margin-top: 1rem; display: none;">Invalid key or data.</p>
+    </div>
+
+    <!-- View 2: List / Multi-select -->
+    <div id="list-view" class="card hidden">
+        <div class="list-header-actions">
+            <h2>Inventory List</h2>
+            <button class="secondary" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem;">📥 Import CSV</button>
+            <input type="file" id="csv-upload" accept=".csv" class="hidden" onchange="handleCSVUpload(event)">
+        </div>
+        <input type="text" id="search-box" placeholder="Search items by name, number, or ID..." onkeyup="filterList()">
+        
+        <div style="margin-bottom: 0.5rem;">
+            <input type="checkbox" id="select-all" onchange="toggleSelectAll(this)" style="margin-right: 10px; width: 16px; height: 16px;">
+            <label for="select-all" style="font-size: 0.9rem; font-weight: bold;">Select All</label>
+        </div>
+
+        <div id="item-list-container"></div>
+
+        <button id="fab-create-labels" class="floating-action hidden" onclick="generateLabelsPreview()">
+            🏷️ Create Labels (<span id="selected-count">0</span>)
+        </button>
+    </div>
+
+    <!-- View 3: Single Item Detail -->
+    <div id="item-view" class="card hidden">
+        <button class="secondary" onclick="showListView()" style="margin-bottom: 1rem;">← Back to List</button>
+        <h1 id="detail-name">Item Name</h1>
+        <div id="detail-content" style="margin-top: 1rem;"></div>
+    </div>
+
+    <!-- View 4: Label Preview & Generation -->
+    <div id="preview-view" class="card hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;" class="no-print">
+            <h2>Label Preview</h2>
+            <div>
+                <button class="secondary" onclick="showListView()">Cancel</button>
+                <button onclick="window.print()" style="margin-left: 10px;">🖨️ Print Labels</button>
+                <button onclick="exportLabelsAsHTML()" style="margin-left: 10px;">💾 Export HTML</button>
+            </div>
+        </div>
+        <p class="no-print" style="color: var(--text-muted); margin-bottom: 1rem;">Paper Size: 29mm x 90mm (Brother QL-810Wc format)</p>
+        
+        <!-- Grid of labels generated here -->
+        <div id="label-preview-container" class="preview-grid"></div>
+    </div>
+
+    <!-- View 5: Settings -->
+    <div id="settings-view" class="card hidden">
+        <h2>App Settings</h2>
+        
+        <label for="qr-ecc" style="display:block; margin: 1rem 0 0.5rem; font-weight: bold;">QR Code Error Correction</label>
+        <select id="qr-ecc">
+            <option value="L">Level L (Low - Most Compact)</option>
+            <option value="M" selected>Level M (Medium)</option>
+            <option value="Q">Level Q (Quartile)</option>
+            <option value="H">Level H (High)</option>
+        </select>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">Lower ECC makes QR code modules larger and easier to scan on small 28mm labels, but withstands less damage.</p>
+        
+        <button class="full-width" onclick="saveSettings()">Save & Close</button>
+    </div>
+</div>
+
+<!-- Developer Console -->
+<div id="dev-console">
+    <div class="console-header" onclick="toggleConsole()">
+        <span>> Terminal / Logs</span>
+        <div>
+            <button class="console-btn" onclick="copyLogs(event)">Copy</button>
+            <button class="console-btn" onclick="clearLogs(event)">Clear</button>
+        </div>
+    </div>
+    <div class="console-body" id="console-output"></div>
+</div>
+
+<script>
+    // --- LOGGER SYSTEM ---
+    const logs = [];
+    const maxLogs = 500;
+    
+    function appLog(type, ...args) {
+        const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
+        const timestamp = new Date().toLocaleTimeString();
+        const entry = `[${timestamp}] [${type.toUpperCase()}] ${msg}`;
+        
+        logs.push(entry);
+        if (logs.length > maxLogs) logs.shift();
+        
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        div.style.color = type === 'error' ? '#f87171' : (type === 'warn' ? '#fbbf24' : 'inherit');
+        div.innerText = entry;
+        
+        const out = document.getElementById('console-output');
+        out.appendChild(div);
+        out.scrollTop = out.scrollHeight; // auto-scroll
+    }
+
+    // Override default console
+    const _log = console.log, _err = console.error, _warn = console.warn;
+    console.log = (...args) => { _log(...args); appLog('info', ...args); };
+    console.error = (...args) => { _err(...args); appLog('error', ...args); };
+    console.warn = (...args) => { _warn(...args); appLog('warn', ...args); };
+
+    function toggleConsole() { document.getElementById('dev-console').classList.toggle('expanded'); }
+    
+    function copyLogs(e) {
+        e.stopPropagation();
+        navigator.clipboard.writeText(logs.join('\n'))
+            .then(() => alert("Logs copied to clipboard!"))
+            .catch(err => console.error("Clipboard copy failed:", err));
+    }
+    
+    function clearLogs(e) {
+        e.stopPropagation();
+        logs.length = 0;
+        document.getElementById('console-output').innerHTML = '';
+        console.log("Console cleared.");
+    }
+
+    // --- APP CONFIGURATION ---
+    const BASE_URL = "https://nomsams.github.io/webware";
+    
+    // Default mock payload mapped to 'varuhuset'
+    const rawCSV = `Manufacturer,itemnumber,item name,itemnumber2,itemnumber3,Numberofitems,Inventorylocation,Comments
+HÄNY,None,IC310 inklusive Jean Lutz,IC310,None,0,Best,None
+HÄNY,955.248B,O-RING 102 X 4,None,1001007,7,Best,None
+HÄNY,None,KONTAKTKABEL JEAN LUTZ,None,101133010,1,Best,None
+HÄNY,None,4/3 WAY SOLENOID VALVE,None,1014485,2,Best,None
+HÄNY,None,HYDRAULIC PLUNGER,2511-HK-11,None,0,Best,None
+HÄNY,None,GUIDE BUSH - ZMP600,2511-FF-11,None,2,Best,None
+HÄNY,359.061,LOCK WASHER M8,None,None,5,Best,None
+HÄNY,613.034,IMPELLER DISC,2261-ED-11,None,3,Best,None
+HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
+
+    let ENCRYPTED_PAYLOAD = CryptoJS.AES.encrypt(rawCSV, "varuhuset").toString();
+
+    // --- STATE ---
+    let globalInventory = [];
+    let currentActiveKey = "";
+    let selectedItems = new Set();
+    let qrEccLevel = QRCode.CorrectLevel.M;
+
+    // --- INITIALIZATION ---
+    window.onload = () => {
+        console.log("App starting initialization...");
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        
+        // Load Settings
+        const savedEcc = localStorage.getItem('qr-ecc');
+        if (savedEcc) {
+            document.getElementById('qr-ecc').value = savedEcc;
+            updateQREccVar(savedEcc);
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlKey = urlParams.get('key');
+        const urlId = urlParams.get('id');
+
+        if (urlKey) {
+            console.log("Found key in URL parameters, attempting auto-decrypt...");
+            attemptDecryption(urlKey, urlId);
+        } else {
+            console.log("No key found, waiting for user input.");
+            switchView('auth-view');
+        }
+    };
+
+    function toggleTheme() {
+        const root = document.documentElement;
+        const newTheme = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        root.setAttribute('data-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+        console.log(`Theme switched to ${newTheme}`);
+    }
+
+    function switchView(viewId) {
+        ['auth-view', 'list-view', 'item-view', 'preview-view', 'settings-view'].forEach(v => {
+            document.getElementById(v).classList.add('hidden');
+        });
+        document.getElementById(viewId).classList.remove('hidden');
+    }
+
+    // --- DECRYPTION & DATA PROCESSING ---
+    function attemptManualDecryption() {
+        const key = document.getElementById('decryption-key').value;
+        attemptDecryption(key, null);
+    }
+
+    function attemptDecryption(key, targetId) {
+        console.log("Attempting decryption...");
+        try {
+            const bytes = CryptoJS.AES.decrypt(ENCRYPTED_PAYLOAD, key);
+            const decryptedCSV = bytes.toString(CryptoJS.enc.Utf8);
+
+            if (!decryptedCSV) throw new Error("Decryption returned empty (wrong key).");
+
+            console.log("Decryption successful!");
+            currentActiveKey = key;
+            document.getElementById('auth-error').style.display = 'none';
+            
+            parseCSVData(decryptedCSV, targetId);
+        } catch (e) {
+            console.error("Decryption failed:", e.message);
+            document.getElementById('auth-error').style.display = 'block';
+            switchView('auth-view');
+        }
+    }
+
+    function parseCSVData(csvText, targetId = null) {
+        Papa.parse(csvText, {
+            header: true,
+            skipEmptyLines: true,
+            complete: function(results) {
+                console.log(`Parsed ${results.data.length} items from CSV.`);
+                processData(results.data);
+                
+                if (targetId) {
+                    openItem(targetId);
+                } else {
+                    showListView();
+                }
+            }
+        });
+    }
+
+    function processData(data) {
+        globalInventory = data.map((row, index) => {
+            // Generate deterministic short ID if none provided
+            let rawId = row.itemid || ("ITM-" + Math.abs(CryptoJS.MD5(row['item name'] + row.itemnumber).words[0]).toString(16).substring(0, 6).toUpperCase());
+            return { ...row, generatedId: rawId };
+        });
+    }
+
+    // --- CSV IMPORT ---
+    function triggerCSVImport() {
+        document.getElementById('csv-upload').click();
+    }
+    
+    function handleCSVUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        console.log(`Importing CSV: ${file.name}`);
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const text = e.target.result;
+            // Parse and merge or overwrite (Here we overwrite for simplicity)
+            Papa.parse(text, {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    console.log(`Imported ${results.data.length} new records.`);
+                    processData(results.data);
+                    
+                    // Re-encrypt and update global payload so app continues working in session
+                    ENCRYPTED_PAYLOAD = CryptoJS.AES.encrypt(text, currentActiveKey).toString();
+                    
+                    selectedItems.clear();
+                    renderList(globalInventory);
+                    alert("Inventory updated successfully!");
+                }
+            });
+        };
+        reader.readAsText(file);
+    }
+
+    // --- LIST & SELECTION ---
+    function showListView() {
+        switchView('list-view');
+        renderList(globalInventory);
+        updateFab();
+    }
+
+    function renderList(items) {
+        const container = document.getElementById('item-list-container');
+        container.innerHTML = '';
+        
+        items.forEach(item => {
+            const id = item.generatedId;
+            const div = document.createElement('div');
+            div.className = 'item-row';
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'item-checkbox';
+            checkbox.checked = selectedItems.has(id);
+            checkbox.onclick = (e) => {
+                e.stopPropagation(); // Don't trigger row click
+                toggleSelection(id, checkbox.checked);
+            };
+
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'item-info';
+            infoDiv.innerHTML = `
+                <div class="item-title">${item['item name']}</div>
+                <div class="item-sub">ID: ${id} | Stock: ${item.Numberofitems || 0}</div>
+            `;
+            infoDiv.onclick = () => openItem(id);
+
+            div.appendChild(checkbox);
+            div.appendChild(infoDiv);
+            container.appendChild(div);
+        });
+    }
+
+    function filterList() {
+        const query = document.getElementById('search-box').value.toLowerCase();
+        const filtered = globalInventory.filter(item => 
+            item['item name'].toLowerCase().includes(query) || 
+            item.generatedId.toLowerCase().includes(query) ||
+            (item.itemnumber && item.itemnumber.toLowerCase().includes(query))
+        );
+        renderList(filtered);
+    }
+
+    function toggleSelection(id, isSelected) {
+        if (isSelected) selectedItems.add(id);
+        else selectedItems.delete(id);
+        updateFab();
+    }
+
+    function toggleSelectAll(checkbox) {
+        const query = document.getElementById('search-box').value.toLowerCase();
+        
+        // Only select currently filtered items
+        const visibleItems = globalInventory.filter(item => 
+            item['item name'].toLowerCase().includes(query) || 
+            item.generatedId.toLowerCase().includes(query)
+        );
+
+        if (checkbox.checked) {
+            visibleItems.forEach(item => selectedItems.add(item.generatedId));
+        } else {
+            visibleItems.forEach(item => selectedItems.delete(item.generatedId));
+        }
+        
+        // Re-render to update checkbox visuals
+        renderList(visibleItems);
+        updateFab();
+    }
+
+    function updateFab() {
+        const fab = document.getElementById('fab-create-labels');
+        const countSpan = document.getElementById('selected-count');
+        
+        if (selectedItems.size > 0) {
+            fab.classList.remove('hidden');
+            countSpan.innerText = selectedItems.size;
+        } else {
+            fab.classList.add('hidden');
+        }
+    }
+
+    // --- SINGLE ITEM VIEW ---
+    function openItem(id) {
+        console.log(`Opening item: ${id}`);
+        const item = globalInventory.find(i => i.generatedId === id);
+        if (!item) {
+            console.error("Item not found");
+            return;
+        }
+
+        switchView('item-view');
+        
+        document.getElementById('detail-name').innerText = item['item name'];
+        
+        const getStr = val => (!val || val === 'None') ? 'N/A' : val;
+        
+        let html = `
+            <div style="margin-bottom:1rem"><strong>ID:</strong> ${id}</div>
+            <div style="margin-bottom:1rem"><strong>Manufacturer:</strong> ${getStr(item.Manufacturer)}</div>
+            <div style="margin-bottom:1rem"><strong>Item #1:</strong> ${getStr(item.itemnumber)}</div>
+            <div style="margin-bottom:1rem"><strong>Item #2:</strong> ${getStr(item.itemnumber2)}</div>
+            <div style="margin-bottom:1rem"><strong>Item #3:</strong> ${getStr(item.itemnumber3)}</div>
+            <div style="margin-bottom:1rem"><strong>Stock:</strong> ${getStr(item.Numberofitems)} at ${getStr(item.Inventorylocation)}</div>
+            <div style="margin-bottom:1rem"><strong>Comments:</strong> ${getStr(item.Comments)}</div>
+            <button class="full-width" onclick="selectAndGoToLabels('${id}')">Create Label for this Item</button>
+        `;
+        document.getElementById('detail-content').innerHTML = html;
+    }
+
+    function selectAndGoToLabels(id) {
+        selectedItems.clear();
+        selectedItems.add(id);
+        generateLabelsPreview();
+    }
+
+    // --- LABEL GENERATION (Brother 29x90 format) ---
+    function generateLabelsPreview() {
+        console.log(`Generating labels for ${selectedItems.size} items...`);
+        switchView('preview-view');
+        
+        const container = document.getElementById('label-preview-container');
+        container.innerHTML = ''; // Clear old
+
+        Array.from(selectedItems).forEach(id => {
+            const item = globalInventory.find(i => i.generatedId === id);
+            if (!item) return;
+
+            // Container for 1 physical label
+            const labelEl = document.createElement('div');
+            labelEl.className = 'label-card';
+
+            // QR area
+            const qrDiv = document.createElement('div');
+            qrDiv.className = 'label-qr';
+            
+            // Text area
+            const textDiv = document.createElement('div');
+            textDiv.className = 'label-text';
+            
+            // Clean numbers
+            const num1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : id;
+            const num2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
+            const num3 = (item.itemnumber3 && item.itemnumber3 !== 'None') ? item.itemnumber3 : '';
+
+            textDiv.innerHTML = `
+                <div class="l-num1">${num1}</div>
+                ${num2 ? `<div class="l-num2">${num2}</div>` : ''}
+                ${num3 ? `<div class="l-num3">${num3}</div>` : ''}
+                <div class="l-name">${item['item name']}</div>
+            `;
+
+            labelEl.appendChild(qrDiv);
+            labelEl.appendChild(textDiv);
+            container.appendChild(labelEl);
+
+            // Generate QR Canvas inside the QR div
+            const targetUrl = `${BASE_URL}?id=${id}&key=${encodeURIComponent(currentActiveKey)}`;
+            new QRCode(qrDiv, {
+                text: targetUrl,
+                width: 105,  // Approx 28mm at 96dpi
+                height: 105,
+                colorDark: "#000000",
+                colorLight: "#ffffff",
+                correctLevel: qrEccLevel 
+            });
+        });
+        console.log("Labels generated.");
+    }
+
+    function exportLabelsAsHTML() {
+        console.log("Exporting labels to HTML file...");
+        // Grab the container HTML and wrap it in a clean document with print styles
+        const labelsHtml = document.getElementById('label-preview-container').innerHTML;
+        
+        const exportDoc = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Labels Export</title>
+            <style>
+                body { margin: 0; padding: 0; background: #e2e8f0; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 1rem;}
+                .label-card { width: 90mm; height: 29mm; background: white; color: black; display: flex; align-items: center; box-sizing: border-box; padding: 1mm; overflow: hidden; position: relative; }
+                .label-qr { width: 28mm; height: 28mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+                .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+                .label-text { flex-grow: 1; padding-left: 2mm; display: flex; flex-direction: column; justify-content: center; overflow: hidden; height: 100%; }
+                .label-text div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+                .l-num1 { font-size: 10pt; font-weight: bold; }
+                .l-num2 { font-size: 8pt; color: #333; }
+                .l-num3 { font-size: 8pt; color: #555; }
+                .l-name { font-size: 7pt; margin-top: auto; padding-top: 1mm; font-style: italic; border-top: 1px solid #ccc; }
+                
+                @media print {
+                    body { background: white; padding: 0; gap: 0; display: block; }
+                    @page { size: 90mm 29mm; margin: 0; }
+                    .label-card { margin: 0; page-break-after: always; box-shadow: none; }
+                }
+            </style>
+        </head>
+        <body onload="window.print()">
+            ${labelsHtml}
+        </body>
+        </html>`;
+
+        const blob = new Blob([exportDoc], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `inventory-labels-${new Date().getTime()}.html`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // --- SETTINGS ---
+    function showSettings() {
+        switchView('settings-view');
+    }
+
+    function saveSettings() {
+        const eccVal = document.getElementById('qr-ecc').value;
+        localStorage.setItem('qr-ecc', eccVal);
+        updateQREccVar(eccVal);
+        console.log(`Settings saved. QR ECC set to: ${eccVal}`);
+        
+        // Return to previous view
+        if (selectedItems.size > 0 && !document.getElementById('preview-view').classList.contains('hidden')) {
+            generateLabelsPreview(); // Regenerate to apply changes
+        } else if (globalInventory.length > 0) {
+            showListView();
+        } else {
+            switchView('auth-view');
+        }
+    }
+
+    function updateQREccVar(val) {
+        switch(val) {
+            case 'L': qrEccLevel = QRCode.CorrectLevel.L; break;
+            case 'Q': qrEccLevel = QRCode.CorrectLevel.Q; break;
+            case 'H': qrEccLevel = QRCode.CorrectLevel.H; break;
+            case 'M': 
+            default: qrEccLevel = QRCode.CorrectLevel.M; break;
+        }
+    }
+
+</script>
+</body>
+</html>
