@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#2563eb" id="meta-theme-color">
+    <meta name="theme-color" content="#f8fafc" id="meta-theme-color">
     <title>Webware Inventory</title>
     
     <!-- External Libraries -->
@@ -27,6 +27,7 @@
             --console-bg: #0f172a;
             --console-text: #4ade80;
             --focus-ring: rgba(37, 99, 235, 0.4);
+            --label-font-cap: 16pt;
         }
 
         [data-theme="dark"] {
@@ -51,8 +52,8 @@
 
         /* --- LAYOUT & HEADER --- */
         header { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--card-bg); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        .logo-container { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.25rem; letter-spacing: -0.5px; }
-        .logo-container img { height: 32px; max-width: 100px; object-fit: contain; border-radius: 6px; }
+        .logo-container { display: flex; align-items: center; gap: 10px; }
+        .logo-container img { height: 32px; max-width: 120px; object-fit: contain; border-radius: 6px; }
         .header-actions { display: flex; gap: 4px; }
         .icon-btn { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--text-main); padding: 8px; border-radius: 50%; transition: background 0.2s; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
         .icon-btn:hover, .icon-btn:active { background: var(--border); }
@@ -62,8 +63,13 @@
         .hidden { display: none !important; }
 
         /* --- FORMS & BUTTONS --- */
-        input[type="password"], input[type="text"], select { width: 100%; padding: 0.85rem 1rem; border: 1.5px solid var(--border); border-radius: 12px; margin-bottom: 1rem; font-size: 1rem; background: var(--card-bg); color: var(--text-main); transition: border-color 0.2s, box-shadow 0.2s; min-height: 48px; }
-        input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px var(--focus-ring); outline: none; }
+        input[type="password"], input[type="text"], textarea, select {
+            width: 100%; padding: 0.85rem 1rem; border: 1.5px solid var(--border); border-radius: 12px;
+            margin-bottom: 1rem; font-size: 1rem; background: var(--card-bg); color: var(--text-main);
+            transition: border-color 0.2s, box-shadow 0.2s; min-height: 48px;
+        }
+        textarea { min-height: 80px; resize: vertical; }
+        input:focus, select:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 4px var(--focus-ring); outline: none; }
         
         .search-wrapper { position: relative; margin-bottom: 1rem; }
         .search-clear { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: var(--border); border: none; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-main); font-size: 0.8rem; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
@@ -76,30 +82,52 @@
         button.secondary:hover { background-color: #cbd5e1; }
         [data-theme="dark"] button.secondary:hover { background-color: #475569; }
         button.danger { background-color: var(--danger); color: white; }
+        button.success-btn { background-color: var(--success); color: white; }
+        button.success-btn:hover { background-color: #059669; }
         button.full-width { width: 100%; }
 
         /* --- LIST VIEW & SELECTION --- */
         .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px; }
+        .list-header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .list-stats { font-size: 0.85rem; color: var(--text-muted); font-weight: 500; margin-bottom: 0.5rem; }
         
         .select-all-banner { display: flex; align-items: center; background: var(--primary-light); padding: 12px 16px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 1rem; cursor: pointer; transition: background 0.2s; min-height: 48px; }
         .select-all-banner:active { opacity: 0.8; }
         
-        .item-row { padding: 1rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1rem; cursor: pointer; transition: background 0.2s; }
+        .item-row { padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1rem; cursor: pointer; transition: background 0.2s; }
         .item-row:hover { background-color: var(--primary-light); }
         .item-row:last-child { border-bottom: none; }
         
-        .custom-checkbox { width: 24px; height: 24px; accent-color: var(--primary); pointer-events: none; } /* Let the row handle the click */
+        .custom-checkbox { width: 24px; height: 24px; accent-color: var(--primary); pointer-events: none; flex-shrink: 0; }
         
-        .item-info { flex-grow: 1; overflow: hidden; }
-        .item-title { font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .item-sub { font-size: 0.85rem; color: var(--text-muted); display: flex; justify-content: space-between; }
+        .item-info { flex-grow: 1; overflow: hidden; min-width: 0; }
+        /* Item number — prominent, fills available width */
+        .item-id {
+            font-size: clamp(1rem, 3vw, 1.3rem);
+            font-weight: 800;
+            color: var(--primary);
+            font-family: ui-monospace, monospace;
+            letter-spacing: -0.3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.2;
+        }
+        .item-title {
+            font-size: clamp(0.85rem, 2.5vw, 1rem);
+            font-weight: 600;
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.3;
+        }
+        .item-sub { font-size: 0.8rem; color: var(--text-muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
         
         /* Floating Action Bar */
         .fab-container { position: fixed; bottom: 50px; left: 0; right: 0; display: flex; justify-content: center; z-index: 90; pointer-events: none; padding: 0 1rem; }
         .fab-wrapper { background: var(--card-bg); padding: 6px; border-radius: 50px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2); display: flex; gap: 6px; pointer-events: auto; border: 1px solid var(--border); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); transform: translateY(150%); }
         .fab-wrapper.visible { transform: translateY(0); }
-        
         .fab-btn { border-radius: 50px; padding: 0.75rem 1.5rem; margin: 0; }
         .fab-clear { background: var(--border); color: var(--text-main); border-radius: 50px; padding: 0 1rem; font-weight: bold; }
 
@@ -119,7 +147,7 @@
             background: white !important;
             color: black !important;
             display: flex;
-            align-items: center;
+            align-items: stretch;
             box-sizing: border-box;
             padding: 1.5mm;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
@@ -128,21 +156,72 @@
             margin: 0 auto;
             border-radius: 2px;
         }
-        .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; }
-        .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
-        .label-text { flex-grow: 1; padding-left: 3.5mm; display: flex; flex-direction: column; justify-content: center; overflow: hidden; height: 100%; }
-        .label-text div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; font-family: Arial, Helvetica, sans-serif !important; }
-        .l-num1 { font-size: 11pt; font-weight: 900; color: #000; letter-spacing: -0.2px; }
-        .l-num2 { font-size: 8.5pt; color: #222; font-weight: 600; }
-        .l-num3 { font-size: 8.5pt; color: #444; }
-        .l-name { font-size: 7.5pt; margin-top: auto; padding-top: 1.5mm; font-style: italic; border-top: 1px solid #999; color: #000; }
+        .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; }
+        .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+        .label-text {
+            flex-grow: 1;
+            padding-left: 3mm;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            overflow: hidden;
+            height: 100%;
+            text-align: left;
+        }
+        .label-text div {
+            line-height: 1.15;
+            font-family: Arial, Helvetica, sans-serif !important;
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        /* Primary number: large, adaptive up to user-set cap */
+        .l-num1 {
+            font-size: clamp(9pt, 3.5vw, var(--label-font-cap));
+            font-weight: 900;
+            color: #000;
+            letter-spacing: -0.5px;
+            margin-top: 1.5mm;
+        }
+        .l-num2 { font-size: clamp(7.5pt, 2.5vw, 11pt); color: #111; font-weight: 700; }
+        .l-num3 { font-size: clamp(7pt, 2vw, 10pt); color: #333; font-weight: 600; }
+        .l-name { font-size: 7pt; margin-top: auto; padding-top: 1mm; font-style: italic; border-top: 0.5px solid #bbb; color: #000; }
+
+        /* --- IMAGE GALLERY (item detail) --- */
+        .item-image-gallery { display: flex; gap: 10px; overflow-x: auto; padding: 0.5rem 0 1rem; scrollbar-width: thin; }
+        .item-image-gallery img { height: 130px; width: auto; object-fit: cover; border-radius: 10px; border: 2px solid var(--border); cursor: pointer; transition: transform 0.2s, border-color 0.2s; flex-shrink: 0; }
+        .item-image-gallery img:hover { transform: scale(1.04); border-color: var(--primary); }
+
+        /* --- LIGHTBOX --- */
+        .lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 9998; align-items: center; justify-content: center; }
+        .lightbox.open { display: flex; }
+        .lightbox img { max-width: 92vw; max-height: 88vh; border-radius: 12px; object-fit: contain; }
+        .lightbox-close { position: absolute; top: 1rem; right: 1.5rem; color: white; font-size: 2.2rem; cursor: pointer; background: none; border: none; min-height: unset; padding: 4px 8px; line-height: 1; }
+        .lightbox-close:hover { background: rgba(255,255,255,0.15); border-radius: 8px; transform: none; }
+
+        /* --- MODAL (Add Item) --- */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 5000; align-items: flex-start; justify-content: center; padding: 1rem; overflow-y: auto; }
+        .modal-overlay.open { display: flex; }
+        .modal-box { background: var(--card-bg); border-radius: 20px; padding: 1.5rem; width: 100%; max-width: 480px; margin: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.4); border: 1px solid var(--border); }
+        .modal-box h3 { font-size: 1.3rem; margin-bottom: 0.25rem; }
+        .modal-notice {
+            background: #fef9c3; color: #78350f;
+            border: 1px solid #fde047; border-radius: 10px;
+            padding: 10px 14px; font-size: 0.85rem; line-height: 1.6;
+            margin-bottom: 1.25rem;
+        }
+        [data-theme="dark"] .modal-notice { background: #422006; color: #fde68a; border-color: #92400e; }
+        .modal-label { font-size: 0.82rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; display: block; }
+        .modal-actions { display: flex; gap: 10px; margin-top: 0.5rem; }
 
         /* --- TOAST NOTIFICATIONS --- */
-        #toast-container { position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 10px; width: 90%; max-width: 400px; pointer-events: none; }
-        .toast { background: var(--card-bg); color: var(--text-main); padding: 14px 20px; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2); border-left: 5px solid var(--primary); opacity: 0; transform: translateY(-20px); transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55); display: flex; align-items: center; gap: 12px; font-weight: 600; pointer-events: auto; cursor: pointer; }
+        #toast-container { position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 10px; width: 90%; max-width: 420px; pointer-events: none; }
+        .toast { background: var(--card-bg); color: var(--text-main); padding: 14px 20px; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2); border-left: 5px solid var(--primary); opacity: 0; transform: translateY(-20px); transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55); display: flex; align-items: flex-start; gap: 12px; font-weight: 600; pointer-events: auto; cursor: pointer; font-size: 0.9rem; line-height: 1.4; }
         .toast.show { opacity: 1; transform: translateY(0); }
         .toast.success { border-left-color: var(--success); }
         .toast.error { border-left-color: var(--danger); }
+        .toast.warning { border-left-color: #f59e0b; }
 
         /* --- LOGGING CONSOLE --- */
         #dev-console { position: fixed; bottom: 0; left: 0; right: 0; background: var(--console-bg); color: var(--console-text); font-family: ui-monospace, monospace; z-index: 1000; display: flex; flex-direction: column; transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1); height: 38px; border-top: 1px solid #334155; }
@@ -156,19 +235,25 @@
         /* --- EMPTY STATE --- */
         .empty-state { text-align: center; padding: 3rem 1rem; color: var(--text-muted); }
         .empty-state svg { width: 64px; height: 64px; margin-bottom: 1rem; opacity: 0.5; color: var(--text-muted); }
+
+        /* --- SETTINGS --- */
+        .setting-row { margin-bottom: 1.75rem; }
+        .setting-row > label { display: block; font-weight: 600; margin-bottom: 0.5rem; }
+        .setting-desc { font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-top: 6px; }
+        input[type="range"] { width: 100%; min-height: unset; padding: 0; border: none; background: none; box-shadow: none; margin-bottom: 0; accent-color: var(--primary); cursor: pointer; }
+        .range-value { display: inline-block; font-weight: 700; color: var(--primary); min-width: 36px; text-align: center; }
         
         /* --- PRINT STYLES --- */
         @media print {
             body { background: white !important; }
             body * { display: none !important; }
             #preview-view, #preview-view .preview-grid, #preview-view .label-card, #preview-view .label-card * { display: flex !important; }
-            
-            #preview-view { position: absolute; left: 0; top: 0; margin: 0; padding: 0; width: 100%; background: white !important;}
+            #preview-view { position: absolute; left: 0; top: 0; margin: 0; padding: 0; width: 100%; background: white !important; }
             .preview-grid { display: block !important; margin: 0; padding: 0; background: none !important; gap: 0; max-height: none; overflow: visible; }
-            
             @page { size: 90mm 29mm; margin: 0; }
             .label-card { box-shadow: none !important; margin: 0; page-break-after: always; width: 90mm; height: 29mm; background: white !important; color: black !important; border: none !important; border-radius: 0 !important; }
             .l-num1, .l-num2, .l-num3, .l-name { color: black !important; }
+            .no-print { display: none !important; }
         }
     </style>
 </head>
@@ -176,11 +261,57 @@
 
 <div id="toast-container" aria-live="polite"></div>
 
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
+    <button class="lightbox-close" onclick="closeLightbox(event)" aria-label="Close lightbox">✕</button>
+    <img id="lightbox-img" src="" alt="Item image enlarged">
+</div>
+
+<!-- Add Item Modal -->
+<div class="modal-overlay" id="add-item-modal" onclick="handleModalOverlayClick(event)">
+    <div class="modal-box">
+        <h3>➕ Add New Item</h3>
+        <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">Fill in the item details below.</p>
+
+        <div class="modal-notice">
+            ⚠️ <strong>Session only.</strong> This item exists only while the browser tab is open. It will not be saved to the database after your session ends. To permanently add items, contact the admin.
+        </div>
+
+        <label class="modal-label" for="ai-manufacturer">Manufacturer</label>
+        <input type="text" id="ai-manufacturer" placeholder="e.g. HÄNY">
+
+        <label class="modal-label" for="ai-name">Item Name <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="ai-name" placeholder="e.g. O-RING 102 X 4">
+
+        <label class="modal-label" for="ai-num1">Item Number</label>
+        <input type="text" id="ai-num1" placeholder="e.g. 955.248B">
+
+        <label class="modal-label" for="ai-num2">Item Number 2</label>
+        <input type="text" id="ai-num2" placeholder="e.g. 2261-ED-11">
+
+        <label class="modal-label" for="ai-num3">Item Number 3</label>
+        <input type="text" id="ai-num3" placeholder="e.g. 1001007">
+
+        <label class="modal-label" for="ai-qty">Quantity</label>
+        <input type="text" id="ai-qty" placeholder="e.g. 5">
+
+        <label class="modal-label" for="ai-location">Inventory Location</label>
+        <input type="text" id="ai-location" placeholder="e.g. Best">
+
+        <label class="modal-label" for="ai-comments">Comments</label>
+        <textarea id="ai-comments" placeholder="Optional notes..."></textarea>
+
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeAddItemModal()">Cancel</button>
+            <button class="success-btn full-width" onclick="submitAddItem()">✔ Add Item</button>
+        </div>
+    </div>
+</div>
+
 <header>
     <div class="logo-container">
-        <!-- Embedded SVG fallback -->
+        <!-- Logo only — no text next to it -->
         <img src="logo.png" alt="Company Logo" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzI1NjNlYiIgcng9IjIwIi8+PHRleHQgeD0iNTAiIHk9IjU4IiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjQ0IiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSIjZmZmZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5XVzwvdGV4dD48L3N2Zz4='" />
-        Webware
     </div>
     <div class="header-actions">
         <button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle Dark Mode" title="Toggle Theme">
@@ -193,11 +324,12 @@
 </header>
 
 <main class="container">
+
     <!-- View 1: Auth -->
     <section id="auth-view" class="card">
         <h2 style="margin-bottom: 0.5rem;">Secure Unlock</h2>
         <p style="margin-bottom: 1.5rem; color: var(--text-muted);">Enter decryption key to load database.</p>
-        <input type="password" id="decryption-key" aria-label="Decryption Key" placeholder="Enter key (e.g., varuhuset)" onkeydown="if(event.key === 'Enter') attemptManualDecryption()">
+        <input type="password" id="decryption-key" aria-label="Decryption Key" placeholder="Enter decryption key" onkeydown="if(event.key === 'Enter') attemptManualDecryption()">
         <button class="full-width" onclick="attemptManualDecryption()">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>
             Unlock Inventory
@@ -208,15 +340,20 @@
     <!-- View 2: List / Multi-select -->
     <section id="list-view" class="card hidden">
         <div class="list-header">
-            <h2 style="margin: 0;">Inventory List</h2>
-            <button class="secondary" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem; min-height: 36px; font-size: 0.9rem;">
-                📥 Import CSV
-            </button>
+            <h2 style="margin: 0;">Inventory</h2>
+            <div class="list-header-actions">
+                <button onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">
+                    ➕ Add Item
+                </button>
+                <button class="secondary" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">
+                    📥 Import CSV
+                </button>
+            </div>
             <input type="file" id="csv-upload" accept=".csv" class="hidden" onchange="handleCSVUpload(event)" aria-label="Upload CSV">
         </div>
         
         <div class="search-wrapper" id="search-container">
-            <input type="text" id="search-box" aria-label="Search Inventory" placeholder="Search by name, number, or ID..." oninput="debounceSearch()">
+            <input type="text" id="search-box" aria-label="Search Inventory" placeholder="Search name, number, manufacturer, location..." oninput="debounceSearch()">
             <button class="search-clear" onclick="clearSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
         </div>
         
@@ -242,17 +379,23 @@
 
     <!-- View 3: Single Item Detail -->
     <section id="item-view" class="card hidden">
-        <button class="secondary" onclick="showListView()" style="margin-bottom: 1.5rem;">← Back to List</button>
+        <!-- Action row at the very top -->
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
+            <button class="secondary" onclick="showListView()" style="flex-shrink:0;">← Back to List</button>
+            <button id="btn-single-label" style="flex:1; min-width:160px;">🏷️ Create Label</button>
+        </div>
+
         <h1 id="detail-name" style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.5rem;">Item Name</h1>
-        
+
+        <!-- Image gallery (shown only if images exist) -->
+        <div id="detail-images"></div>
+
         <div id="detail-content" style="margin-top: 1rem; line-height: 1.8; font-size: 1.05rem;"></div>
         
-        <div style="margin-top: 2rem; margin-bottom: 2rem;">
+        <div style="margin-top: 2rem; margin-bottom: 1rem;">
             <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Warehouse Locator Map</strong>
             <div class="warehouse-map" id="mock-map"></div>
         </div>
-
-        <button class="full-width" id="btn-single-label">🏷️ Create Label for this Item</button>
     </section>
 
     <!-- View 4: Label Preview & Generation -->
@@ -261,12 +404,12 @@
             <h2 style="margin:0;">Label Preview</h2>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button class="secondary" onclick="showListView()">Cancel</button>
-                <button onclick="window.print()">🖨️ Print</button>
+                <button onclick="printLabels()">🖨️ Print</button>
                 <button onclick="exportLabelsAsHTML()">💾 HTML Export</button>
             </div>
         </div>
         <p class="no-print" style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem; background: var(--border); padding: 8px 12px; border-radius: 8px;">
-            ℹ️ Format strictly set to <strong>Brother QL 29mm x 90mm</strong>. Ensure printer margins are set to 'None'.
+            ℹ️ Format: <strong>Brother QL 29mm × 90mm</strong>. Set printer margins to <strong>None</strong>.
         </p>
         
         <div id="label-preview-container" class="preview-grid"></div>
@@ -275,21 +418,32 @@
     <!-- View 5: Settings -->
     <section id="settings-view" class="card hidden">
         <h2 style="margin-bottom: 1.5rem;">App Settings</h2>
-        
-        <label for="qr-ecc" style="display:block; margin: 1rem 0 0.5rem; font-weight: 600;">QR Code Error Correction</label>
-        <select id="qr-ecc">
-            <option value="L">Level L (Low - Best for tiny 28mm labels)</option>
-            <option value="M" selected>Level M (Medium - Default)</option>
-            <option value="Q">Level Q (Quartile)</option>
-            <option value="H">Level H (High - May become unscannable if URL is long)</option>
-        </select>
-        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 2rem; line-height: 1.5;">
-            Lower ECC makes the black-and-white QR squares physically larger. This is critical for micro-labels (28x28mm) so scanners can read them.
-        </p>
+
+        <div class="setting-row">
+            <label for="qr-ecc">QR Code Error Correction</label>
+            <select id="qr-ecc">
+                <option value="L">Level L — Low (best for tiny 28mm labels)</option>
+                <option value="M" selected>Level M — Medium (default)</option>
+                <option value="Q">Level Q — Quartile</option>
+                <option value="H">Level H — High (may fail if URL is long)</option>
+            </select>
+            <p class="setting-desc">Lower ECC makes QR modules larger — critical for micro-labels so scanners can read them reliably.</p>
+        </div>
+
+        <div class="setting-row">
+            <label for="label-font-cap-range">
+                Label Primary Number Font Cap:
+                <span class="range-value" id="font-cap-display">16pt</span>
+            </label>
+            <input type="range" id="label-font-cap-range" min="10" max="24" step="1" value="16"
+                   oninput="previewFontCap(this.value)">
+            <p class="setting-desc">Max font size for the main item number on printed labels. Range: 10 – 24pt.</p>
+        </div>
         
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>
         <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
     </section>
+
 </main>
 
 <!-- Developer Console -->
@@ -305,7 +459,7 @@
 </div>
 
 <script>
-    // --- LOGGER SYSTEM ---
+    // ─── LOGGER ──────────────────────────────────────────────────────────────
     const logs = [];
     const maxLogs = 500;
     
@@ -313,78 +467,46 @@
         const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
         const timestamp = new Date().toLocaleTimeString();
         const entry = `[${timestamp}] [${type.toUpperCase()}] ${msg}`;
-        
         logs.push(entry);
         if (logs.length > maxLogs) logs.shift();
-        
         const div = document.createElement('div');
         div.className = 'log-entry';
         div.style.color = type === 'error' ? '#f87171' : (type === 'warn' ? '#fbbf24' : 'inherit');
         div.innerText = entry;
-        
         const out = document.getElementById('console-output');
-        if(out) {
-            out.appendChild(div);
-            out.scrollTop = out.scrollHeight; 
-        }
+        if (out) { out.appendChild(div); out.scrollTop = out.scrollHeight; }
     }
 
     const _log = console.log, _err = console.error, _warn = console.warn;
-    console.log = (...args) => { _log(...args); appLog('info', ...args); };
-    console.error = (...args) => { _err(...args); appLog('error', ...args); };
-    console.warn = (...args) => { _warn(...args); appLog('warn', ...args); };
+    console.log  = (...a) => { _log(...a);  appLog('info',  ...a); };
+    console.error= (...a) => { _err(...a);  appLog('error', ...a); };
+    console.warn = (...a) => { _warn(...a); appLog('warn',  ...a); };
 
     function toggleConsole() { document.getElementById('dev-console').classList.toggle('expanded'); }
-    function copyLogs(e) { e.stopPropagation(); navigator.clipboard.writeText(logs.join('\n')).then(() => showToast("Logs copied!", "success")); }
+    function copyLogs(e)  { e.stopPropagation(); navigator.clipboard.writeText(logs.join('\n')).then(() => showToast("Logs copied!", "success")); }
     function clearLogs(e) { e.stopPropagation(); logs.length = 0; document.getElementById('console-output').innerHTML = ''; console.log("Console cleared."); }
 
-    // --- TOAST NOTIFICATIONS ---
-    function showToast(message, type = 'info') {
+    // ─── TOAST ───────────────────────────────────────────────────────────────
+    function showToast(message, type = 'info', duration = 3500) {
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
-        
-        let icon = 'ℹ️';
-        if(type === 'success') icon = '✅';
-        if(type === 'error') icon = '❌';
-        
-        toast.innerHTML = `<span aria-hidden="true">${icon}</span> <span>${message}</span>`;
-        
-        // Tap to dismiss
-        toast.onclick = () => {
-            toast.classList.remove('show');
-            setTimeout(() => toast.remove(), 300);
-        };
-
+        const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
+        toast.innerHTML = `<span aria-hidden="true" style="flex-shrink:0">${icons[type] || 'ℹ️'}</span><span>${message}</span>`;
+        toast.onclick = () => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); };
         container.appendChild(toast);
-        void toast.offsetWidth; // Force reflow
+        void toast.offsetWidth;
         toast.classList.add('show');
-        
-        setTimeout(() => {
-            if(toast.parentElement) {
-                toast.classList.remove('show');
-                setTimeout(() => toast.remove(), 300);
-            }
-        }, 3500);
+        setTimeout(() => { if (toast.parentElement) { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); } }, duration);
     }
 
-    // --- APP CONFIGURATION & STATE ---
+    // ─── STATE ───────────────────────────────────────────────────────────────
     const BASE_URL = window.location.origin + window.location.pathname;
-    
-    // Default payload matching prompt requirement
-    const rawCSV = `Manufacturer,itemnumber,item name,itemnumber2,itemnumber3,Numberofitems,Inventorylocation,Comments
-HÄNY,None,IC310 inklusive Jean Lutz,IC310,None,0,Best,None
-HÄNY,955.248B,O-RING 102 X 4,None,1001007,7,Best,None
-HÄNY,None,KONTAKTKABEL JEAN LUTZ,None,101133010,1,Best,None
-HÄNY,None,4/3 WAY SOLENOID VALVE,None,1014485,2,Best,None
-HÄNY,None,HYDRAULIC PLUNGER,2511-HK-11,None,0,Best,None
-HÄNY,None,GUIDE BUSH - ZMP600,2511-FF-11,None,2,Best,None
-HÄNY,359.061,LOCK WASHER M8,None,None,5,Best,None
-HÄNY,613.034,IMPELLER DISC,2261-ED-11,None,3,Best,None
-HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
+
+    // Built-in CSV now includes an `images` column (empty by default)
+    const rawCSV = `Manufacturer,itemnumber,item name,itemnumber2,itemnumber3,Numberofitems,Inventorylocation,Comments,images\r\nHÄNY,None,IC310 inklusive Jean Lutz,IC310,None,0,Best,None,\r\nHÄNY,955.248B,O-RING 102 X 4,None,1001007,7,Best,None,\r\nHÄNY,None,KONTAKTKABEL JEAN LUTZ,None,101133010,1,Best,None,\r\nHÄNY,None,4/3 WAY SOLENOID VALVE,None,1014485,2,Best,None,\r\nHÄNY,None,HYDRAULIC PLUNGER,2511-HK-11,None,0,Best,None,\r\nHÄNY,None,GUIDE BUSH - ZMP600,2511-FF-11,None,2,Best,None,\r\nHÄNY,359.061,LOCK WASHER M8,None,None,5,Best,None,\r\nHÄNY,613.034,IMPELLER DISC,2261-ED-11,None,3,Best,None,\r\nHÄNY,613.036,GREASE RING,None,None,11,Best,None,`;
 
     let ENCRYPTED_PAYLOAD = CryptoJS.AES.encrypt(rawCSV, "varuhuset").toString();
-    
     let globalInventory = [];
     let currentActiveKey = "";
     let selectedItems = new Set();
@@ -393,7 +515,7 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
     let currentlyVisibleIds = [];
     let activeView = 'auth-view';
 
-    // --- INITIALIZATION ---
+    // ─── INIT ─────────────────────────────────────────────────────────────────
     window.onload = () => {
         console.log("Initializing App...");
         initTheme();
@@ -401,11 +523,9 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
 
         const urlParams = new URLSearchParams(window.location.search);
         const urlKey = urlParams.get('key');
-        const urlId = urlParams.get('id');
-
-        // Check Session Storage for persistence to survive accidental reloads
+        const urlId  = urlParams.get('id');
         const sessionPayload = sessionStorage.getItem('webware_payload');
-        const sessionKey = sessionStorage.getItem('webware_key');
+        const sessionKey     = sessionStorage.getItem('webware_key');
 
         if (urlKey) {
             console.log("Key found in URL, auto-decrypting...");
@@ -418,8 +538,10 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
         }
     };
 
+    // ─── THEME ────────────────────────────────────────────────────────────────
     function initTheme() {
-        const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        // Default: light. Only switch to dark if the user explicitly saved it.
+        const savedTheme = localStorage.getItem('theme') || 'light';
         document.documentElement.setAttribute('data-theme', savedTheme);
         updateMetaThemeColor(savedTheme);
     }
@@ -434,12 +556,11 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
     }
 
     function updateMetaThemeColor(theme) {
-        const meta = document.getElementById('meta-theme-color');
-        meta.content = theme === 'dark' ? '#0b1120' : '#f8fafc';
+        document.getElementById('meta-theme-color').content = theme === 'dark' ? '#0b1120' : '#f8fafc';
     }
 
     function switchView(viewId) {
-        ['auth-view', 'list-view', 'item-view', 'preview-view', 'settings-view'].forEach(v => {
+        ['auth-view','list-view','item-view','preview-view','settings-view'].forEach(v => {
             document.getElementById(v).classList.add('hidden');
         });
         document.getElementById(viewId).classList.remove('hidden');
@@ -447,12 +568,10 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    // --- DECRYPTION & DATA PROCESSING ---
+    // ─── DECRYPTION ───────────────────────────────────────────────────────────
     function attemptManualDecryption() {
         const key = document.getElementById('decryption-key').value.trim();
-        if(!key) return showToast("Please enter a key", "error");
-        
-        // If we have a cached payload from a previous import, try that first
+        if (!key) return showToast("Please enter a key", "error");
         const payloadToUse = sessionStorage.getItem('webware_payload') || ENCRYPTED_PAYLOAD;
         attemptDecryption(key, null, payloadToUse);
     }
@@ -461,27 +580,22 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
         try {
             const bytes = CryptoJS.AES.decrypt(payload, key);
             const decryptedCSV = bytes.toString(CryptoJS.enc.Utf8);
-
             if (!decryptedCSV) throw new Error("Decryption empty");
 
             console.log("Decryption Success");
             currentActiveKey = key;
-            ENCRYPTED_PAYLOAD = payload; // Sync global state
-            
-            // Persist session
+            ENCRYPTED_PAYLOAD = payload;
             sessionStorage.setItem('webware_payload', payload);
             sessionStorage.setItem('webware_key', key);
-            
             document.getElementById('auth-error').style.display = 'none';
-            if(!targetId) showToast("Database unlocked", "success");
-            
+            if (!targetId) showToast("Database unlocked", "success");
             parseCSVData(decryptedCSV, targetId);
-        } catch (e) {
+        } catch(e) {
             console.error("Decryption Failed:", e.message);
             document.getElementById('auth-error').style.display = 'block';
             showToast("Invalid decryption key", "error");
             switchView('auth-view');
-            sessionStorage.clear(); // Clear bad session data
+            sessionStorage.clear();
         }
     }
 
@@ -497,15 +611,12 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
             header: true,
             skipEmptyLines: true,
             complete: function(results) {
-                if(!results.data || results.data.length === 0) {
+                if (!results.data || results.data.length === 0) {
                     showToast("CSV parsed but found no valid data rows.", "error");
                     return;
                 }
-                
                 const processed = results.data.map(row => ({ ...row, generatedId: generateConsistentId(row) }));
-                
                 if (isMerge) {
-                    // Merge logic: overwrite if ID exists
                     const idMap = new Map(globalInventory.map(i => [i.generatedId, i]));
                     processed.forEach(p => idMap.set(p.generatedId, p));
                     globalInventory = Array.from(idMap.values());
@@ -513,7 +624,6 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
                 } else {
                     globalInventory = processed;
                 }
-                
                 if (targetId) openItem(targetId);
                 else showListView();
             },
@@ -524,43 +634,83 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
         });
     }
 
-    // --- CSV IMPORT ---
+    // ─── CSV IMPORT ───────────────────────────────────────────────────────────
     function triggerCSVImport() { document.getElementById('csv-upload').click(); }
-    
+
     function handleCSVUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
-        
         console.log(`Importing: ${file.name}`);
         const reader = new FileReader();
         reader.onload = function(e) {
             parseCSVData(e.target.result, null, true);
-            
-            // Re-encrypt combined inventory and save to session so it persists on reload
             const newCsvStr = Papa.unparse(globalInventory);
             const newPayload = CryptoJS.AES.encrypt(newCsvStr, currentActiveKey).toString();
             ENCRYPTED_PAYLOAD = newPayload;
             sessionStorage.setItem('webware_payload', newPayload);
-            
-            clearSelection(); // Reset selections on data change
-            document.getElementById('search-box').value = ''; 
+            clearSelection();
+            document.getElementById('search-box').value = '';
             filterList(true);
         };
         reader.readAsText(file);
-        event.target.value = ''; 
+        event.target.value = '';
     }
 
-    // --- LIST & SELECTION ---
-    function showListView() {
-        switchView('list-view');
-        filterList(); 
+    // ─── ADD ITEM (session-only) ──────────────────────────────────────────────
+    function openAddItemModal() {
+        ['ai-manufacturer','ai-name','ai-num1','ai-num2','ai-num3','ai-qty','ai-location','ai-comments']
+            .forEach(id => { document.getElementById(id).value = ''; });
+        document.getElementById('add-item-modal').classList.add('open');
     }
+
+    function closeAddItemModal() {
+        document.getElementById('add-item-modal').classList.remove('open');
+    }
+
+    function handleModalOverlayClick(e) {
+        if (e.target === document.getElementById('add-item-modal')) closeAddItemModal();
+    }
+
+    function submitAddItem() {
+        const name = document.getElementById('ai-name').value.trim();
+        if (!name) { showToast("Item Name is required.", "error"); return; }
+
+        const newItem = {
+            Manufacturer:      document.getElementById('ai-manufacturer').value.trim() || 'None',
+            itemnumber:        document.getElementById('ai-num1').value.trim()         || 'None',
+            'item name':       name,
+            itemnumber2:       document.getElementById('ai-num2').value.trim()         || 'None',
+            itemnumber3:       document.getElementById('ai-num3').value.trim()         || 'None',
+            Numberofitems:     document.getElementById('ai-qty').value.trim()          || '0',
+            Inventorylocation: document.getElementById('ai-location').value.trim()     || 'None',
+            Comments:          document.getElementById('ai-comments').value.trim()     || 'None',
+            images:            '',
+        };
+        newItem.generatedId = generateConsistentId(newItem);
+
+        // Avoid collision
+        if (globalInventory.find(i => i.generatedId === newItem.generatedId)) {
+            newItem.generatedId += '-' + Date.now().toString(36).toUpperCase();
+        }
+
+        globalInventory.push(newItem);
+        closeAddItemModal();
+        filterList(false);
+        showToast(
+            "Item added — session only. It will not persist after closing. Contact admin to save permanently.",
+            "warning",
+            7000
+        );
+        console.log(`Session item added: ${newItem.generatedId}`);
+    }
+
+    // ─── LIST & SELECTION ─────────────────────────────────────────────────────
+    function showListView() { switchView('list-view'); filterList(); }
 
     function debounceSearch() {
         const wrapper = document.getElementById('search-container');
         const val = document.getElementById('search-box').value;
         val.length > 0 ? wrapper.classList.add('has-text') : wrapper.classList.remove('has-text');
-        
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => filterList(false), 200);
     }
@@ -576,20 +726,27 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
     function filterList(forceAll = false) {
         const query = forceAll ? "" : document.getElementById('search-box').value.toLowerCase().trim();
         let filtered = globalInventory;
-        
+
         if (query !== "") {
-            filtered = globalInventory.filter(item => 
-                (item['item name'] && item['item name'].toLowerCase().includes(query)) || 
-                (item.generatedId && item.generatedId.toLowerCase().includes(query)) ||
-                (item.itemnumber && item.itemnumber.toLowerCase().includes(query))
-            );
+            filtered = globalInventory.filter(item => {
+                // Search across ALL meaningful fields
+                const fields = [
+                    item['item name'],
+                    item.generatedId,
+                    item.itemnumber,
+                    item.itemnumber2,
+                    item.itemnumber3,
+                    item.Manufacturer,
+                    item.Inventorylocation,
+                    item.Comments,
+                    item.Numberofitems,
+                ];
+                return fields.some(f => f && f.toString().toLowerCase().includes(query));
+            });
         }
-        
+
         currentlyVisibleIds = filtered.map(i => i.generatedId);
-        
-        // Update stats
         document.getElementById('list-stats').innerText = `Showing ${filtered.length} of ${globalInventory.length} items`;
-        
         renderList(filtered);
         syncSelectAllCheckbox();
     }
@@ -597,8 +754,8 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
     function renderList(items) {
         const container = document.getElementById('item-list-container');
         container.innerHTML = '';
-        
-        if(items.length === 0) {
+
+        if (items.length === 0) {
             container.innerHTML = `
                 <div class="empty-state">
                     <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
@@ -609,156 +766,137 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
         }
 
         const frag = document.createDocumentFragment();
-
         items.forEach(item => {
             const id = item.generatedId;
             const div = document.createElement('div');
             div.className = 'item-row';
             div.setAttribute('role', 'button');
             div.tabIndex = 0;
-            
-            // Allow clicking anywhere on the row to select/deselect OR view
-            // Decision: To make it mobile friendly, tapping the row selects it. 
-            // We need a specific button to "view details".
-            
+
             const isChecked = selectedItems.has(id);
-            
+            // Best display number: first non-None itemnumber field
+            const displayNum = [item.itemnumber, item.itemnumber2, item.itemnumber3]
+                .find(n => n && n !== 'None') || id;
+
             div.innerHTML = `
                 <input type="checkbox" class="custom-checkbox" ${isChecked ? 'checked' : ''} aria-hidden="true">
                 <div class="item-info">
+                    <div class="item-id">${displayNum}</div>
                     <div class="item-title">${item['item name'] || 'Unnamed'}</div>
                     <div class="item-sub">
-                        <span>ID: ${id}</span>
+                        <span>${item.Manufacturer && item.Manufacturer !== 'None' ? item.Manufacturer : ''}</span>
                         <span>Stock: <strong>${item.Numberofitems || 0}</strong></span>
                     </div>
                 </div>
-                <button class="icon-btn" aria-label="View Details" style="min-width:40px; min-height:40px; padding:4px; margin-left:8px;" onclick="handleViewDetails(event, '${id}')">
+                <button class="icon-btn" aria-label="View Details" style="min-width:40px;min-height:40px;padding:4px;margin-left:8px;flex-shrink:0;" onclick="handleViewDetails(event,'${id}')">
                     <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
                 </button>
             `;
-            
-            // Row click toggles selection
+
             div.onclick = (e) => {
-                if (e.target.closest('.icon-btn')) return; // handled by button
+                if (e.target.closest('.icon-btn')) return;
                 const cb = div.querySelector('.custom-checkbox');
                 cb.checked = !cb.checked;
                 toggleSelection(id, cb.checked);
             };
-            
-            // Keyboard nav
-            div.onkeydown = (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    div.click();
-                }
-            };
-
+            div.onkeydown = (e) => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); div.click(); } };
             frag.appendChild(div);
         });
-
         container.appendChild(frag);
     }
 
-    function handleViewDetails(e, id) {
-        e.stopPropagation(); // Prevent row selection
-        openItem(id);
-    }
+    function handleViewDetails(e, id) { e.stopPropagation(); openItem(id); }
 
     function toggleSelection(id, isSelected) {
-        if (isSelected) selectedItems.add(id);
-        else selectedItems.delete(id);
-        updateFab();
-        syncSelectAllCheckbox();
+        if (isSelected) selectedItems.add(id); else selectedItems.delete(id);
+        updateFab(); syncSelectAllCheckbox();
     }
 
     function toggleSelectAllBanner() {
         const cb = document.getElementById('select-all-cb');
-        // If currently indeterminate or false, turn true. Else false.
         const targetState = !(cb.checked && !cb.indeterminate);
-        
-        currentlyVisibleIds.forEach(id => {
-            if (targetState) selectedItems.add(id);
-            else selectedItems.delete(id);
+        currentlyVisibleIds.forEach(id => { if (targetState) selectedItems.add(id); else selectedItems.delete(id); });
+        document.querySelectorAll('.item-row .custom-checkbox').forEach((checkbox, i) => {
+            if (currentlyVisibleIds[i]) checkbox.checked = targetState;
         });
-        
-        // Visual update without full re-render
-        const checkboxes = document.querySelectorAll('.item-row .custom-checkbox');
-        checkboxes.forEach((checkbox, index) => {
-            if (currentlyVisibleIds[index]) checkbox.checked = targetState;
-        });
-        
-        syncSelectAllCheckbox();
-        updateFab();
+        syncSelectAllCheckbox(); updateFab();
     }
 
     function syncSelectAllCheckbox() {
-        const selectAllCb = document.getElementById('select-all-cb');
-        if (currentlyVisibleIds.length === 0) {
-            selectAllCb.checked = false;
-            selectAllCb.indeterminate = false;
-            return;
-        }
-
-        let visibleSelectedCount = 0;
-        currentlyVisibleIds.forEach(id => {
-            if(selectedItems.has(id)) visibleSelectedCount++;
-        });
-
-        if (visibleSelectedCount === 0) {
-            selectAllCb.checked = false;
-            selectAllCb.indeterminate = false;
-        } else if (visibleSelectedCount === currentlyVisibleIds.length) {
-            selectAllCb.checked = true;
-            selectAllCb.indeterminate = false;
-        } else {
-            selectAllCb.checked = false;
-            selectAllCb.indeterminate = true;
-        }
+        const cb = document.getElementById('select-all-cb');
+        if (currentlyVisibleIds.length === 0) { cb.checked = false; cb.indeterminate = false; return; }
+        const visCount = currentlyVisibleIds.filter(id => selectedItems.has(id)).length;
+        if (visCount === 0)                            { cb.checked = false; cb.indeterminate = false; }
+        else if (visCount === currentlyVisibleIds.length) { cb.checked = true;  cb.indeterminate = false; }
+        else                                           { cb.checked = false; cb.indeterminate = true; }
     }
 
     function clearSelection() {
         selectedItems.clear();
-        const checkboxes = document.querySelectorAll('.item-row .custom-checkbox');
-        checkboxes.forEach(cb => cb.checked = false);
-        syncSelectAllCheckbox();
-        updateFab();
+        document.querySelectorAll('.item-row .custom-checkbox').forEach(cb => cb.checked = false);
+        syncSelectAllCheckbox(); updateFab();
     }
 
     function updateFab() {
         const fab = document.getElementById('fab-bar');
-        const countSpan = document.getElementById('selected-count');
-        
-        if (selectedItems.size > 0) {
-            fab.classList.add('visible');
-            countSpan.innerText = selectedItems.size;
-        } else {
-            fab.classList.remove('visible');
-        }
+        document.getElementById('selected-count').innerText = selectedItems.size;
+        selectedItems.size > 0 ? fab.classList.add('visible') : fab.classList.remove('visible');
     }
 
-    // --- SINGLE ITEM VIEW & MAP ---
+    // ─── ITEM DETAIL ──────────────────────────────────────────────────────────
     function openItem(id) {
         const item = globalInventory.find(i => i.generatedId === id);
         if (!item) return showToast("Item not found", "error");
 
         switchView('item-view');
-        
         document.getElementById('detail-name').innerText = item['item name'] || 'Unnamed Item';
-        const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
-        
-        let html = `
-            <div style="margin-bottom:12px; display:flex; gap:10px;">
-                <span style="font-weight:600; width:120px;">System ID:</span> 
-                <span style="font-family:monospace; background:var(--border); padding:2px 6px; border-radius:6px; letter-spacing:0.5px;">${id}</span>
+
+        const getStr = val => (!val || val === 'None')
+            ? '<span style="color:var(--text-muted)">N/A</span>'
+            : val;
+
+        // ── Image gallery ──
+        const imagesEl = document.getElementById('detail-images');
+        imagesEl.innerHTML = '';
+        const rawImages = (item.images || '').trim();
+        if (rawImages && rawImages !== 'None') {
+            const filenames = rawImages.split(';').map(s => s.trim()).filter(Boolean);
+            if (filenames.length > 0) {
+                const gallery = document.createElement('div');
+                gallery.className = 'item-image-gallery';
+                filenames.forEach(fn => {
+                    const img = document.createElement('img');
+                    img.src   = `assets/${fn}`;
+                    img.alt   = fn;
+                    img.title = fn;
+                    img.onerror = function() { this.style.display = 'none'; };
+                    img.onclick = () => openLightbox(`assets/${fn}`);
+                    gallery.appendChild(img);
+                });
+                imagesEl.appendChild(gallery);
+            }
+        }
+
+        // ── Detail fields ──
+        document.getElementById('detail-content').innerHTML = `
+            <div style="margin-bottom:12px;display:flex;gap:10px;">
+                <span style="font-weight:600;width:120px;">System ID:</span>
+                <span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span>
             </div>
-            <div style="margin-bottom:12px; display:flex; gap:10px;"><span style="font-weight:600; width:120px;">Manufacturer:</span> <span>${getStr(item.Manufacturer)}</span></div>
-            <div style="margin-bottom:12px; display:flex; gap:10px;"><span style="font-weight:600; width:120px;">Item #1:</span> <span>${getStr(item.itemnumber)}</span></div>
-            <div style="margin-bottom:12px; display:flex; gap:10px;"><span style="font-weight:600; width:120px;">Item #2:</span> <span>${getStr(item.itemnumber2)}</span></div>
-            <div style="margin-bottom:12px; display:flex; gap:10px;"><span style="font-weight:600; width:120px;">Item #3:</span> <span>${getStr(item.itemnumber3)}</span></div>
-            <div style="margin-bottom:12px; display:flex; gap:10px;"><span style="font-weight:600; width:120px;">Stock:</span> <span style="font-weight:600; color:var(--primary);">${getStr(item.Numberofitems)}</span> units @ ${getStr(item.Inventorylocation)}</div>
-            <div style="margin-bottom:12px; display:flex; gap:10px; flex-direction:column;"><span style="font-weight:600;">Comments:</span> <div style="background:var(--primary-light); padding:10px; border-radius:8px; border:1px solid var(--border);">${getStr(item.Comments)}</div></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:120px;">Manufacturer:</span><span>${getStr(item.Manufacturer)}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:120px;">Item #1:</span><span>${getStr(item.itemnumber)}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:120px;">Item #2:</span><span>${getStr(item.itemnumber2)}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:120px;">Item #3:</span><span>${getStr(item.itemnumber3)}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;">
+                <span style="font-weight:600;width:120px;">Stock:</span>
+                <span style="font-weight:600;color:var(--primary);">${getStr(item.Numberofitems)}</span>
+                &nbsp;units @ ${getStr(item.Inventorylocation)}
+            </div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;">
+                <span style="font-weight:600;">Comments:</span>
+                <div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div>
+            </div>
         `;
-        document.getElementById('detail-content').innerHTML = html;
 
         document.getElementById('btn-single-label').onclick = () => {
             selectedItems.clear();
@@ -769,31 +907,41 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
         renderMockMap(id);
     }
 
+    // ─── LIGHTBOX ─────────────────────────────────────────────────────────────
+    function openLightbox(src) {
+        document.getElementById('lightbox-img').src = src;
+        document.getElementById('lightbox').classList.add('open');
+    }
+    function closeLightbox(e) {
+        // Only close when clicking the overlay or close button (not the image itself)
+        if (!e || e.target !== document.getElementById('lightbox-img')) {
+            document.getElementById('lightbox').classList.remove('open');
+        }
+    }
+
+    // ─── WAREHOUSE MAP ────────────────────────────────────────────────────────
     function renderMockMap(id) {
         const map = document.getElementById('mock-map');
         map.innerHTML = '';
-        
         let hash = 0;
         for (let i = 0; i < id.length; i++) hash = ((hash << 5) - hash) + id.charCodeAt(i);
-        let activeIndex = Math.abs(hash) % 36; 
-
+        const activeIndex = Math.abs(hash) % 36;
         for (let i = 0; i < 36; i++) {
-            let cell = document.createElement('div');
+            const cell = document.createElement('div');
             cell.className = 'map-cell' + (i === activeIndex ? ' active' : '');
-            let col = String.fromCharCode(65 + (i % 6)); 
-            let row = Math.floor(i / 6) + 1;
+            const col = String.fromCharCode(65 + (i % 6));
+            const row = Math.floor(i / 6) + 1;
             cell.innerText = i === activeIndex ? `${col}${row}` : '';
             map.appendChild(cell);
         }
     }
 
-    // --- LABEL GENERATION (Brother QL Format) ---
+    // ─── LABEL GENERATION ─────────────────────────────────────────────────────
     function generateLabelsPreview() {
         console.log(`Generating labels for ${selectedItems.size} items...`);
         switchView('preview-view');
-        
         const container = document.getElementById('label-preview-container');
-        container.innerHTML = ''; 
+        container.innerHTML = '';
         let errorCount = 0;
 
         Array.from(selectedItems).forEach(id => {
@@ -803,13 +951,13 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
             const labelEl = document.createElement('div');
             labelEl.className = 'label-card';
 
-            const qrDiv = document.createElement('div');
+            const qrDiv  = document.createElement('div');
             qrDiv.className = 'label-qr';
-            
+
             const textDiv = document.createElement('div');
             textDiv.className = 'label-text';
-            
-            const num1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : id;
+
+            const num1 = (item.itemnumber  && item.itemnumber  !== 'None') ? item.itemnumber  : id;
             const num2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
             const num3 = (item.itemnumber3 && item.itemnumber3 !== 'None') ? item.itemnumber3 : '';
 
@@ -825,129 +973,131 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
             container.appendChild(labelEl);
 
             const targetUrl = `${BASE_URL}?id=${id}&key=${encodeURIComponent(currentActiveKey)}`;
-            
-            // Safety check: Too much data for low ECC in small physical space can fail
             try {
-                new QRCode(qrDiv, {
-                    text: targetUrl,
-                    width: 110,  
-                    height: 110,
-                    colorDark: "#000000",
-                    colorLight: "#ffffff",
-                    correctLevel: qrEccLevel 
-                });
-            } catch (err) {
+                new QRCode(qrDiv, { text: targetUrl, width: 110, height: 110, colorDark: "#000000", colorLight: "#ffffff", correctLevel: qrEccLevel });
+            } catch(err) {
                 console.error("QR Generate Error:", err);
                 errorCount++;
-                qrDiv.innerHTML = '<span style="font-size:8px; color:red; text-align:center;">Data too long for ECC level</span>';
+                qrDiv.innerHTML = '<span style="font-size:8px;color:red;text-align:center;">Data too long for ECC level</span>';
             }
         });
-        
-        if (errorCount > 0) {
-            showToast(`${errorCount} QR code(s) failed. Try increasing ECC level in settings.`, "error");
-        }
+
+        if (errorCount > 0) showToast(`${errorCount} QR code(s) failed. Try a lower ECC level in settings.`, "error");
     }
 
-    // --- HTML LABEL EXPORT (Canvas to IMG conversion) ---
+    // ─── PRINT (fixes blank-rectangle issue by converting canvas→img first) ───
+    function printLabels() {
+        const container = document.getElementById('label-preview-container');
+        const canvases  = Array.from(container.querySelectorAll('.label-qr canvas'));
+        const imgs      = Array.from(container.querySelectorAll('.label-qr img'));
+
+        // Bake canvas pixels into the sibling <img> elements so the print engine sees raster images
+        canvases.forEach((canvas, i) => {
+            const dataUrl = canvas.toDataURL('image/png');
+            if (imgs[i]) {
+                imgs[i].src = dataUrl;
+                imgs[i].style.cssText = 'display:block !important; max-width:100%; max-height:100%;';
+            }
+            canvas.style.display = 'none';
+        });
+
+        // Give the browser a tick to paint the new img srcs, then open print dialog
+        setTimeout(() => {
+            window.print();
+            // After the print dialog closes, restore the original canvas display
+            setTimeout(() => {
+                canvases.forEach(c => { c.style.display = ''; });
+                imgs.forEach(img => { if (img.src.startsWith('data:')) img.removeAttribute('src'); img.style.cssText = ''; });
+            }, 1500);
+        }, 200);
+    }
+
+    // ─── HTML EXPORT ──────────────────────────────────────────────────────────
     function exportLabelsAsHTML() {
         showToast("Generating HTML print file...", "info");
-
         const originalContainer = document.getElementById('label-preview-container');
-        const cloneContainer = originalContainer.cloneNode(true);
-        
-        const originalCanvases = originalContainer.querySelectorAll('canvas');
-        const clonedCanvases = cloneContainer.querySelectorAll('canvas');
-        const clonedImages = cloneContainer.querySelectorAll('img');
+        const cloneContainer    = originalContainer.cloneNode(true);
+        const originalCanvases  = originalContainer.querySelectorAll('canvas');
+        const clonedCanvases    = cloneContainer.querySelectorAll('canvas');
+        const clonedImages      = cloneContainer.querySelectorAll('img');
 
-        for(let i = 0; i < originalCanvases.length; i++) {
+        for (let i = 0; i < originalCanvases.length; i++) {
             const dataUrl = originalCanvases[i].toDataURL("image/png");
-            if (clonedImages[i]) {
-                clonedImages[i].src = dataUrl;
-                clonedImages[i].style.display = 'block';
-            }
-            if (clonedCanvases[i] && clonedCanvases[i].parentNode) {
-                clonedCanvases[i].parentNode.removeChild(clonedCanvases[i]);
-            }
+            if (clonedImages[i]) { clonedImages[i].src = dataUrl; clonedImages[i].style.display = 'block'; }
+            if (clonedCanvases[i]?.parentNode) clonedCanvases[i].parentNode.removeChild(clonedCanvases[i]);
         }
-        
-        const labelsHtml = cloneContainer.innerHTML;
-        
+
         const exportDoc = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Brother QL Labels Export</title>
 <style>
-    body { margin: 0; padding: 0; background: #e2e8f0; font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 1rem;}
-    .label-card { width: 90mm; height: 29mm; background: white; color: black; display: flex; align-items: center; box-sizing: border-box; padding: 1.5mm; overflow: hidden; position: relative; }
-    .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-    .label-qr img { max-width: 100%; max-height: 100%; object-fit: contain; display: block !important; }
-    .label-text { flex-grow: 1; padding-left: 3.5mm; display: flex; flex-direction: column; justify-content: center; overflow: hidden; height: 100%; }
-    .label-text div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; font-family: Arial, Helvetica, sans-serif !important;}
-    .l-num1 { font-size: 11pt; font-weight: 900; color: #000; letter-spacing: -0.2px; }
-    .l-num2 { font-size: 8.5pt; color: #222; font-weight: 600; }
-    .l-num3 { font-size: 8.5pt; color: #444; }
-    .l-name { font-size: 7.5pt; margin-top: auto; padding-top: 1.5mm; font-style: italic; border-top: 1px solid #999; color: #000; }
-    @media print {
-        body { background: white !important; padding: 0; gap: 0; display: block; }
-        @page { size: 90mm 29mm; margin: 0; }
-        .label-card { margin: 0; page-break-after: always; box-shadow: none; border: none; }
-    }
-</style></head><body onload="window.print()">${labelsHtml}</body></html>`;
+body{margin:0;padding:0;background:#e2e8f0;font-family:Arial,sans-serif;display:flex;flex-direction:column;align-items:center;gap:1rem;padding:1rem}
+.label-card{width:90mm;height:29mm;background:white;color:black;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm;overflow:hidden;position:relative}
+.label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center}
+.label-qr img{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
+.label-text{flex-grow:1;padding-left:3mm;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden;height:100%;text-align:left}
+.label-text div{line-height:1.15;font-family:Arial,Helvetica,sans-serif!important;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.l-num1{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.5px;margin-top:1.5mm}
+.l-num2{font-size:10pt;color:#111;font-weight:700}
+.l-num3{font-size:9pt;color:#333;font-weight:600}
+.l-name{font-size:7pt;margin-top:auto;padding-top:1mm;font-style:italic;border-top:0.5px solid #bbb;color:#000}
+@media print{body{background:white!important;padding:0;gap:0;display:block}@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none}}
+</style></head><body onload="window.print()">${cloneContainer.innerHTML}</body></html>`;
 
         const blob = new Blob([exportDoc], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Labels-Export-${new Date().getTime()}.html`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url; a.download = `Labels-Export-${Date.now()}.html`;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(url);
         showToast("Labels exported successfully!", "success");
     }
 
-    // --- SETTINGS ---
+    // ─── SETTINGS ─────────────────────────────────────────────────────────────
     function initSettings() {
+        // QR ECC
         const savedEcc = localStorage.getItem('qr-ecc');
-        if (savedEcc) {
-            document.getElementById('qr-ecc').value = savedEcc;
-            updateQREccVar(savedEcc);
-        }
+        if (savedEcc) { document.getElementById('qr-ecc').value = savedEcc; updateQREccVar(savedEcc); }
+
+        // Label font cap
+        const savedCap = localStorage.getItem('label-font-cap') || '16';
+        document.getElementById('label-font-cap-range').value = savedCap;
+        document.getElementById('font-cap-display').innerText = savedCap + 'pt';
+        document.documentElement.style.setProperty('--label-font-cap', savedCap + 'pt');
     }
 
-    function showSettings() {
-        switchView('settings-view');
+    function previewFontCap(val) {
+        document.getElementById('font-cap-display').innerText = val + 'pt';
+        document.documentElement.style.setProperty('--label-font-cap', val + 'pt');
     }
+
+    function showSettings() { switchView('settings-view'); }
 
     function saveSettings() {
-        const eccVal = document.getElementById('qr-ecc').value;
+        const eccVal    = document.getElementById('qr-ecc').value;
+        const fontCapVal = document.getElementById('label-font-cap-range').value;
+
         localStorage.setItem('qr-ecc', eccVal);
         updateQREccVar(eccVal);
+
+        localStorage.setItem('label-font-cap', fontCapVal);
+        document.documentElement.style.setProperty('--label-font-cap', fontCapVal + 'pt');
+
         showToast("Settings saved", "success");
-        
-        if (selectedItems.size > 0 && activeView === 'preview-view') {
-            generateLabelsPreview(); 
-        } else if (globalInventory.length > 0) {
-            switchView('list-view');
-        } else {
-            switchView('auth-view');
-        }
+        if (selectedItems.size > 0 && activeView === 'preview-view') generateLabelsPreview();
+        else if (globalInventory.length > 0) switchView('list-view');
+        else switchView('auth-view');
     }
 
     function updateQREccVar(val) {
-        switch(val) {
-            case 'L': qrEccLevel = QRCode.CorrectLevel.L; break;
-            case 'Q': qrEccLevel = QRCode.CorrectLevel.Q; break;
-            case 'H': qrEccLevel = QRCode.CorrectLevel.H; break;
-            case 'M': default: qrEccLevel = QRCode.CorrectLevel.M; break;
-        }
+        const map = { L: QRCode.CorrectLevel.L, Q: QRCode.CorrectLevel.Q, H: QRCode.CorrectLevel.H };
+        qrEccLevel = map[val] ?? QRCode.CorrectLevel.M;
     }
 
     function clearSession() {
         sessionStorage.removeItem('webware_payload');
         sessionStorage.removeItem('webware_key');
-        window.location.href = window.location.pathname; // Reload clear
+        window.location.href = window.location.pathname;
     }
-
 </script>
 </body>
 </html>
