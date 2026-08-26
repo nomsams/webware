@@ -1,2 +1,2 @@
 # webware
-Web inventory
+https://nomsams.github.io/webware
