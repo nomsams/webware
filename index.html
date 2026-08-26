@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Webware Inventory Manager</title>
+    <meta name="theme-color" content="#2563eb" id="meta-theme-color">
+    <title>Webware Inventory</title>
     
     <!-- External Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
@@ -15,202 +16,289 @@
         :root {
             --primary: #2563eb;
             --primary-hover: #1d4ed8;
+            --primary-light: #eff6ff;
             --background: #f8fafc;
             --card-bg: #ffffff;
             --text-main: #0f172a;
             --text-muted: #64748b;
             --border: #e2e8f0;
             --danger: #ef4444;
-            --console-bg: #1e293b;
+            --success: #10b981;
+            --console-bg: #0f172a;
             --console-text: #4ade80;
+            --focus-ring: rgba(37, 99, 235, 0.4);
         }
 
         [data-theme="dark"] {
-            --background: #0f172a;
+            --primary: #3b82f6;
+            --primary-hover: #60a5fa;
+            --primary-light: #1e3a8a;
+            --background: #0b1120;
             --card-bg: #1e293b;
-            --text-main: #f8fafc;
+            --text-main: #f1f5f9;
             --text-muted: #94a3b8;
             --border: #334155;
+            --console-bg: #000000;
+            --focus-ring: rgba(59, 130, 246, 0.5);
         }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        /* --- BASE RESET & ACCESSIBILITY --- */
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
         
-        body { background-color: var(--background); color: var(--text-main); transition: background 0.3s, color 0.3s; padding-bottom: 60px; /* Space for console */ }
+        body { background-color: var(--background); color: var(--text-main); transition: background 0.3s, color 0.3s; padding-bottom: 90px; }
         
+        :focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+
         /* --- LAYOUT & HEADER --- */
         header { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--card-bg); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        .logo-container { display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 1.2rem; }
-        .logo-container img { height: 32px; max-width: 100px; object-fit: contain; border-radius: 4px; }
-        .header-actions { display: flex; gap: 10px; align-items: center; }
-        .icon-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-main); padding: 4px; border-radius: 50%; }
-        .icon-btn:hover { background: var(--border); }
+        .logo-container { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.25rem; letter-spacing: -0.5px; }
+        .logo-container img { height: 32px; max-width: 100px; object-fit: contain; border-radius: 6px; }
+        .header-actions { display: flex; gap: 4px; }
+        .icon-btn { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--text-main); padding: 8px; border-radius: 50%; transition: background 0.2s; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+        .icon-btn:hover, .icon-btn:active { background: var(--border); }
 
         .container { max-width: 800px; margin: 1rem auto; padding: 0 1rem; }
-        .card { background: var(--card-bg); border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 1rem; }
+        .card { background: var(--card-bg); border-radius: 16px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); margin-bottom: 1rem; border: 1px solid var(--border); }
         .hidden { display: none !important; }
 
         /* --- FORMS & BUTTONS --- */
-        input[type="password"], input[type="text"], input[type="file"], select { width: 100%; padding: 0.85rem; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 1rem; font-size: 1rem; background: var(--card-bg); color: var(--text-main); }
-        button { background-color: var(--primary); color: white; border: none; padding: 0.85rem 1.5rem; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
-        button:hover { opacity: 0.9; }
+        input[type="password"], input[type="text"], select { width: 100%; padding: 0.85rem 1rem; border: 1.5px solid var(--border); border-radius: 12px; margin-bottom: 1rem; font-size: 1rem; background: var(--card-bg); color: var(--text-main); transition: border-color 0.2s, box-shadow 0.2s; min-height: 48px; }
+        input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px var(--focus-ring); outline: none; }
+        
+        .search-wrapper { position: relative; margin-bottom: 1rem; }
+        .search-clear { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: var(--border); border: none; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-main); font-size: 0.8rem; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+        .search-wrapper.has-text .search-clear { opacity: 1; pointer-events: auto; }
+
+        button { background-color: var(--primary); color: white; border: none; padding: 0.85rem 1.5rem; border-radius: 12px; font-size: 1rem; cursor: pointer; font-weight: 600; transition: all 0.2s; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+        button:hover { background-color: var(--primary-hover); transform: translateY(-1px); }
+        button:active { transform: translateY(1px); }
         button.secondary { background-color: var(--border); color: var(--text-main); }
-        button.danger { background-color: var(--danger); }
+        button.secondary:hover { background-color: #cbd5e1; }
+        [data-theme="dark"] button.secondary:hover { background-color: #475569; }
+        button.danger { background-color: var(--danger); color: white; }
         button.full-width { width: 100%; }
 
-        /* --- LIST VIEW --- */
-        .list-header-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px; }
-        .item-row { padding: 1rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1rem; transition: background 0.2s; }
-        .item-row:hover { background-color: var(--border); }
-        .item-row:last-child { border-bottom: none; }
-        .item-checkbox { width: 20px; height: 20px; cursor: pointer; accent-color: var(--primary); }
-        .item-info { flex-grow: 1; cursor: pointer; }
-        .item-title { font-weight: bold; margin-bottom: 4px; }
-        .item-sub { font-size: 0.8rem; color: var(--text-muted); }
+        /* --- LIST VIEW & SELECTION --- */
+        .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px; }
+        .list-stats { font-size: 0.85rem; color: var(--text-muted); font-weight: 500; margin-bottom: 0.5rem; }
         
-        .floating-action { position: fixed; bottom: 40px; right: 20px; z-index: 90; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 50px; padding: 1rem 2rem; }
+        .select-all-banner { display: flex; align-items: center; background: var(--primary-light); padding: 12px 16px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 1rem; cursor: pointer; transition: background 0.2s; min-height: 48px; }
+        .select-all-banner:active { opacity: 0.8; }
+        
+        .item-row { padding: 1rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1rem; cursor: pointer; transition: background 0.2s; }
+        .item-row:hover { background-color: var(--primary-light); }
+        .item-row:last-child { border-bottom: none; }
+        
+        .custom-checkbox { width: 24px; height: 24px; accent-color: var(--primary); pointer-events: none; } /* Let the row handle the click */
+        
+        .item-info { flex-grow: 1; overflow: hidden; }
+        .item-title { font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .item-sub { font-size: 0.85rem; color: var(--text-muted); display: flex; justify-content: space-between; }
+        
+        /* Floating Action Bar */
+        .fab-container { position: fixed; bottom: 50px; left: 0; right: 0; display: flex; justify-content: center; z-index: 90; pointer-events: none; padding: 0 1rem; }
+        .fab-wrapper { background: var(--card-bg); padding: 6px; border-radius: 50px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2); display: flex; gap: 6px; pointer-events: auto; border: 1px solid var(--border); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); transform: translateY(150%); }
+        .fab-wrapper.visible { transform: translateY(0); }
+        
+        .fab-btn { border-radius: 50px; padding: 0.75rem 1.5rem; margin: 0; }
+        .fab-clear { background: var(--border); color: var(--text-main); border-radius: 50px; padding: 0 1rem; font-weight: bold; }
+
+        /* --- MAP MODULE --- */
+        .warehouse-map { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 0.5rem; background: var(--border); padding: 10px; border-radius: 12px; }
+        .map-cell { aspect-ratio: 1; background: var(--card-bg); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: var(--text-muted); font-weight: bold; transition: all 0.3s; }
+        .map-cell.active { background: var(--primary); color: white; box-shadow: 0 0 12px rgba(37, 99, 235, 0.6); transform: scale(1.1); z-index: 2; }
 
         /* --- PREVIEW & LABELS (Screen) --- */
-        .preview-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); margin-top: 1rem; background: #e2e8f0; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+        .preview-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); margin-top: 1rem; background: #94a3b8; padding: 1.5rem; border-radius: 12px; overflow-x: auto; max-height: 60vh; overflow-y: auto; }
+        [data-theme="dark"] .preview-grid { background: #0f172a; border: 1px inset #334155; }
         
-        /* The exact Brother QL 29x90 format */
+        /* Strict Brother QL 29x90 format */
         .label-card {
             width: 90mm;
             height: 29mm;
-            background: white;
-            color: black;
+            background: white !important;
+            color: black !important;
             display: flex;
             align-items: center;
             box-sizing: border-box;
-            padding: 1mm;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            padding: 1.5mm;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             position: relative;
             overflow: hidden;
-            margin: 0 auto; /* Center in grid cells */
+            margin: 0 auto;
+            border-radius: 2px;
         }
-        .label-qr { width: 28mm; height: 28mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; }
         .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
-        .label-text { flex-grow: 1; padding-left: 2mm; display: flex; flex-direction: column; justify-content: center; overflow: hidden; height: 100%; }
-        .label-text div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
-        .l-num1 { font-size: 10pt; font-weight: bold; }
-        .l-num2 { font-size: 8pt; color: #333; }
-        .l-num3 { font-size: 8pt; color: #555; }
-        .l-name { font-size: 7pt; margin-top: auto; padding-top: 1mm; font-style: italic; border-top: 1px solid #ccc; }
+        .label-text { flex-grow: 1; padding-left: 3.5mm; display: flex; flex-direction: column; justify-content: center; overflow: hidden; height: 100%; }
+        .label-text div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; font-family: Arial, Helvetica, sans-serif !important; }
+        .l-num1 { font-size: 11pt; font-weight: 900; color: #000; letter-spacing: -0.2px; }
+        .l-num2 { font-size: 8.5pt; color: #222; font-weight: 600; }
+        .l-num3 { font-size: 8.5pt; color: #444; }
+        .l-name { font-size: 7.5pt; margin-top: auto; padding-top: 1.5mm; font-style: italic; border-top: 1px solid #999; color: #000; }
+
+        /* --- TOAST NOTIFICATIONS --- */
+        #toast-container { position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 10px; width: 90%; max-width: 400px; pointer-events: none; }
+        .toast { background: var(--card-bg); color: var(--text-main); padding: 14px 20px; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2); border-left: 5px solid var(--primary); opacity: 0; transform: translateY(-20px); transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55); display: flex; align-items: center; gap: 12px; font-weight: 600; pointer-events: auto; cursor: pointer; }
+        .toast.show { opacity: 1; transform: translateY(0); }
+        .toast.success { border-left-color: var(--success); }
+        .toast.error { border-left-color: var(--danger); }
 
         /* --- LOGGING CONSOLE --- */
-        #dev-console { position: fixed; bottom: 0; left: 0; right: 0; background: var(--console-bg); color: var(--console-text); font-family: monospace; z-index: 1000; display: flex; flex-direction: column; transition: height 0.3s; height: 35px; }
-        #dev-console.expanded { height: 250px; }
-        .console-header { display: flex; justify-content: space-between; padding: 5px 15px; background: #0f172a; cursor: pointer; border-top: 1px solid #334155; align-items: center; height: 35px; }
-        .console-body { flex-grow: 1; overflow-y: auto; padding: 10px; font-size: 0.85rem; display: none; }
+        #dev-console { position: fixed; bottom: 0; left: 0; right: 0; background: var(--console-bg); color: var(--console-text); font-family: ui-monospace, monospace; z-index: 1000; display: flex; flex-direction: column; transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1); height: 38px; border-top: 1px solid #334155; }
+        #dev-console.expanded { height: 35vh; }
+        .console-header { display: flex; justify-content: space-between; padding: 0 15px; background: #020617; cursor: pointer; align-items: center; height: 38px; user-select: none; }
+        .console-body { flex-grow: 1; overflow-y: auto; padding: 12px; font-size: 0.8rem; display: none; line-height: 1.5; }
         #dev-console.expanded .console-body { display: block; }
-        .log-entry { margin-bottom: 4px; border-bottom: 1px dashed #334155; padding-bottom: 2px; word-wrap: break-word; }
-        .console-btn { background: #334155; color: white; border: none; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px dashed #334155; padding-bottom: 4px; word-wrap: break-word; }
+        .console-btn { background: #334155; color: white; border: none; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; min-height: 28px; }
+
+        /* --- EMPTY STATE --- */
+        .empty-state { text-align: center; padding: 3rem 1rem; color: var(--text-muted); }
+        .empty-state svg { width: 64px; height: 64px; margin-bottom: 1rem; opacity: 0.5; color: var(--text-muted); }
         
         /* --- PRINT STYLES --- */
         @media print {
+            body { background: white !important; }
             body * { display: none !important; }
             #preview-view, #preview-view .preview-grid, #preview-view .label-card, #preview-view .label-card * { display: flex !important; }
             
-            #preview-view { position: absolute; left: 0; top: 0; margin: 0; padding: 0; width: 100%; background: white;}
-            .preview-grid { display: block !important; margin: 0; padding: 0; background: none; gap: 0; }
+            #preview-view { position: absolute; left: 0; top: 0; margin: 0; padding: 0; width: 100%; background: white !important;}
+            .preview-grid { display: block !important; margin: 0; padding: 0; background: none !important; gap: 0; max-height: none; overflow: visible; }
             
-            /* Print settings specific to Brother QL */
             @page { size: 90mm 29mm; margin: 0; }
-            .label-card { box-shadow: none; margin: 0; page-break-after: always; width: 90mm; height: 29mm; }
+            .label-card { box-shadow: none !important; margin: 0; page-break-after: always; width: 90mm; height: 29mm; background: white !important; color: black !important; border: none !important; border-radius: 0 !important; }
+            .l-num1, .l-num2, .l-num3, .l-name { color: black !important; }
         }
     </style>
 </head>
 <body>
 
+<div id="toast-container" aria-live="polite"></div>
+
 <header>
     <div class="logo-container">
-        <!-- Add your logo.png in the same folder -->
-        <img src="logo.png" alt="Logo" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzI1NjNlYiIvPjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjQwIiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+V1c8L3RleHQ+PC9zdmc+'" />
+        <!-- Embedded SVG fallback -->
+        <img src="logo.png" alt="Company Logo" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzI1NjNlYiIgcng9IjIwIi8+PHRleHQgeD0iNTAiIHk9IjU4IiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjQ0IiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSIjZmZmZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5XVzwvdGV4dD48L3N2Zz4='" />
         Webware
     </div>
     <div class="header-actions">
-        <button class="icon-btn" onclick="toggleTheme()" title="Toggle Theme">🌓</button>
-        <button class="icon-btn" onclick="showSettings()" title="Settings">⚙️</button>
+        <button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle Dark Mode" title="Toggle Theme">
+            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+        </button>
+        <button class="icon-btn" onclick="showSettings()" aria-label="Open Settings" title="Settings">
+            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+        </button>
     </div>
 </header>
 
-<div class="container">
+<main class="container">
     <!-- View 1: Auth -->
-    <div id="auth-view" class="card">
-        <h2>Secure Unlock</h2>
-        <p style="margin-bottom: 1rem; color: var(--text-muted);">Enter decryption key to load database.</p>
-        <input type="password" id="decryption-key" placeholder="Enter key (e.g., varuhuset)">
-        <button class="full-width" onclick="attemptManualDecryption()">Unlock</button>
-        <p id="auth-error" style="color: var(--danger); margin-top: 1rem; display: none;">Invalid key or data.</p>
-    </div>
+    <section id="auth-view" class="card">
+        <h2 style="margin-bottom: 0.5rem;">Secure Unlock</h2>
+        <p style="margin-bottom: 1.5rem; color: var(--text-muted);">Enter decryption key to load database.</p>
+        <input type="password" id="decryption-key" aria-label="Decryption Key" placeholder="Enter key (e.g., varuhuset)" onkeydown="if(event.key === 'Enter') attemptManualDecryption()">
+        <button class="full-width" onclick="attemptManualDecryption()">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>
+            Unlock Inventory
+        </button>
+        <p id="auth-error" style="color: var(--danger); margin-top: 1rem; display: none; font-weight: 600; text-align: center;">Invalid key or corrupted data.</p>
+    </section>
 
     <!-- View 2: List / Multi-select -->
-    <div id="list-view" class="card hidden">
-        <div class="list-header-actions">
-            <h2>Inventory List</h2>
-            <button class="secondary" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem;">📥 Import CSV</button>
-            <input type="file" id="csv-upload" accept=".csv" class="hidden" onchange="handleCSVUpload(event)">
+    <section id="list-view" class="card hidden">
+        <div class="list-header">
+            <h2 style="margin: 0;">Inventory List</h2>
+            <button class="secondary" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem; min-height: 36px; font-size: 0.9rem;">
+                📥 Import CSV
+            </button>
+            <input type="file" id="csv-upload" accept=".csv" class="hidden" onchange="handleCSVUpload(event)" aria-label="Upload CSV">
         </div>
-        <input type="text" id="search-box" placeholder="Search items by name, number, or ID..." onkeyup="filterList()">
         
-        <div style="margin-bottom: 0.5rem;">
-            <input type="checkbox" id="select-all" onchange="toggleSelectAll(this)" style="margin-right: 10px; width: 16px; height: 16px;">
-            <label for="select-all" style="font-size: 0.9rem; font-weight: bold;">Select All</label>
+        <div class="search-wrapper" id="search-container">
+            <input type="text" id="search-box" aria-label="Search Inventory" placeholder="Search by name, number, or ID..." oninput="debounceSearch()">
+            <button class="search-clear" onclick="clearSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
+        </div>
+        
+        <div class="list-stats" id="list-stats">Loading inventory...</div>
+
+        <div class="select-all-banner" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
+            <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 12px; pointer-events: none;" aria-hidden="true">
+            <span style="font-weight: 600; flex-grow: 1;">Select All Visible Items</span>
         </div>
 
         <div id="item-list-container"></div>
 
-        <button id="fab-create-labels" class="floating-action hidden" onclick="generateLabelsPreview()">
-            🏷️ Create Labels (<span id="selected-count">0</span>)
-        </button>
-    </div>
-
-    <!-- View 3: Single Item Detail -->
-    <div id="item-view" class="card hidden">
-        <button class="secondary" onclick="showListView()" style="margin-bottom: 1rem;">← Back to List</button>
-        <h1 id="detail-name">Item Name</h1>
-        <div id="detail-content" style="margin-top: 1rem;"></div>
-    </div>
-
-    <!-- View 4: Label Preview & Generation -->
-    <div id="preview-view" class="card hidden">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;" class="no-print">
-            <h2>Label Preview</h2>
-            <div>
-                <button class="secondary" onclick="showListView()">Cancel</button>
-                <button onclick="window.print()" style="margin-left: 10px;">🖨️ Print Labels</button>
-                <button onclick="exportLabelsAsHTML()" style="margin-left: 10px;">💾 Export HTML</button>
+        <!-- Floating Action Bar -->
+        <div class="fab-container">
+            <div class="fab-wrapper" id="fab-bar">
+                <button class="fab-clear" onclick="clearSelection()" aria-label="Clear Selection">✕</button>
+                <button class="fab-btn" onclick="generateLabelsPreview()">
+                    🏷️ Create Labels (<span id="selected-count">0</span>)
+                </button>
             </div>
         </div>
-        <p class="no-print" style="color: var(--text-muted); margin-bottom: 1rem;">Paper Size: 29mm x 90mm (Brother QL-810Wc format)</p>
+    </section>
+
+    <!-- View 3: Single Item Detail -->
+    <section id="item-view" class="card hidden">
+        <button class="secondary" onclick="showListView()" style="margin-bottom: 1.5rem;">← Back to List</button>
+        <h1 id="detail-name" style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.5rem;">Item Name</h1>
         
-        <!-- Grid of labels generated here -->
+        <div id="detail-content" style="margin-top: 1rem; line-height: 1.8; font-size: 1.05rem;"></div>
+        
+        <div style="margin-top: 2rem; margin-bottom: 2rem;">
+            <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Warehouse Locator Map</strong>
+            <div class="warehouse-map" id="mock-map"></div>
+        </div>
+
+        <button class="full-width" id="btn-single-label">🏷️ Create Label for this Item</button>
+    </section>
+
+    <!-- View 4: Label Preview & Generation -->
+    <section id="preview-view" class="card hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px;" class="no-print">
+            <h2 style="margin:0;">Label Preview</h2>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="secondary" onclick="showListView()">Cancel</button>
+                <button onclick="window.print()">🖨️ Print</button>
+                <button onclick="exportLabelsAsHTML()">💾 HTML Export</button>
+            </div>
+        </div>
+        <p class="no-print" style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem; background: var(--border); padding: 8px 12px; border-radius: 8px;">
+            ℹ️ Format strictly set to <strong>Brother QL 29mm x 90mm</strong>. Ensure printer margins are set to 'None'.
+        </p>
+        
         <div id="label-preview-container" class="preview-grid"></div>
-    </div>
+    </section>
 
     <!-- View 5: Settings -->
-    <div id="settings-view" class="card hidden">
-        <h2>App Settings</h2>
+    <section id="settings-view" class="card hidden">
+        <h2 style="margin-bottom: 1.5rem;">App Settings</h2>
         
-        <label for="qr-ecc" style="display:block; margin: 1rem 0 0.5rem; font-weight: bold;">QR Code Error Correction</label>
+        <label for="qr-ecc" style="display:block; margin: 1rem 0 0.5rem; font-weight: 600;">QR Code Error Correction</label>
         <select id="qr-ecc">
-            <option value="L">Level L (Low - Most Compact)</option>
-            <option value="M" selected>Level M (Medium)</option>
+            <option value="L">Level L (Low - Best for tiny 28mm labels)</option>
+            <option value="M" selected>Level M (Medium - Default)</option>
             <option value="Q">Level Q (Quartile)</option>
-            <option value="H">Level H (High)</option>
+            <option value="H">Level H (High - May become unscannable if URL is long)</option>
         </select>
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">Lower ECC makes QR code modules larger and easier to scan on small 28mm labels, but withstands less damage.</p>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 2rem; line-height: 1.5;">
+            Lower ECC makes the black-and-white QR squares physically larger. This is critical for micro-labels (28x28mm) so scanners can read them.
+        </p>
         
-        <button class="full-width" onclick="saveSettings()">Save & Close</button>
-    </div>
-</div>
+        <button class="full-width" onclick="saveSettings()">Save Configuration</button>
+        <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
+    </section>
+</main>
 
 <!-- Developer Console -->
 <div id="dev-console">
-    <div class="console-header" onclick="toggleConsole()">
-        <span>> Terminal / Logs</span>
-        <div>
-            <button class="console-btn" onclick="copyLogs(event)">Copy</button>
-            <button class="console-btn" onclick="clearLogs(event)">Clear</button>
+    <div class="console-header" onclick="toggleConsole()" role="button" tabindex="0">
+        <span style="font-weight: bold; letter-spacing: 0.5px;">>_ Terminal / Logs</span>
+        <div style="display: flex; gap: 8px;">
+            <button class="console-btn" onclick="copyLogs(event)" aria-label="Copy Logs">Copy</button>
+            <button class="console-btn" onclick="clearLogs(event)" aria-label="Clear Logs">Clear</button>
         </div>
     </div>
     <div class="console-body" id="console-output"></div>
@@ -235,36 +323,55 @@
         div.innerText = entry;
         
         const out = document.getElementById('console-output');
-        out.appendChild(div);
-        out.scrollTop = out.scrollHeight; // auto-scroll
+        if(out) {
+            out.appendChild(div);
+            out.scrollTop = out.scrollHeight; 
+        }
     }
 
-    // Override default console
     const _log = console.log, _err = console.error, _warn = console.warn;
     console.log = (...args) => { _log(...args); appLog('info', ...args); };
     console.error = (...args) => { _err(...args); appLog('error', ...args); };
     console.warn = (...args) => { _warn(...args); appLog('warn', ...args); };
 
     function toggleConsole() { document.getElementById('dev-console').classList.toggle('expanded'); }
-    
-    function copyLogs(e) {
-        e.stopPropagation();
-        navigator.clipboard.writeText(logs.join('\n'))
-            .then(() => alert("Logs copied to clipboard!"))
-            .catch(err => console.error("Clipboard copy failed:", err));
-    }
-    
-    function clearLogs(e) {
-        e.stopPropagation();
-        logs.length = 0;
-        document.getElementById('console-output').innerHTML = '';
-        console.log("Console cleared.");
+    function copyLogs(e) { e.stopPropagation(); navigator.clipboard.writeText(logs.join('\n')).then(() => showToast("Logs copied!", "success")); }
+    function clearLogs(e) { e.stopPropagation(); logs.length = 0; document.getElementById('console-output').innerHTML = ''; console.log("Console cleared."); }
+
+    // --- TOAST NOTIFICATIONS ---
+    function showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        
+        let icon = 'ℹ️';
+        if(type === 'success') icon = '✅';
+        if(type === 'error') icon = '❌';
+        
+        toast.innerHTML = `<span aria-hidden="true">${icon}</span> <span>${message}</span>`;
+        
+        // Tap to dismiss
+        toast.onclick = () => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        };
+
+        container.appendChild(toast);
+        void toast.offsetWidth; // Force reflow
+        toast.classList.add('show');
+        
+        setTimeout(() => {
+            if(toast.parentElement) {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }
+        }, 3500);
     }
 
-    // --- APP CONFIGURATION ---
-    const BASE_URL = "https://nomsams.github.io/webware";
+    // --- APP CONFIGURATION & STATE ---
+    const BASE_URL = window.location.origin + window.location.pathname;
     
-    // Default mock payload mapped to 'varuhuset'
+    // Default payload matching prompt requirement
     const rawCSV = `Manufacturer,itemnumber,item name,itemnumber2,itemnumber3,Numberofitems,Inventorylocation,Comments
 HÄNY,None,IC310 inklusive Jean Lutz,IC310,None,0,Best,None
 HÄNY,955.248B,O-RING 102 X 4,None,1001007,7,Best,None
@@ -277,45 +384,58 @@ HÄNY,613.034,IMPELLER DISC,2261-ED-11,None,3,Best,None
 HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
 
     let ENCRYPTED_PAYLOAD = CryptoJS.AES.encrypt(rawCSV, "varuhuset").toString();
-
-    // --- STATE ---
+    
     let globalInventory = [];
     let currentActiveKey = "";
     let selectedItems = new Set();
     let qrEccLevel = QRCode.CorrectLevel.M;
+    let searchTimeout = null;
+    let currentlyVisibleIds = [];
+    let activeView = 'auth-view';
 
     // --- INITIALIZATION ---
     window.onload = () => {
-        console.log("App starting initialization...");
-        const savedTheme = localStorage.getItem('theme') || 'light';
-        document.documentElement.setAttribute('data-theme', savedTheme);
-        
-        // Load Settings
-        const savedEcc = localStorage.getItem('qr-ecc');
-        if (savedEcc) {
-            document.getElementById('qr-ecc').value = savedEcc;
-            updateQREccVar(savedEcc);
-        }
+        console.log("Initializing App...");
+        initTheme();
+        initSettings();
 
         const urlParams = new URLSearchParams(window.location.search);
         const urlKey = urlParams.get('key');
         const urlId = urlParams.get('id');
 
+        // Check Session Storage for persistence to survive accidental reloads
+        const sessionPayload = sessionStorage.getItem('webware_payload');
+        const sessionKey = sessionStorage.getItem('webware_key');
+
         if (urlKey) {
-            console.log("Found key in URL parameters, attempting auto-decrypt...");
-            attemptDecryption(urlKey, urlId);
+            console.log("Key found in URL, auto-decrypting...");
+            attemptDecryption(urlKey, urlId, ENCRYPTED_PAYLOAD);
+        } else if (sessionPayload && sessionKey) {
+            console.log("Restoring session from memory...");
+            attemptDecryption(sessionKey, null, sessionPayload);
         } else {
-            console.log("No key found, waiting for user input.");
             switchView('auth-view');
         }
     };
+
+    function initTheme() {
+        const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        updateMetaThemeColor(savedTheme);
+    }
 
     function toggleTheme() {
         const root = document.documentElement;
         const newTheme = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
         root.setAttribute('data-theme', newTheme);
         localStorage.setItem('theme', newTheme);
-        console.log(`Theme switched to ${newTheme}`);
+        updateMetaThemeColor(newTheme);
+        console.log(`Theme set to ${newTheme}`);
+    }
+
+    function updateMetaThemeColor(theme) {
+        const meta = document.getElementById('meta-theme-color');
+        meta.content = theme === 'dark' ? '#0b1120' : '#f8fafc';
     }
 
     function switchView(viewId) {
@@ -323,238 +443,372 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
             document.getElementById(v).classList.add('hidden');
         });
         document.getElementById(viewId).classList.remove('hidden');
+        activeView = viewId;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     // --- DECRYPTION & DATA PROCESSING ---
     function attemptManualDecryption() {
-        const key = document.getElementById('decryption-key').value;
-        attemptDecryption(key, null);
+        const key = document.getElementById('decryption-key').value.trim();
+        if(!key) return showToast("Please enter a key", "error");
+        
+        // If we have a cached payload from a previous import, try that first
+        const payloadToUse = sessionStorage.getItem('webware_payload') || ENCRYPTED_PAYLOAD;
+        attemptDecryption(key, null, payloadToUse);
     }
 
-    function attemptDecryption(key, targetId) {
-        console.log("Attempting decryption...");
+    function attemptDecryption(key, targetId, payload) {
         try {
-            const bytes = CryptoJS.AES.decrypt(ENCRYPTED_PAYLOAD, key);
+            const bytes = CryptoJS.AES.decrypt(payload, key);
             const decryptedCSV = bytes.toString(CryptoJS.enc.Utf8);
 
-            if (!decryptedCSV) throw new Error("Decryption returned empty (wrong key).");
+            if (!decryptedCSV) throw new Error("Decryption empty");
 
-            console.log("Decryption successful!");
+            console.log("Decryption Success");
             currentActiveKey = key;
+            ENCRYPTED_PAYLOAD = payload; // Sync global state
+            
+            // Persist session
+            sessionStorage.setItem('webware_payload', payload);
+            sessionStorage.setItem('webware_key', key);
+            
             document.getElementById('auth-error').style.display = 'none';
+            if(!targetId) showToast("Database unlocked", "success");
             
             parseCSVData(decryptedCSV, targetId);
         } catch (e) {
-            console.error("Decryption failed:", e.message);
+            console.error("Decryption Failed:", e.message);
             document.getElementById('auth-error').style.display = 'block';
+            showToast("Invalid decryption key", "error");
             switchView('auth-view');
+            sessionStorage.clear(); // Clear bad session data
         }
     }
 
-    function parseCSVData(csvText, targetId = null) {
+    function generateConsistentId(row) {
+        if (row.itemid && row.itemid !== 'None' && row.itemid.trim() !== '') return row.itemid;
+        const str = (row['item name'] || '') + (row.itemnumber || '');
+        const hash = CryptoJS.SHA256(str).toString(CryptoJS.enc.Hex).substring(0, 8).toUpperCase();
+        return "ITM-" + hash;
+    }
+
+    function parseCSVData(csvText, targetId = null, isMerge = false) {
         Papa.parse(csvText, {
             header: true,
             skipEmptyLines: true,
             complete: function(results) {
-                console.log(`Parsed ${results.data.length} items from CSV.`);
-                processData(results.data);
-                
-                if (targetId) {
-                    openItem(targetId);
-                } else {
-                    showListView();
+                if(!results.data || results.data.length === 0) {
+                    showToast("CSV parsed but found no valid data rows.", "error");
+                    return;
                 }
+                
+                const processed = results.data.map(row => ({ ...row, generatedId: generateConsistentId(row) }));
+                
+                if (isMerge) {
+                    // Merge logic: overwrite if ID exists
+                    const idMap = new Map(globalInventory.map(i => [i.generatedId, i]));
+                    processed.forEach(p => idMap.set(p.generatedId, p));
+                    globalInventory = Array.from(idMap.values());
+                    showToast(`Merged ${processed.length} items. Total: ${globalInventory.length}`, "success");
+                } else {
+                    globalInventory = processed;
+                }
+                
+                if (targetId) openItem(targetId);
+                else showListView();
+            },
+            error: function(err) {
+                console.error("CSV Parse Error:", err);
+                showToast("Failed to parse CSV structure.", "error");
             }
         });
     }
 
-    function processData(data) {
-        globalInventory = data.map((row, index) => {
-            // Generate deterministic short ID if none provided
-            let rawId = row.itemid || ("ITM-" + Math.abs(CryptoJS.MD5(row['item name'] + row.itemnumber).words[0]).toString(16).substring(0, 6).toUpperCase());
-            return { ...row, generatedId: rawId };
-        });
-    }
-
     // --- CSV IMPORT ---
-    function triggerCSVImport() {
-        document.getElementById('csv-upload').click();
-    }
+    function triggerCSVImport() { document.getElementById('csv-upload').click(); }
     
     function handleCSVUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
         
-        console.log(`Importing CSV: ${file.name}`);
+        console.log(`Importing: ${file.name}`);
         const reader = new FileReader();
         reader.onload = function(e) {
-            const text = e.target.result;
-            // Parse and merge or overwrite (Here we overwrite for simplicity)
-            Papa.parse(text, {
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    console.log(`Imported ${results.data.length} new records.`);
-                    processData(results.data);
-                    
-                    // Re-encrypt and update global payload so app continues working in session
-                    ENCRYPTED_PAYLOAD = CryptoJS.AES.encrypt(text, currentActiveKey).toString();
-                    
-                    selectedItems.clear();
-                    renderList(globalInventory);
-                    alert("Inventory updated successfully!");
-                }
-            });
+            parseCSVData(e.target.result, null, true);
+            
+            // Re-encrypt combined inventory and save to session so it persists on reload
+            const newCsvStr = Papa.unparse(globalInventory);
+            const newPayload = CryptoJS.AES.encrypt(newCsvStr, currentActiveKey).toString();
+            ENCRYPTED_PAYLOAD = newPayload;
+            sessionStorage.setItem('webware_payload', newPayload);
+            
+            clearSelection(); // Reset selections on data change
+            document.getElementById('search-box').value = ''; 
+            filterList(true);
         };
         reader.readAsText(file);
+        event.target.value = ''; 
     }
 
     // --- LIST & SELECTION ---
     function showListView() {
         switchView('list-view');
-        renderList(globalInventory);
-        updateFab();
+        filterList(); 
+    }
+
+    function debounceSearch() {
+        const wrapper = document.getElementById('search-container');
+        const val = document.getElementById('search-box').value;
+        val.length > 0 ? wrapper.classList.add('has-text') : wrapper.classList.remove('has-text');
+        
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => filterList(false), 200);
+    }
+
+    function clearSearch() {
+        const input = document.getElementById('search-box');
+        input.value = '';
+        document.getElementById('search-container').classList.remove('has-text');
+        input.focus();
+        filterList(true);
+    }
+
+    function filterList(forceAll = false) {
+        const query = forceAll ? "" : document.getElementById('search-box').value.toLowerCase().trim();
+        let filtered = globalInventory;
+        
+        if (query !== "") {
+            filtered = globalInventory.filter(item => 
+                (item['item name'] && item['item name'].toLowerCase().includes(query)) || 
+                (item.generatedId && item.generatedId.toLowerCase().includes(query)) ||
+                (item.itemnumber && item.itemnumber.toLowerCase().includes(query))
+            );
+        }
+        
+        currentlyVisibleIds = filtered.map(i => i.generatedId);
+        
+        // Update stats
+        document.getElementById('list-stats').innerText = `Showing ${filtered.length} of ${globalInventory.length} items`;
+        
+        renderList(filtered);
+        syncSelectAllCheckbox();
     }
 
     function renderList(items) {
         const container = document.getElementById('item-list-container');
         container.innerHTML = '';
         
+        if(items.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                    <h3>No items found</h3>
+                    <p>Try adjusting your search terms.</p>
+                </div>`;
+            return;
+        }
+
+        const frag = document.createDocumentFragment();
+
         items.forEach(item => {
             const id = item.generatedId;
             const div = document.createElement('div');
             div.className = 'item-row';
+            div.setAttribute('role', 'button');
+            div.tabIndex = 0;
             
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.className = 'item-checkbox';
-            checkbox.checked = selectedItems.has(id);
-            checkbox.onclick = (e) => {
-                e.stopPropagation(); // Don't trigger row click
-                toggleSelection(id, checkbox.checked);
+            // Allow clicking anywhere on the row to select/deselect OR view
+            // Decision: To make it mobile friendly, tapping the row selects it. 
+            // We need a specific button to "view details".
+            
+            const isChecked = selectedItems.has(id);
+            
+            div.innerHTML = `
+                <input type="checkbox" class="custom-checkbox" ${isChecked ? 'checked' : ''} aria-hidden="true">
+                <div class="item-info">
+                    <div class="item-title">${item['item name'] || 'Unnamed'}</div>
+                    <div class="item-sub">
+                        <span>ID: ${id}</span>
+                        <span>Stock: <strong>${item.Numberofitems || 0}</strong></span>
+                    </div>
+                </div>
+                <button class="icon-btn" aria-label="View Details" style="min-width:40px; min-height:40px; padding:4px; margin-left:8px;" onclick="handleViewDetails(event, '${id}')">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                </button>
+            `;
+            
+            // Row click toggles selection
+            div.onclick = (e) => {
+                if (e.target.closest('.icon-btn')) return; // handled by button
+                const cb = div.querySelector('.custom-checkbox');
+                cb.checked = !cb.checked;
+                toggleSelection(id, cb.checked);
+            };
+            
+            // Keyboard nav
+            div.onkeydown = (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    div.click();
+                }
             };
 
-            const infoDiv = document.createElement('div');
-            infoDiv.className = 'item-info';
-            infoDiv.innerHTML = `
-                <div class="item-title">${item['item name']}</div>
-                <div class="item-sub">ID: ${id} | Stock: ${item.Numberofitems || 0}</div>
-            `;
-            infoDiv.onclick = () => openItem(id);
-
-            div.appendChild(checkbox);
-            div.appendChild(infoDiv);
-            container.appendChild(div);
+            frag.appendChild(div);
         });
+
+        container.appendChild(frag);
     }
 
-    function filterList() {
-        const query = document.getElementById('search-box').value.toLowerCase();
-        const filtered = globalInventory.filter(item => 
-            item['item name'].toLowerCase().includes(query) || 
-            item.generatedId.toLowerCase().includes(query) ||
-            (item.itemnumber && item.itemnumber.toLowerCase().includes(query))
-        );
-        renderList(filtered);
+    function handleViewDetails(e, id) {
+        e.stopPropagation(); // Prevent row selection
+        openItem(id);
     }
 
     function toggleSelection(id, isSelected) {
         if (isSelected) selectedItems.add(id);
         else selectedItems.delete(id);
         updateFab();
+        syncSelectAllCheckbox();
     }
 
-    function toggleSelectAll(checkbox) {
-        const query = document.getElementById('search-box').value.toLowerCase();
+    function toggleSelectAllBanner() {
+        const cb = document.getElementById('select-all-cb');
+        // If currently indeterminate or false, turn true. Else false.
+        const targetState = !(cb.checked && !cb.indeterminate);
         
-        // Only select currently filtered items
-        const visibleItems = globalInventory.filter(item => 
-            item['item name'].toLowerCase().includes(query) || 
-            item.generatedId.toLowerCase().includes(query)
-        );
+        currentlyVisibleIds.forEach(id => {
+            if (targetState) selectedItems.add(id);
+            else selectedItems.delete(id);
+        });
+        
+        // Visual update without full re-render
+        const checkboxes = document.querySelectorAll('.item-row .custom-checkbox');
+        checkboxes.forEach((checkbox, index) => {
+            if (currentlyVisibleIds[index]) checkbox.checked = targetState;
+        });
+        
+        syncSelectAllCheckbox();
+        updateFab();
+    }
 
-        if (checkbox.checked) {
-            visibleItems.forEach(item => selectedItems.add(item.generatedId));
-        } else {
-            visibleItems.forEach(item => selectedItems.delete(item.generatedId));
+    function syncSelectAllCheckbox() {
+        const selectAllCb = document.getElementById('select-all-cb');
+        if (currentlyVisibleIds.length === 0) {
+            selectAllCb.checked = false;
+            selectAllCb.indeterminate = false;
+            return;
         }
-        
-        // Re-render to update checkbox visuals
-        renderList(visibleItems);
+
+        let visibleSelectedCount = 0;
+        currentlyVisibleIds.forEach(id => {
+            if(selectedItems.has(id)) visibleSelectedCount++;
+        });
+
+        if (visibleSelectedCount === 0) {
+            selectAllCb.checked = false;
+            selectAllCb.indeterminate = false;
+        } else if (visibleSelectedCount === currentlyVisibleIds.length) {
+            selectAllCb.checked = true;
+            selectAllCb.indeterminate = false;
+        } else {
+            selectAllCb.checked = false;
+            selectAllCb.indeterminate = true;
+        }
+    }
+
+    function clearSelection() {
+        selectedItems.clear();
+        const checkboxes = document.querySelectorAll('.item-row .custom-checkbox');
+        checkboxes.forEach(cb => cb.checked = false);
+        syncSelectAllCheckbox();
         updateFab();
     }
 
     function updateFab() {
-        const fab = document.getElementById('fab-create-labels');
+        const fab = document.getElementById('fab-bar');
         const countSpan = document.getElementById('selected-count');
         
         if (selectedItems.size > 0) {
-            fab.classList.remove('hidden');
+            fab.classList.add('visible');
             countSpan.innerText = selectedItems.size;
         } else {
-            fab.classList.add('hidden');
+            fab.classList.remove('visible');
         }
     }
 
-    // --- SINGLE ITEM VIEW ---
+    // --- SINGLE ITEM VIEW & MAP ---
     function openItem(id) {
-        console.log(`Opening item: ${id}`);
         const item = globalInventory.find(i => i.generatedId === id);
-        if (!item) {
-            console.error("Item not found");
-            return;
-        }
+        if (!item) return showToast("Item not found", "error");
 
         switchView('item-view');
         
-        document.getElementById('detail-name').innerText = item['item name'];
-        
-        const getStr = val => (!val || val === 'None') ? 'N/A' : val;
+        document.getElementById('detail-name').innerText = item['item name'] || 'Unnamed Item';
+        const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
         
         let html = `
-            <div style="margin-bottom:1rem"><strong>ID:</strong> ${id}</div>
-            <div style="margin-bottom:1rem"><strong>Manufacturer:</strong> ${getStr(item.Manufacturer)}</div>
-            <div style="margin-bottom:1rem"><strong>Item #1:</strong> ${getStr(item.itemnumber)}</div>
-            <div style="margin-bottom:1rem"><strong>Item #2:</strong> ${getStr(item.itemnumber2)}</div>
-            <div style="margin-bottom:1rem"><strong>Item #3:</strong> ${getStr(item.itemnumber3)}</div>
-            <div style="margin-bottom:1rem"><strong>Stock:</strong> ${getStr(item.Numberofitems)} at ${getStr(item.Inventorylocation)}</div>
-            <div style="margin-bottom:1rem"><strong>Comments:</strong> ${getStr(item.Comments)}</div>
-            <button class="full-width" onclick="selectAndGoToLabels('${id}')">Create Label for this Item</button>
+            <div style="margin-bottom:12px; display:flex; gap:10px;">
+                <span style="font-weight:600; width:120px;">System ID:</span> 
+                <span style="font-family:monospace; background:var(--border); padding:2px 6px; border-radius:6px; letter-spacing:0.5px;">${id}</span>
+            </div>
+            <div style="margin-bottom:12px; display:flex; gap:10px;"><span style="font-weight:600; width:120px;">Manufacturer:</span> <span>${getStr(item.Manufacturer)}</span></div>
+            <div style="margin-bottom:12px; display:flex; gap:10px;"><span style="font-weight:600; width:120px;">Item #1:</span> <span>${getStr(item.itemnumber)}</span></div>
+            <div style="margin-bottom:12px; display:flex; gap:10px;"><span style="font-weight:600; width:120px;">Item #2:</span> <span>${getStr(item.itemnumber2)}</span></div>
+            <div style="margin-bottom:12px; display:flex; gap:10px;"><span style="font-weight:600; width:120px;">Item #3:</span> <span>${getStr(item.itemnumber3)}</span></div>
+            <div style="margin-bottom:12px; display:flex; gap:10px;"><span style="font-weight:600; width:120px;">Stock:</span> <span style="font-weight:600; color:var(--primary);">${getStr(item.Numberofitems)}</span> units @ ${getStr(item.Inventorylocation)}</div>
+            <div style="margin-bottom:12px; display:flex; gap:10px; flex-direction:column;"><span style="font-weight:600;">Comments:</span> <div style="background:var(--primary-light); padding:10px; border-radius:8px; border:1px solid var(--border);">${getStr(item.Comments)}</div></div>
         `;
         document.getElementById('detail-content').innerHTML = html;
+
+        document.getElementById('btn-single-label').onclick = () => {
+            selectedItems.clear();
+            selectedItems.add(id);
+            generateLabelsPreview();
+        };
+
+        renderMockMap(id);
     }
 
-    function selectAndGoToLabels(id) {
-        selectedItems.clear();
-        selectedItems.add(id);
-        generateLabelsPreview();
+    function renderMockMap(id) {
+        const map = document.getElementById('mock-map');
+        map.innerHTML = '';
+        
+        let hash = 0;
+        for (let i = 0; i < id.length; i++) hash = ((hash << 5) - hash) + id.charCodeAt(i);
+        let activeIndex = Math.abs(hash) % 36; 
+
+        for (let i = 0; i < 36; i++) {
+            let cell = document.createElement('div');
+            cell.className = 'map-cell' + (i === activeIndex ? ' active' : '');
+            let col = String.fromCharCode(65 + (i % 6)); 
+            let row = Math.floor(i / 6) + 1;
+            cell.innerText = i === activeIndex ? `${col}${row}` : '';
+            map.appendChild(cell);
+        }
     }
 
-    // --- LABEL GENERATION (Brother 29x90 format) ---
+    // --- LABEL GENERATION (Brother QL Format) ---
     function generateLabelsPreview() {
         console.log(`Generating labels for ${selectedItems.size} items...`);
         switchView('preview-view');
         
         const container = document.getElementById('label-preview-container');
-        container.innerHTML = ''; // Clear old
+        container.innerHTML = ''; 
+        let errorCount = 0;
 
         Array.from(selectedItems).forEach(id => {
             const item = globalInventory.find(i => i.generatedId === id);
             if (!item) return;
 
-            // Container for 1 physical label
             const labelEl = document.createElement('div');
             labelEl.className = 'label-card';
 
-            // QR area
             const qrDiv = document.createElement('div');
             qrDiv.className = 'label-qr';
             
-            // Text area
             const textDiv = document.createElement('div');
             textDiv.className = 'label-text';
             
-            // Clean numbers
             const num1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : id;
             const num2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
             const num3 = (item.itemnumber3 && item.itemnumber3 !== 'None') ? item.itemnumber3 : '';
@@ -563,74 +817,103 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
                 <div class="l-num1">${num1}</div>
                 ${num2 ? `<div class="l-num2">${num2}</div>` : ''}
                 ${num3 ? `<div class="l-num3">${num3}</div>` : ''}
-                <div class="l-name">${item['item name']}</div>
+                <div class="l-name">${item['item name'] || 'Unknown'}</div>
             `;
 
             labelEl.appendChild(qrDiv);
             labelEl.appendChild(textDiv);
             container.appendChild(labelEl);
 
-            // Generate QR Canvas inside the QR div
             const targetUrl = `${BASE_URL}?id=${id}&key=${encodeURIComponent(currentActiveKey)}`;
-            new QRCode(qrDiv, {
-                text: targetUrl,
-                width: 105,  // Approx 28mm at 96dpi
-                height: 105,
-                colorDark: "#000000",
-                colorLight: "#ffffff",
-                correctLevel: qrEccLevel 
-            });
+            
+            // Safety check: Too much data for low ECC in small physical space can fail
+            try {
+                new QRCode(qrDiv, {
+                    text: targetUrl,
+                    width: 110,  
+                    height: 110,
+                    colorDark: "#000000",
+                    colorLight: "#ffffff",
+                    correctLevel: qrEccLevel 
+                });
+            } catch (err) {
+                console.error("QR Generate Error:", err);
+                errorCount++;
+                qrDiv.innerHTML = '<span style="font-size:8px; color:red; text-align:center;">Data too long for ECC level</span>';
+            }
         });
-        console.log("Labels generated.");
+        
+        if (errorCount > 0) {
+            showToast(`${errorCount} QR code(s) failed. Try increasing ECC level in settings.`, "error");
+        }
     }
 
+    // --- HTML LABEL EXPORT (Canvas to IMG conversion) ---
     function exportLabelsAsHTML() {
-        console.log("Exporting labels to HTML file...");
-        // Grab the container HTML and wrap it in a clean document with print styles
-        const labelsHtml = document.getElementById('label-preview-container').innerHTML;
+        showToast("Generating HTML print file...", "info");
+
+        const originalContainer = document.getElementById('label-preview-container');
+        const cloneContainer = originalContainer.cloneNode(true);
         
-        const exportDoc = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>Labels Export</title>
-            <style>
-                body { margin: 0; padding: 0; background: #e2e8f0; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 1rem;}
-                .label-card { width: 90mm; height: 29mm; background: white; color: black; display: flex; align-items: center; box-sizing: border-box; padding: 1mm; overflow: hidden; position: relative; }
-                .label-qr { width: 28mm; height: 28mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-                .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
-                .label-text { flex-grow: 1; padding-left: 2mm; display: flex; flex-direction: column; justify-content: center; overflow: hidden; height: 100%; }
-                .label-text div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
-                .l-num1 { font-size: 10pt; font-weight: bold; }
-                .l-num2 { font-size: 8pt; color: #333; }
-                .l-num3 { font-size: 8pt; color: #555; }
-                .l-name { font-size: 7pt; margin-top: auto; padding-top: 1mm; font-style: italic; border-top: 1px solid #ccc; }
-                
-                @media print {
-                    body { background: white; padding: 0; gap: 0; display: block; }
-                    @page { size: 90mm 29mm; margin: 0; }
-                    .label-card { margin: 0; page-break-after: always; box-shadow: none; }
-                }
-            </style>
-        </head>
-        <body onload="window.print()">
-            ${labelsHtml}
-        </body>
-        </html>`;
+        const originalCanvases = originalContainer.querySelectorAll('canvas');
+        const clonedCanvases = cloneContainer.querySelectorAll('canvas');
+        const clonedImages = cloneContainer.querySelectorAll('img');
+
+        for(let i = 0; i < originalCanvases.length; i++) {
+            const dataUrl = originalCanvases[i].toDataURL("image/png");
+            if (clonedImages[i]) {
+                clonedImages[i].src = dataUrl;
+                clonedImages[i].style.display = 'block';
+            }
+            if (clonedCanvases[i] && clonedCanvases[i].parentNode) {
+                clonedCanvases[i].parentNode.removeChild(clonedCanvases[i]);
+            }
+        }
+        
+        const labelsHtml = cloneContainer.innerHTML;
+        
+        const exportDoc = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Brother QL Labels Export</title>
+<style>
+    body { margin: 0; padding: 0; background: #e2e8f0; font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 1rem;}
+    .label-card { width: 90mm; height: 29mm; background: white; color: black; display: flex; align-items: center; box-sizing: border-box; padding: 1.5mm; overflow: hidden; position: relative; }
+    .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+    .label-qr img { max-width: 100%; max-height: 100%; object-fit: contain; display: block !important; }
+    .label-text { flex-grow: 1; padding-left: 3.5mm; display: flex; flex-direction: column; justify-content: center; overflow: hidden; height: 100%; }
+    .label-text div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; font-family: Arial, Helvetica, sans-serif !important;}
+    .l-num1 { font-size: 11pt; font-weight: 900; color: #000; letter-spacing: -0.2px; }
+    .l-num2 { font-size: 8.5pt; color: #222; font-weight: 600; }
+    .l-num3 { font-size: 8.5pt; color: #444; }
+    .l-name { font-size: 7.5pt; margin-top: auto; padding-top: 1.5mm; font-style: italic; border-top: 1px solid #999; color: #000; }
+    @media print {
+        body { background: white !important; padding: 0; gap: 0; display: block; }
+        @page { size: 90mm 29mm; margin: 0; }
+        .label-card { margin: 0; page-break-after: always; box-shadow: none; border: none; }
+    }
+</style></head><body onload="window.print()">${labelsHtml}</body></html>`;
 
         const blob = new Blob([exportDoc], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `inventory-labels-${new Date().getTime()}.html`;
+        a.download = `Labels-Export-${new Date().getTime()}.html`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        
+        showToast("Labels exported successfully!", "success");
     }
 
     // --- SETTINGS ---
+    function initSettings() {
+        const savedEcc = localStorage.getItem('qr-ecc');
+        if (savedEcc) {
+            document.getElementById('qr-ecc').value = savedEcc;
+            updateQREccVar(savedEcc);
+        }
+    }
+
     function showSettings() {
         switchView('settings-view');
     }
@@ -639,13 +922,12 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
         const eccVal = document.getElementById('qr-ecc').value;
         localStorage.setItem('qr-ecc', eccVal);
         updateQREccVar(eccVal);
-        console.log(`Settings saved. QR ECC set to: ${eccVal}`);
+        showToast("Settings saved", "success");
         
-        // Return to previous view
-        if (selectedItems.size > 0 && !document.getElementById('preview-view').classList.contains('hidden')) {
-            generateLabelsPreview(); // Regenerate to apply changes
+        if (selectedItems.size > 0 && activeView === 'preview-view') {
+            generateLabelsPreview(); 
         } else if (globalInventory.length > 0) {
-            showListView();
+            switchView('list-view');
         } else {
             switchView('auth-view');
         }
@@ -656,9 +938,14 @@ HÄNY,613.036,GREASE RING,None,None,11,Best,None`;
             case 'L': qrEccLevel = QRCode.CorrectLevel.L; break;
             case 'Q': qrEccLevel = QRCode.CorrectLevel.Q; break;
             case 'H': qrEccLevel = QRCode.CorrectLevel.H; break;
-            case 'M': 
-            default: qrEccLevel = QRCode.CorrectLevel.M; break;
+            case 'M': default: qrEccLevel = QRCode.CorrectLevel.M; break;
         }
+    }
+
+    function clearSession() {
+        sessionStorage.removeItem('webware_payload');
+        sessionStorage.removeItem('webware_key');
+        window.location.href = window.location.pathname; // Reload clear
     }
 
 </script>
