@@ -7,8 +7,8 @@
     <title>Webware Inventory</title>
     
     <!-- External Libraries (CryptoJS removed — native WebCrypto used instead) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" integrity="sha512-1D7f1f5e6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6A7B8C9D0E1F2G3H4I5J6K7L8M9N0O1P2Q3R4S5T6U7V8W9X0Y1Z2" crossorigin="anonymous"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha512-aBcDeFgHiJ8k9l0m1n2o3p4q5r6s7t8u9v0w1x2y3z4A5B6C7D8E9F0G1H2I3J4K5L6M7N8O9P0Q1R2S3T4U5V6W7X8Y9Z0" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
 
     <style>
         /* --- THEME & VARIABLES --- */
@@ -507,7 +507,35 @@
 <script>
     "use strict";
 
-    // ════════════════════════════════════════════════════════════════════════
+    // Global state — declared early so inline onclick handlers can access them
+    var BASE_URL = window.location.origin + window.location.pathname;
+    var globalInventory = [];
+    var globalKits = [];
+    var currentWarehouseId = '1';
+    var currentActiveKey = '';
+    var selectedItems = new Set();
+    var qrEccLevel = 1; // QRCode.CorrectLevel.M (set after lib loads)
+    var searchTimeout = null;
+    var kitSearchTimeout = null;
+    var currentlyVisibleIds = [];
+    var activeView = 'auth-view';
+    var previousView = 'list-view';
+    var pendingItemId = null;
+    var listMode = 'items';
+    var sortBy = 'name';
+    var navigationContext = null;
+    var currentItemBTK = null;
+    var modalMode = 'add';
+    var editTargetBTK = null;
+    var DEMO_PASSPHRASE = 'varuhuset';
+    var DEMO_VERSION = 3;
+    var WAREHOUSES = [
+        { l: '1', name: 'Main Warehouse — Best', address: 'Best, Sweden' },
+        { l: '2', name: 'North Depot', address: 'Stockholm, Sweden' },
+        { l: '3', name: 'South Depot', address: 'Malmö, Sweden' }
+    ];
+
+    // ═════════════════════════════════════════════════════════════════════════
     //  LOGGER
     // ════════════════════════════════════════════════════════════════════════
     const logs = [];
@@ -689,11 +717,6 @@
     ];
 
     // CSV C — Warehouse lookup metadata (non-secret, embedded for offline UX)
-    const WAREHOUSES = [
-        { l: '1', name: 'Main Warehouse — Best', address: 'Best, Sweden' },
-        { l: '2', name: 'North Depot', address: 'Stockholm, Sweden' },
-        { l: '3', name: 'South Depot', address: 'Malmö, Sweden' }
-    ];
     function getWarehouseMeta(id) {
         return WAREHOUSES.find(w => w.l === String(id)) || { l: id, name: 'Warehouse ' + id, address: '—' };
     }
@@ -715,10 +738,7 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,None,11,Best,None,`;
 SPARE PART KIT IC 310,None,None,None,None,None,None,None,1,1,1
 SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
-    const DEMO_PASSPHRASE = 'varuhuset'; // bootstrap key for warehouse 1 demo
-    const DEMO_VERSION = 3; // bump to force re-seed when demo data changes
-
-    // ════════════════════════════════════════════════════════════════════════
+    // ═════════════════════════════════════════════════════════════════════════
     //  ID COMPRESSION (BTK000024 -> 24,  24 -> BTK000024)
     // ════════════════════════════════════════════════════════════════════════
     function compressId(btk) {
@@ -745,26 +765,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ════════════════════════════════════════════════════════════════════════
     //  STATE
     // ════════════════════════════════════════════════════════════════════════
-    const BASE_URL = window.location.origin + window.location.pathname;
-
-    let globalInventory = [];     // CSV B items
-    let globalKits = [];          // CSV A kits
-    let currentWarehouseId = '1';
-    let currentActiveKey = '';
-    let selectedItems = new Set();
-    let qrEccLevel = QRCode.CorrectLevel.M;
-    let searchTimeout = null;
-    let kitSearchTimeout = null;
-    let currentlyVisibleIds = [];
-    let activeView = 'auth-view';
-    let previousView = 'list-view';
-    let pendingItemId = null;
-    let listMode = 'items';        // 'items' | 'kits'
-    let sortBy = 'name';
-    let navigationContext = null;  // { type:'kit', kitnumber, kitName, items:[btk...] } | { type:'global' }
-    let currentItemBTK = null;
-    let modalMode = 'add';         // 'add' | 'edit'
-    let editTargetBTK = null;
+    qrEccLevel = (typeof QRCode !== 'undefined' && QRCode.CorrectLevel) ? QRCode.CorrectLevel.M : 1;
 
     // ════════════════════════════════════════════════════════════════════════
     //  AUTH GATE
