@@ -9,6 +9,8 @@
     <!-- External Libraries (CryptoJS removed — native WebCrypto used instead) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js" crossorigin="anonymous"></script>
 
     <style>
         /* --- THEME & VARIABLES --- */
@@ -336,14 +338,22 @@
         <h2 style="margin-bottom: 0.5rem;">Secure Unlock</h2>
         <p style="margin-bottom: 1.5rem; color: var(--text-muted);">Enter warehouse ID and decryption key to load its database.</p>
         <label class="modal-label" for="auth-warehouse">Warehouse ID</label>
-        <input type="text" id="auth-warehouse" aria-label="Warehouse ID" placeholder="e.g. 1" value="1">
+        <input type="text" id="auth-warehouse" aria-label="Warehouse ID" placeholder="e.g. 1" value="1" oninput="syncAuthFieldsForTypedWarehouse()">
         <input type="password" id="decryption-key" aria-label="Decryption Key" placeholder="Enter decryption key" onkeydown="if(event.key === 'Enter') attemptManualDecryption()">
-        <button class="full-width" onclick="attemptManualDecryption()">
+        <button class="full-width" id="btn-unlock-static" onclick="attemptManualDecryption()">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>
             Unlock Inventory
         </button>
+        <div id="supabase-login-fields" class="hidden">
+            <input type="email" id="sb-email" aria-label="Email" placeholder="Email" autocomplete="username">
+            <input type="password" id="sb-password" aria-label="Password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key === 'Enter') attemptSupabaseLogin()">
+            <button class="full-width" onclick="attemptSupabaseLogin()">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>
+                Sign In
+            </button>
+        </div>
         <p id="auth-error" style="color: var(--danger); margin-top: 1rem; display: none; font-weight: 600; text-align: center;">Invalid key or corrupted data.</p>
-        <p style="color: var(--text-muted); margin-top: 1rem; font-size: 0.85rem; text-align:center;">Tip: a link like <code>#1/KEY/PASS</code> can unlock &amp; save the key automatically.</p>
+        <p id="auth-tip-static" style="color: var(--text-muted); margin-top: 1rem; font-size: 0.85rem; text-align:center;">Tip: a link like <code>#1/KEY/PASS</code> can unlock &amp; save the key automatically.</p>
     </section>
 
     <!-- View 2: List / Multi-select -->
@@ -352,10 +362,11 @@
             <h2 style="margin: 0;">Inventory</h2>
             <div class="list-header-actions" id="list-actions">
                 <button id="btn-add-item" onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">➕ Add Item</button>
-                <button class="secondary" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Items CSV</button>
-                <button class="secondary" onclick="triggerKitsCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Kits CSV</button>
-                <button class="secondary" onclick="triggerWarehouseCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Warehouses CSV</button>
-                <button class="secondary" onclick="exportEncryptedDatabase()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">💾 Export</button>
+                <button class="secondary" id="btn-items-csv" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Items CSV</button>
+                <button class="secondary" id="btn-kits-csv" onclick="triggerKitsCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Kits CSV</button>
+                <button class="secondary" id="btn-warehouse-csv" onclick="triggerWarehouseCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Warehouses CSV</button>
+                <button class="secondary" id="btn-export-db" onclick="exportEncryptedDatabase()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">💾 Export</button>
+                <button class="secondary hidden" id="btn-batch-images" onclick="triggerBatchImageUpload()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">🖼️ Batch Images</button>
             </div>
         </div>
 
@@ -398,6 +409,7 @@
         <input type="file" id="csv-upload" accept=".csv" class="hidden" onchange="handleCSVUpload(event)" aria-label="Upload Items CSV">
         <input type="file" id="kits-csv-upload" accept=".csv" class="hidden" onchange="handleKitsCSVUpload(event)" aria-label="Upload Kits CSV">
         <input type="file" id="warehouse-csv-upload" accept=".csv" class="hidden" onchange="handleWarehouseCSVUpload(event)" aria-label="Upload Warehouses CSV">
+        <input type="file" id="batch-image-upload" accept="image/jpeg,image/png,image/webp" multiple class="hidden" onchange="handleBatchImageUpload(event)" aria-label="Batch Upload Images">
 
         <!-- Floating Action Bar -->
         <div class="fab-container">
@@ -425,6 +437,11 @@
         <div id="detail-kit-tags" class="kit-tags"></div>
 
         <div id="detail-images"></div>
+
+        <div id="btn-add-image-wrap" class="hidden" style="margin-bottom:1rem;">
+            <button class="secondary" onclick="document.getElementById('single-image-upload').click()">📷 Add Image</button>
+            <input type="file" id="single-image-upload" accept="image/jpeg,image/png,image/webp" class="hidden" onchange="handleSingleImageUpload(event)" aria-label="Add Image">
+        </div>
 
         <div id="detail-content" style="margin-top: 1rem; line-height: 1.8; font-size: 1.05rem;"></div>
         
@@ -548,10 +565,18 @@
     var labelPadLeft = 2, labelPadRight = 2, labelFontScale = 1;
     var labelMode = 'items';
     var WAREHOUSES = [
-        { l: '1', name: 'Main Warehouse — Best', address: 'Best, Sweden' },
+        { l: '1', name: 'Main Warehouse — Best', address: 'Best, Sweden', mode: 'supabase' },
         { l: '2', name: 'North Depot', address: 'Stockholm, Sweden' },
         { l: '3', name: 'South Depot', address: 'Malmö, Sweden' }
     ];
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  SUPABASE (warehouse-scoped auth + RLS-gated reads/writes — see WAREHOUSES mode)
+    // ════════════════════════════════════════════════════════════════════════
+    const SUPABASE_URL = 'https://qagdbkvcgxurnqowlokx.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFhZ2Ria3ZjZ3h1cm5xb3dsb2t4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4MTY0MDEsImV4cCI6MjEwMzM5MjQwMX0.tteGQHJTQ775oB0IllbS0oOIPlshngD9yqy_elVl5NU'; // safe to publish — RLS enforces access
+    const sb = (typeof window.supabase !== 'undefined') ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+    var currentUserRole = null; // 'viewer' | 'editor' | 'admin' — kept in memory only, never persisted
 
     // ═════════════════════════════════════════════════════════════════════════
     //  LOGGER
@@ -781,6 +806,163 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     // ════════════════════════════════════════════════════════════════════════
+    //  SUPABASE — row <-> app-shape conversion, session/list/item loading
+    // ════════════════════════════════════════════════════════════════════════
+    function supabaseRowToItem(row) {
+        return {
+            Manufacturer: row.manufacturer || 'None',
+            BTKnumber: row.btk,
+            itemnumber: row.itemnumber || 'None',
+            'itemname(english)': row.itemname_en || 'Unnamed',
+            'itemname(swedish)': row.itemname_sv || 'None',
+            itemnumber2: row.itemnumber2 || 'None',
+            itemnumber3: row.itemnumber3 || 'None',
+            Numberofitems: String(row.numberofitems ?? '0'),
+            Inventorylocation: row.inventorylocation || 'None',
+            Comments: row.comments || 'None',
+            images: row.images || ''
+        };
+    }
+
+    async function loadSupabaseSession(wid) {
+        const { data: { user } } = await sb.auth.getUser();
+        if (!user) throw new Error("No active Supabase session");
+        const { data: profile, error } = await sb.from('profiles').select('*').eq('id', user.id).single();
+        if (error) throw error;
+        currentUserRole = profile.role;
+        currentWarehouseId = wid;
+        currentActiveKey = 'supabase-session'; // sentinel so requireAuth() passes
+    }
+
+    async function supabaseLoadList(wid) {
+        const { data, error } = await sb.from('items').select('*').eq('warehouse_id', wid);
+        if (error) { showToast("Could not load items: " + error.message, "error"); return; }
+        globalInventory = (data || []).map(supabaseRowToItem);
+        globalKits = [];
+        showListView();
+    }
+
+    async function supabaseItemRoute(btk, wid) {
+        const { data: { session } } = await sb.auth.getSession();
+        if (!session) { pendingItemId = btk; currentWarehouseId = wid; showAuth(); return; }
+        try {
+            await loadSupabaseSession(wid);
+        } catch (e) {
+            console.error("Supabase session load failed:", e);
+            pendingItemId = btk; showAuth(); return;
+        }
+        const { data, error } = await sb.from('items').select('*').eq('btk', btk).single();
+        if (error) { showToast("Item not found or access denied.", "error"); return; }
+        globalInventory = [supabaseRowToItem(data)];
+        openItem(btk, { type: 'global' });
+    }
+
+    // Persist an item's `images` field back to Supabase (used by single/batch image upload).
+    async function supabasePersistImages(btk, images) {
+        const { error } = await sb.from('items').update({ images }).eq('btk', btk);
+        if (error) throw error;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  IMAGES — client-side resize (Canvas API), single + batch upload
+    // ════════════════════════════════════════════════════════════════════════
+    const BTK_RE = /BTK0*([0-9]{1,6})/i;
+
+    function drawToBlob(bmp, maxDim, q) {
+        const s = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+        c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+        return new Promise(r => c.toBlob(r, 'image/jpeg', q));
+    }
+
+    async function resizeImage(file, btk) {
+        const bmp = await createImageBitmap(file);
+        const stamp = Date.now().toString(36);
+        const filename = `${btk}_${stamp}.jpg`, thumbName = `${btk}_${stamp}_thumb.jpg`;
+        return {
+            full: await drawToBlob(bmp, 1600, 0.85),
+            thumb: await drawToBlob(bmp, 320, 0.8),
+            filename, thumbName
+        };
+    }
+
+    function appendImageFilename(existing, filename) {
+        return (existing || '').split(';').map(s => s.trim()).filter(Boolean).concat(filename).join(';');
+    }
+
+    function downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    async function downloadImageZip(matched) {
+        const zip = new JSZip();
+        matched.forEach(m => { zip.file(m.filename, m.full); zip.file(m.thumbName, m.thumb); });
+        const blob = await zip.generateAsync({ type: 'blob' });
+        downloadBlob(blob, 'batch-images.zip');
+    }
+
+    async function handleSingleImageUpload(event) {
+        const file = event.target.files[0];
+        event.target.value = '';
+        if (!file || !currentItemBTK) return;
+        try {
+            const { full, thumb, filename, thumbName } = await resizeImage(file, currentItemBTK);
+            const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+            const newImages = appendImageFilename(item.images, filename);
+            downloadBlob(full, filename);
+            downloadBlob(thumb, thumbName);
+            item.images = newImages;
+            if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') await supabasePersistImages(currentItemBTK, newImages);
+            else saveDraft(currentWarehouseId);
+            showToast(`Image resized & downloaded. Drop ${filename} + ${thumbName} into assets/.`, "success", 6000);
+            openItem(currentItemBTK, navigationContext);
+        } catch (e) {
+            console.error("Image upload failed:", e);
+            showToast("Image upload failed: " + e.message, "error");
+        }
+    }
+
+    function triggerBatchImageUpload() { if (!requireAuth()) return; document.getElementById('batch-image-upload').click(); }
+
+    async function handleBatchImageUpload(event) {
+        const files = Array.from(event.target.files || []);
+        event.target.value = '';
+        if (!files.length) return;
+
+        const matched = [], unmatched = [];
+        for (const file of files) {
+            const m = file.name.match(BTK_RE);
+            const btk = m ? 'BTK' + m[1].padStart(6, '0') : null;
+            const item = btk && globalInventory.find(i => i.BTKnumber === btk);
+            if (!item) { unmatched.push(file.name); continue; }
+            const { full, thumb, filename, thumbName } = await resizeImage(file, btk);
+            item.images = appendImageFilename(item.images, filename);
+            matched.push({ btk, filename, thumbName, full, thumb });
+        }
+
+        if (!matched.length) { showToast("No filenames matched a BTK number.", "warning"); return; }
+
+        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            await Promise.all(matched.map(m => {
+                const item = globalInventory.find(i => i.BTKnumber === m.btk);
+                return supabasePersistImages(m.btk, item.images).catch(e => console.error(`Persist failed for ${m.btk}:`, e));
+            }));
+        } else {
+            saveDraft(currentWarehouseId);
+        }
+
+        await downloadImageZip(matched);
+        if (listMode === 'items') filterList(false);
+        const unmatchedMsg = unmatched.length ? ` ${unmatched.length} file(s) unmatched: ${unmatched.join(', ')}` : '';
+        showToast(`Matched ${matched.length} image(s), zip downloaded. Unzip into assets/.${unmatchedMsg}`, "success", 8000);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     //  STATE
     // ════════════════════════════════════════════════════════════════════════
     qrEccLevel = (typeof QRCode !== 'undefined' && QRCode.CorrectLevel) ? QRCode.CorrectLevel.M : 1;
@@ -952,6 +1134,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     async function itemRoute(compressed, wid) {
         const btk = decompressId(compressed);
+        if (getWarehouseMeta(wid).mode === 'supabase') { await supabaseItemRoute(btk, wid); return; }
         const keys = getKeyVault();
         if (keys[wid]) {
             currentWarehouseId = wid;
@@ -975,6 +1158,18 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     async function startupRoute() {
+        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const { data: { session } } = await sb.auth.getSession();
+            if (session) {
+                try {
+                    await loadSupabaseSession(currentWarehouseId);
+                    await supabaseLoadList(currentWarehouseId);
+                    return;
+                } catch (e) { console.error("Supabase startup session load failed:", e); }
+            }
+            showAuth();
+            return;
+        }
         const keys = getKeyVault();
         if (keys[currentWarehouseId] && getEnvelopeVault()[currentWarehouseId]) {
             try {
@@ -1005,7 +1200,44 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ════════════════════════════════════════════════════════════════════════
     function showAuth() {
         document.getElementById('auth-warehouse').value = currentWarehouseId;
+        applyAuthFieldVisibility(currentWarehouseId);
         switchView('auth-view');
+    }
+
+    function applyAuthFieldVisibility(wid) {
+        const isSupa = getWarehouseMeta(wid).mode === 'supabase';
+        document.getElementById('supabase-login-fields').classList.toggle('hidden', !isSupa);
+        document.getElementById('decryption-key').classList.toggle('hidden', isSupa);
+        document.getElementById('btn-unlock-static').classList.toggle('hidden', isSupa);
+        document.getElementById('auth-tip-static').classList.toggle('hidden', isSupa);
+    }
+
+    // Live-toggle auth fields as the user types a warehouse ID, without resetting their input.
+    function syncAuthFieldsForTypedWarehouse() {
+        applyAuthFieldVisibility(document.getElementById('auth-warehouse').value.trim() || '1');
+    }
+
+    async function attemptSupabaseLogin() {
+        const wid = document.getElementById('auth-warehouse').value.trim() || '1';
+        const email = document.getElementById('sb-email').value.trim();
+        const password = document.getElementById('sb-password').value;
+        if (!email || !password) return showToast("Please enter email and password", "error");
+
+        const { error } = await sb.auth.signInWithPassword({ email, password });
+        if (error) {
+            document.getElementById('auth-error').style.display = 'block';
+            return showToast("Login failed: " + error.message, "error");
+        }
+        document.getElementById('auth-error').style.display = 'none';
+        try {
+            await loadSupabaseSession(wid);
+        } catch (e) {
+            console.error("Profile load failed:", e);
+            return showToast("Signed in, but no profile found for this account.", "error");
+        }
+        showToast("Signed in.", "success");
+        if (pendingItemId) { const id = pendingItemId; pendingItemId = null; await supabaseItemRoute(id, wid); }
+        else await supabaseLoadList(wid);
     }
 
     function attemptManualDecryption() {
@@ -1160,12 +1392,41 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 <span>🏬 <strong>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address}</span>
                 <label for="warehouse-switcher" style="margin:0; font-size:0.85rem; color:var(--text-muted);">Switch:</label>
                 <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" style="width:auto; min-width:160px; margin:0; padding:6px 10px; font-size:0.85rem;">${WAREHOUSES.map(w => `<option value="${w.l}" ${w.l === currentWarehouseId ? 'selected' : ''}>${w.name}</option>`).join('')}</select>
+                ${meta.mode === 'supabase' ? `<span style="font-size:0.8rem; color:var(--text-muted);">🔐 Signed in as <strong>${currentUserRole || '?'}</strong></span>` : ''}
             </div>`;
+
+        // CSV import/export operate on the local encrypted vault — not applicable in Supabase mode.
+        const isSupa = meta.mode === 'supabase';
+        ['btn-items-csv', 'btn-kits-csv', 'btn-warehouse-csv', 'btn-export-db'].forEach(id => {
+            document.getElementById(id).classList.toggle('hidden', isSupa);
+        });
+        document.getElementById('btn-batch-images').classList.toggle('hidden', !isSupa || currentUserRole === 'viewer');
     }
 
     async function switchWarehouse(wid) {
         if (!requireAuth()) return;
         if (wid === currentWarehouseId) return;
+
+        if (getWarehouseMeta(wid).mode === 'supabase') {
+            const { data: { session } } = await sb.auth.getSession();
+            if (!session) {
+                document.getElementById('warehouse-switcher').value = currentWarehouseId;
+                currentWarehouseId = wid;
+                showAuth();
+                return;
+            }
+            try {
+                await loadSupabaseSession(wid);
+                await supabaseLoadList(wid);
+                showToast(`Switched to warehouse ${wid}.`, "success");
+            } catch (e) {
+                console.error("Supabase warehouse switch failed:", e);
+                document.getElementById('warehouse-switcher').value = currentWarehouseId;
+                showToast("Cannot open warehouse: " + e.message, "error");
+            }
+            return;
+        }
+
         const vault = getEnvelopeVault();
         if (!vault[wid]) return showToast(`No data for warehouse ${wid}.`, "warning");
         try {
@@ -1439,6 +1700,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('btn-next-item').classList.toggle('hidden', !kitNav);
         document.getElementById('btn-prev-item').classList.toggle('hidden', !kitNav);
 
+        // Role-gated controls (only meaningful in Supabase mode — static mode has no role concept)
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        const isViewer = isSupa && currentUserRole === 'viewer';
+        document.getElementById('btn-edit-item').classList.toggle('hidden', isViewer);
+        document.getElementById('btn-add-image-wrap').classList.toggle('hidden', !isSupa || isViewer);
+
         const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
 
         // Image gallery
@@ -1572,6 +1839,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const nameEn = document.getElementById('ai-name-en').value.trim();
         if (!btk || !nameEn) { showToast("BTK Number and English Name are required.", "error"); return; }
 
+        const existingImages = (modalMode === 'edit' && editTargetBTK)
+            ? (globalInventory.find(i => i.BTKnumber === editTargetBTK) || {}).images || ''
+            : '';
+
         const newItem = {
             'Manufacturer':      document.getElementById('ai-manufacturer').value.trim() || 'None',
             'BTKnumber':         btk,
@@ -1583,8 +1854,28 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             'Numberofitems':     document.getElementById('ai-qty').value.trim() || '0',
             'Inventorylocation': document.getElementById('ai-location').value.trim() || 'None',
             'Comments':          document.getElementById('ai-comments').value.trim() || 'None',
-            'images':            ''
+            'images':            existingImages
         };
+
+        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const row = {
+                manufacturer: newItem.Manufacturer, itemnumber: newItem.itemnumber,
+                itemname_en: newItem['itemname(english)'], itemname_sv: newItem['itemname(swedish)'],
+                itemnumber2: newItem.itemnumber2, itemnumber3: newItem.itemnumber3,
+                numberofitems: parseInt(newItem.Numberofitems) || 0,
+                inventorylocation: newItem.Inventorylocation, comments: newItem.Comments
+            };
+            const req = (modalMode === 'edit')
+                ? sb.from('items').update(row).eq('btk', editTargetBTK)
+                : sb.from('items').insert({ ...row, btk, warehouse_id: currentWarehouseId, images: '' });
+            req.then(({ error }) => {
+                if (error) return showToast("Save blocked: " + error.message, "error");
+                closeAddItemModal();
+                showToast("Saved to Supabase.", "success");
+                supabaseLoadList(currentWarehouseId);
+            });
+            return;
+        }
 
         if (modalMode === 'edit' && editTargetBTK && editTargetBTK !== btk) {
             // BTKnumber changed — remove old entry
@@ -1872,10 +2163,12 @@ ${css}
         qrEccLevel = map[val] ?? QRCode.CorrectLevel.M;
     }
 
-    function clearSession() {
+    async function clearSession() {
         localStorage.removeItem(LS_KEYS);
         localStorage.removeItem(LS_VAULT);
         localStorage.removeItem(LS_DRAFT);
+        currentUserRole = null;
+        if (sb) { try { await sb.auth.signOut(); } catch (e) { console.error("Supabase sign-out failed:", e); } }
         window.location.href = window.location.pathname;
     }
 </script>

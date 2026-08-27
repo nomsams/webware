@@ -98,6 +98,17 @@ webware/
 └── README.md           # This file
 ```
 
+## Supabase Mode (Warehouse 1)
+
+Warehouse `1` runs on Supabase instead of the static encrypted-envelope flow (`mode: 'supabase'` in the `WAREHOUSES` array). This trades the "fully static, zero dependency" property for real server-enforced viewer/editor/admin permissions via Postgres Row Level Security.
+
+- **Auth**: Email/password sign-in (Supabase Auth), not the passphrase flow. No public sign-ups — accounts are created manually in the Supabase dashboard.
+- **Roles**: `viewer` (read-only), `editor` (can update existing items + images), `admin` (can also insert/delete). Role lives in the `profiles` table and is enforced by RLS, not just hidden in the UI — a viewer's write attempt is rejected server-side even via devtools.
+- **Data**: Items live in the `items` table (schema in the Supabase SQL editor history), keyed by BTK number. No kits table — kit/BOM functionality was intentionally dropped for Supabase-mode warehouses.
+- **Images**: Uploaded via the app (single image in item view, or batch via filename-BTK matching in the list view). Images are resized client-side (Canvas API, full + thumbnail) and downloaded as files/zip — there's no server storage, so an admin still has to drop the files into `assets/` and commit them, same as the encrypted-export workflow for static warehouses.
+- **Keep-alive**: `.github/workflows/supabase-keepalive.yml` pings the database twice a week so the free-tier project doesn't pause after 7 days of inactivity. Requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` repo secrets (Settings → Secrets and variables → Actions) — the service role key must **never** be committed or used client-side.
+- **Other warehouses** (`2`, `3`, ...) are unaffected and keep using the offline-capable passphrase/envelope-encryption flow described above.
+
 ## Security Notes
 
 - Passphrases never leave the browser
