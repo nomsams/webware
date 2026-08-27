@@ -14,19 +14,26 @@ node --test modules/tests/*.test.js
 - **`groq-client.js`** + **`../supabase/functions/groq-proxy/index.ts`** — chat with Groq-hosted
   models (model + reasoning-effort selectable, streaming supported), with the API key held
   server-side in a Supabase Edge Function's secrets rather than in the browser. Deploy the
-  function and `supabase secrets set GROQ_API_KEY=...` before this does anything real. See the
-  security note below on why it's an Edge Function and not a key in `index.html`.
-- **`cors-proxy.js`** — pluggable CORS-proxy fetch wrapper (primary proxy, falling back to public
-  proxies, falling back to a direct fetch), used by `web-search.js`. See the `chikibriki` note
-  below before configuring a primary proxy.
+  function and `supabase secrets set GROQ_API_KEY=...` before this does anything real.
+- **`cors-proxy.js`** + **`../supabase/functions/cors-proxy/index.ts`** — CORS-proxy fetch client,
+  used by `web-search.js`. Defaults to webware's own `cors-proxy` Edge Function once configured
+  (deploy it, then call `configureCorsProxy(...)`), falling back to public proxies and finally a
+  direct fetch. See the `chikibriki` note below.
 - **`web-search.js`** — DuckDuckGo search + page-text extraction, ported from
   `github.com/nomsams/timeline` (the search) with a cleanup approach mirroring
   `github.com/nomsams/crawly` (the text extraction). Depends on `cors-proxy.js`.
 - **`order-parser.js`** — the actual feature behind "a box where we can write or paste something
-  like 'plocka item 1 and item 2...'": turns free text into a structured `{ items, recipient }`
-  pack-order draft via `groq-client.js`, optionally using `web-search.js` to look up a recipient's
-  address when the text names them but doesn't give one. This is the piece the other modules
-  exist to support.
+  like 'plocka item 1 and item 2...'": turns free text into a structured
+  `{ items, recipient, from }` pack-order draft via `groq-client.js`. Each item reference is
+  resolved to a real BTK + quantity in order: an exact match against a pre-loaded item list, a
+  bare BTK number used as-is, or (new) a live database search via a caller-supplied
+  `searchItemCandidates(text)` function, scored by `bestCandidateMatch()` to find the closest hit
+  — so it isn't limited to items already loaded into memory. Optionally uses `web-search.js` to
+  look up a recipient's address when the text names them but doesn't give one. `fromAddress` is
+  passed straight through (it's the app's own known data — the warehouse's address — not
+  something to infer from free text). See the multi-warehouse note in its file header for how
+  `searchItemCandidates` should be scoped when the same product can exist in more than one
+  warehouse.
 - **`img-square.js`** — pads an image to a square, filling the new space with a solid color or a
   color sampled from the image's own edges. Ported from `github.com/nomsams/imgsquare`. Intended
   to slot into the existing item-photo/manufacturer-logo canvas editor as an extra step.
@@ -36,23 +43,36 @@ node --test modules/tests/*.test.js
   contactview's autosave (plain `localStorage`) and "Google Calendar sync" (turned out to be a
   `calendar.google.com` deep link / `.ics` download, not a real API integration) weren't ported —
   neither is more than a few lines to add directly wherever this ends up wired in, if wanted.
+- **`email-sender.js`** + **`../supabase/functions/send-email/index.ts`** — sends email via SMTP
+  (Gmail/Outlook/one.com presets, or a custom host for your own server), credentials held as
+  Supabase secrets, same pattern as `GROQ_API_KEY`. Also exports `buildMailtoLink()`, a
+  zero-backend fallback that just opens the user's own mail client with everything prefilled, and
+  `buildPackOrderEmailTemplate()`, which turns an `order-parser.js`-shaped draft into a ready
+  subject/body. **Not exercised against a live SMTP server** (no Deno runtime available in this
+  environment) — the `denomailer` usage follows its documented API but verify it end-to-end once
+  deployed. See the function's doc comment for the Gmail app-password requirement and the Outlook
+  basic-auth caveat (Microsoft has disabled it for most tenants since 2022–2023 — confirm yours
+  still allows it before relying on that preset).
 
 ## Security note: API keys in a static, client-only site
 
 `index.html` is served as-is from GitHub Pages — anything written into it, including an API key,
-is visible to anyone who views page source. That's why `groq-client.js` doesn't hold a Groq key
-itself: it calls a Supabase Edge Function (`groq-proxy`) that holds `GROQ_API_KEY` as a Supabase
-secret and only accepts requests from signed-in app users. The same reasoning applies to any
-future proxy/key this app adds — prefer a server-side secret over a client-embedded one.
+is visible to anyone who views page source. That's why none of `groq-client.js`, `cors-proxy.js`,
+or `email-sender.js` hold a real credential themselves: each calls a Supabase Edge Function that
+holds the actual secret (`GROQ_API_KEY`, `SMTP_PASSWORD`, etc.) server-side and only accepts
+requests from signed-in app users. Prefer this shape for any future proxy/key this app adds over
+a client-embedded one.
 
-`cors-proxy.js`'s doc comment covers a related but different case: crawly and timeline (two of
-the reference repos this was ported from) hardcode a fallback proxy key, `"chikibriki"`, in
-cleartext in their own public source. That's already exposed on the public internet regardless of
-anything done here, so there's nothing to protect by keeping it out of this repo too — but it
-also isn't something to depend on, since it points at a Supabase project (`onbkfqayveownervyktu`)
-that belongs to those repos, not to webware. `cors-proxy.js` ships with no primary proxy
-configured by default; wire that one back in explicitly (see the module's doc comment) only if
-you still control that project and want it.
+`cors-proxy.js`'s `chikibriki` default is a different case, worth understanding separately: crawly
+and timeline (two of the reference repos this was ported from) hardcode a fallback proxy key,
+`"chikibriki"`, in cleartext in their own public source, against a CORS-proxy Edge Function on a
+Supabase project (`onbkfqayveownervyktu`) that belongs to those repos, not to webware. That value
+was never actually secret — it's a conventional gate value, the same way an API's public client ID
+isn't secret. `modules/cors-proxy.js` keeps `chikibriki` as its own default `x-proxy-key` (for
+parity, per request), sent to **webware's own** `cors-proxy` Edge Function rather than the other
+project's — that function's real protection is requiring a signed-in Supabase user, same as
+`groq-proxy`. `CORS_PROXY_KEY` is an optional extra secret-side check if you want it, but the auth
+requirement is what actually gates the function.
 
 ## Not ported as a separate module
 

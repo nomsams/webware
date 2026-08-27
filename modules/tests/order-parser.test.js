@@ -2,7 +2,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOrderRequest, parseJsonReply, looksLikeBtk, matchKnownItem, guessAddressLine } from '../order-parser.js';
+import {
+  parseOrderRequest, parseJsonReply, looksLikeBtk, matchKnownItem, bestCandidateMatch, guessAddressLine,
+} from '../order-parser.js';
 
 const KNOWN_ITEMS = [
   { btk: 'BTK000001', name: 'Widget A' },
@@ -23,6 +25,22 @@ test('matchKnownItem resolves ordinals, BTKs, and names case-insensitively', () 
   assert.equal(matchKnownItem('widget a', KNOWN_ITEMS).btk, 'BTK000001');
   assert.equal(matchKnownItem('nonexistent', KNOWN_ITEMS), null);
   assert.equal(matchKnownItem('item 99', KNOWN_ITEMS), null);
+});
+
+test('bestCandidateMatch short-circuits on an exact BTK match', () => {
+  const candidates = [{ btk: 'BTK000005', name: 'Something else' }, { btk: 'BTK000009', name: 'Blue Widget' }];
+  assert.equal(bestCandidateMatch('BTK000009', candidates).name, 'Blue Widget');
+});
+
+test('bestCandidateMatch picks the closer name by word overlap, and ignores weak matches', () => {
+  const candidates = [{ btk: 'BTK000010', name: 'Red Bolt 10mm' }, { btk: 'BTK000011', name: 'Blue Widget Large' }];
+  assert.equal(bestCandidateMatch('blue widget', candidates).btk, 'BTK000011');
+  assert.equal(bestCandidateMatch('completely unrelated text', candidates), null);
+});
+
+test('bestCandidateMatch returns null with no candidates', () => {
+  assert.equal(bestCandidateMatch('anything', []), null);
+  assert.equal(bestCandidateMatch('anything', null), null);
 });
 
 test('parseJsonReply extracts JSON even when wrapped in prose or code fences', () => {
@@ -47,22 +65,86 @@ test('guessAddressLine returns null when nothing matches', () => {
   assert.equal(guessAddressLine('no postal codes here at all'), null);
 });
 
-test('parseOrderRequest resolves item ordinals and skips lookup when no address tools are given', async () => {
+test('parseOrderRequest resolves item ordinals, defaults quantity to 1, and skips lookup when no address tools are given', async () => {
   const fakeGroq = {
     chat: async () => JSON.stringify({
-      items: [{ reference: 'item 1', quantity: 3 }],
+      items: [{ reference: 'item 1' }, { reference: 'item 2', quantity: 3 }],
       recipientName: 'Acme AB',
       recipientAddressHint: null,
       needsAddressLookup: true,
     }),
   };
 
-  const draft = await parseOrderRequest(fakeGroq, 'plocka item 1 x3 till Acme AB', { knownItems: KNOWN_ITEMS });
+  const draft = await parseOrderRequest(fakeGroq, 'plocka item 1 och item 2 x3 till Acme AB', { knownItems: KNOWN_ITEMS });
 
-  assert.deepEqual(draft.items, [{ reference: 'item 1', quantity: 3, btk: 'BTK000001' }]);
+  assert.deepEqual(draft.items, [
+    { reference: 'item 1', quantity: 1, btk: 'BTK000001', matchedName: 'Widget A' },
+    { reference: 'item 2', quantity: 3, btk: 'BTK000002', matchedName: 'Widget B' },
+  ]);
   assert.equal(draft.recipient.name, 'Acme AB');
   assert.equal(draft.recipient.address, null);
   assert.equal(draft.recipient.confidence, 'unknown');
+  assert.equal(draft.from, null);
+});
+
+test('parseOrderRequest falls back to searchItemCandidates when a reference is not in knownItems', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: 'blue widget', quantity: 2 }],
+      recipientName: null, recipientAddressHint: null, needsAddressLookup: false,
+    }),
+  };
+  let searchedWith = null;
+  const searchItemCandidates = async (text) => {
+    searchedWith = text;
+    return [{ btk: 'BTK000099', name: 'Blue Widget Large' }, { btk: 'BTK000100', name: 'Red Bolt' }];
+  };
+
+  const draft = await parseOrderRequest(fakeGroq, 'plocka en blue widget', { knownItems: [], searchItemCandidates });
+
+  assert.equal(searchedWith, 'blue widget');
+  assert.deepEqual(draft.items, [{ reference: 'blue widget', quantity: 2, btk: 'BTK000099', matchedName: 'Blue Widget Large' }]);
+});
+
+test('parseOrderRequest leaves an item unresolved when search finds nothing close enough', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: 'some obscure thing', quantity: 1 }],
+      recipientName: null, recipientAddressHint: null, needsAddressLookup: false,
+    }),
+  };
+  const searchItemCandidates = async () => [{ btk: 'BTK000001', name: 'Widget A' }];
+
+  const draft = await parseOrderRequest(fakeGroq, 'plocka some obscure thing', { searchItemCandidates });
+
+  assert.equal(draft.items[0].btk, null);
+  assert.equal(draft.items[0].matchedName, null);
+});
+
+test('parseOrderRequest does not call searchItemCandidates when a reference already matched knownItems or looks like a BTK', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: 'item 1', quantity: 1 }, { reference: 'BTK000042', quantity: 1 }],
+      recipientName: null, recipientAddressHint: null, needsAddressLookup: false,
+    }),
+  };
+  let searchCalled = false;
+  const searchItemCandidates = async () => { searchCalled = true; return []; };
+
+  const draft = await parseOrderRequest(fakeGroq, 'plocka item 1 och BTK000042', { knownItems: KNOWN_ITEMS, searchItemCandidates });
+
+  assert.equal(searchCalled, false);
+  assert.equal(draft.items[0].btk, 'BTK000001');
+  assert.equal(draft.items[1].btk, 'BTK000042');
+});
+
+test('parseOrderRequest passes fromAddress straight through without touching it', async () => {
+  const fakeGroq = { chat: async () => JSON.stringify({ items: [], recipientName: null, recipientAddressHint: null, needsAddressLookup: false }) };
+  const fromAddress = { name: 'Warehouse 1', address: 'Lagervägen 1, 123 45 Stockholm' };
+
+  const draft = await parseOrderRequest(fakeGroq, 'plocka ingenting', { fromAddress });
+
+  assert.deepEqual(draft.from, fromAddress);
 });
 
 test('parseOrderRequest uses the given address hint without triggering a search', async () => {

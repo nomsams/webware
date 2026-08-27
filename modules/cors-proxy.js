@@ -1,53 +1,74 @@
-// Browser-side CORS-proxy wrapper for fetching pages that don't send permissive CORS headers
-// (used by web-search.js to reach DuckDuckGo and search-result pages). Ported from the
-// primary-then-fallback proxy chain used in https://github.com/nomsams/crawly and
-// https://github.com/nomsams/timeline.
+// Browser-side CORS-proxy client for fetching pages that don't send permissive CORS headers
+// (used by web-search.js to reach DuckDuckGo and search-result pages).
 //
 // STATUS: standalone, not wired into index.html yet.
 //
-// SECURITY NOTE on "chikibriki": crawly and timeline both default their proxy key to the literal
-// string "chikibriki" against a specific Supabase Edge Function
-// (onbkfqayveownervyktu.supabase.co/functions/v1/cors-proxy) whenever no key is typed into their
-// UI. That value is hardcoded in cleartext in two public repos, so treat it as an
-// already-exposed, low-value shared secret, not something to protect — and not something to
-// silently depend on either, since it points at a different Supabase project than webware's own,
-// outside this app's control. It is deliberately NOT wired in as a default here. If you still
-// control that project and want parity with crawly/timeline, call:
-//   configureCorsProxy(supabaseCorsProxy('https://onbkfqayveownervyktu.supabase.co', 'chikibriki'))
-// Out of the box this module skips straight to the public fallback proxies below.
+// Default path calls webware's own cors-proxy Supabase Edge Function
+// (supabase/functions/cors-proxy) — deploy it and call configureCorsProxy() once (same
+// dependency-injected shape as groq-client.js's createGroqClient) and corsFetch() uses it
+// automatically, falling back to public proxies (corsproxy.io, allorigins.win) and finally a
+// direct fetch if it isn't configured or fails.
+//
+// On "chikibriki": crawly and timeline (github.com/nomsams/crawly, /timeline) default their
+// proxy key to the literal string "chikibriki" against a CORS-proxy Edge Function on a *different*
+// Supabase project than webware's own. That value is hardcoded in cleartext in both of those
+// public repos, so it was never actually secret — it functions as a conventional non-secret gate
+// value, not unlike a public API identifier. DEFAULT_PROXY_KEY below keeps that same convention
+// (sent as the x-proxy-key header) for parity, but it is NOT what protects webware's own
+// cors-proxy function — that function requires a signed-in Supabase user, the same real
+// protection groq-proxy uses for GROQ_API_KEY. If you want CORS_PROXY_KEY checked server-side
+// too (defense in depth, optional), set it to match: `supabase secrets set CORS_PROXY_KEY=chikibriki`.
+//
+// Usage:
+//   import { configureCorsProxy } from './cors-proxy.js';
+//   configureCorsProxy({
+//     supabaseUrl: SUPABASE_URL,
+//     supabaseAnonKey: SUPABASE_ANON_KEY,
+//     getAccessToken: async () => (await sb.auth.getSession()).data.session?.access_token,
+//   });
+//   const res = await corsFetch('https://html.duckduckgo.com/html/?q=...');
+
+export const DEFAULT_PROXY_KEY = 'chikibriki';
 
 const PUBLIC_FALLBACKS = [
   (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
   (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
 ];
 
-let primaryProxy = null; // { buildUrl(url), headers } | null
+let ownProxy = null; // { endpoint, supabaseAnonKey, getAccessToken, proxyKey } | null
 
-// buildUrl: (targetUrl) => proxiedUrl. headers: extra headers to send with the proxied request
-// (e.g. an auth key). Pass no args (or a falsy buildUrl) to clear the primary proxy.
-export function configureCorsProxy({ buildUrl, headers = {} } = {}) {
-  primaryProxy = buildUrl ? { buildUrl, headers } : null;
-}
-
-// Convenience builder matching crawly/timeline's own primary proxy shape:
-// <supabaseUrl>/functions/v1/cors-proxy?url=<target>, key sent as the x-proxy-key header.
-export function supabaseCorsProxy(supabaseUrl, key) {
-  return {
-    buildUrl: (url) => `${supabaseUrl.replace(/\/$/, '')}/functions/v1/cors-proxy?url=${encodeURIComponent(url)}`,
-    headers: { 'x-proxy-key': key },
+export function configureCorsProxy({ supabaseUrl, supabaseAnonKey, getAccessToken, proxyKey = DEFAULT_PROXY_KEY } = {}) {
+  if (!supabaseUrl) { ownProxy = null; return; }
+  if (!supabaseAnonKey || !getAccessToken) {
+    throw new Error('configureCorsProxy: supabaseAnonKey and getAccessToken are required alongside supabaseUrl');
+  }
+  ownProxy = {
+    endpoint: `${supabaseUrl.replace(/\/$/, '')}/functions/v1/cors-proxy`,
+    supabaseAnonKey,
+    getAccessToken,
+    proxyKey,
   };
 }
 
-// Tries the configured primary proxy first (if any), then each public fallback in order, then
-// finally a direct fetch (works for hosts that already send CORS headers). Returns the first
-// response with res.ok; throws the last error/status if every attempt fails.
+// Tries webware's own cors-proxy function first (if configured), then each public fallback in
+// order, then finally a direct fetch (works for hosts that already send CORS headers). Returns
+// the first response with res.ok; throws the last error/status if every attempt fails.
 export async function corsFetch(targetUrl, options = {}, { fetchImpl = fetch } = {}) {
   const attempts = [];
-  if (primaryProxy) {
-    attempts.push(() => fetchImpl(primaryProxy.buildUrl(targetUrl), {
-      ...options,
-      headers: { ...(options.headers || {}), ...primaryProxy.headers },
-    }));
+  if (ownProxy) {
+    attempts.push(async () => {
+      const accessToken = await ownProxy.getAccessToken();
+      if (!accessToken) throw new Error('corsFetch: no active session for the cors-proxy function');
+      return fetchImpl(`${ownProxy.endpoint}?url=${encodeURIComponent(targetUrl)}`, {
+        ...options,
+        headers: {
+          ...(options.headers || {}),
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey': ownProxy.supabaseAnonKey,
+          'x-proxy-key': ownProxy.proxyKey,
+        },
+      });
+    });
   }
   for (const build of PUBLIC_FALLBACKS) {
     attempts.push(() => fetchImpl(build(targetUrl), options));
@@ -69,5 +90,5 @@ export async function corsFetch(targetUrl, options = {}, { fetchImpl = fetch } =
 
 // Exposed for tests / callers that want to reset state between uses.
 export function _resetCorsProxy() {
-  primaryProxy = null;
+  ownProxy = null;
 }
