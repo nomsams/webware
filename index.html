@@ -52,7 +52,7 @@
         /* --- LAYOUT & HEADER --- */
         header { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--card-bg); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
         .logo-container { display: flex; align-items: center; gap: 10px; }
-        .logo-container img { height: 32px; max-width: 120px; object-fit: contain; border-radius: 6px; }
+        .logo-container img { height: 51px; max-width: 180px; object-fit: contain; border-radius: 6px; }
         .header-actions { display: flex; gap: 4px; }
         .icon-btn { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--text-main); padding: 8px; border-radius: 50%; transition: background 0.2s; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
         .icon-btn:hover, .icon-btn:active { background: var(--border); }
@@ -372,15 +372,17 @@
                 <input type="text" id="search-box" aria-label="Search Inventory" placeholder="Search name, number, BTK, manufacturer, location..." oninput="debounceSearch()">
                 <button class="search-clear" onclick="clearSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
             </div>
-            <select id="sort-by" onchange="onSortChange()" style="margin-bottom: 1rem;">
-                <option value="name">Sort: Name (A–Z)</option>
-                <option value="manufacturer">Sort: Manufacturer</option>
-                <option value="btk">Sort: BTK Number</option>
-            </select>
             <div class="list-stats" id="list-stats">Loading inventory...</div>
-            <div class="select-all-banner" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
-                <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 12px; pointer-events: none;" aria-hidden="true">
-                <span style="font-weight: 600; flex-grow: 1;">Select All Visible Items</span>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+                <select id="sort-by" onchange="onSortChange()" style="margin: 0; width: auto;">
+                    <option value="name">Sort: Name (A–Z)</option>
+                    <option value="manufacturer">Sort: Manufacturer</option>
+                    <option value="btk">Sort: BTK Number</option>
+                </select>
+                <div class="select-all-banner" style="flex: 1; margin-bottom: 0;" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
+                    <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 12px; pointer-events: none;" aria-hidden="true">
+                    <span style="font-weight: 600; flex-grow: 1;">Select All Visible Items</span>
+                </div>
             </div>
         </div>
 
@@ -448,8 +450,7 @@
             <h2 style="margin:0;">Label Preview</h2>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button class="secondary" onclick="showListView()">Cancel</button>
-                <button onclick="printLabels()">🖨️ Print (HTML)</button>
-                <button onclick="printLabelsBrother()">🖨️ Print (Brother)</button>
+                <button onclick="printLabels()">🖨️ Print</button>
                 <button onclick="exportLabelsAsHTML()">💾 HTML Export</button>
             </div>
         </div>
@@ -1200,14 +1201,17 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             div.className = 'item-row';
             div.setAttribute('role', 'button'); div.tabIndex = 0;
             const isChecked = selectedItems.has(id);
-            const subNum = [item.itemnumber, item.itemnumber2, item.itemnumber3].find(n => n && n !== 'None') || '';
+            const rNum1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
+            const rNum2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
+            const rNums = [rNum1, rNum2].filter(Boolean).join(' · ') || id;
+            const rMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
             div.innerHTML = `
                 <div class="select-circle ${isChecked ? 'selected' : ''}" data-id="${id}" aria-hidden="true" title="Select for label"></div>
                 <div class="item-info">
-                    <div class="item-id">${id}</div>
-                    <div class="item-title">${item['itemname(english)'] || 'Unnamed'}</div>
+                    <div class="item-title">${item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed'}</div>
+                    <div class="item-id">${rNums}</div>
                     <div class="item-sub">
-                        <span>${item.Manufacturer && item.Manufacturer !== 'None' ? item.Manufacturer : ''} ${subNum ? '· ' + subNum : ''}</span>
+                        <span>${rMfr ? rMfr + ' · ' : ''}${id}</span>
                         <span>Stock: <strong>${item.Numberofitems || 0}</strong></span>
                     </div>
                 </div>`;
@@ -1409,17 +1413,21 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             }
         }
 
-        const dNum1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
-        const dNum2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
-        const dNums = [dNum1, dNum2].filter(Boolean).join(' · ');
         const dMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
+        const field = (label, val) => `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">${label}:</span><span>${getStr(val)}</span></div>`;
         document.getElementById('detail-content').innerHTML = `
-            ${dNums ? `<div style="margin-bottom:10px;font-size:1.25rem;font-weight:800;color:var(--text-main);">${dNums}</div>` : ''}
             <div style="margin-bottom:14px;font-size:1rem;color:var(--text-muted);"><strong style="color:var(--text-main);">${dMfr ? dMfr + ' · ' : ''}</strong><span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Stock:</span><span style="font-weight:600;color:var(--primary);">${getStr(item.Numberofitems)}</span> &nbsp;units @ ${getStr(item.Inventorylocation)}</div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Swedish Name:</span><span>${getStr(item['itemname(swedish)'])}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Item #3:</span><span>${getStr(item.itemnumber3)}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;"><span style="font-weight:600;">Comments:</span><div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div></div>`;
+            ${field('Item Name (English)', item['itemname(english)'])}
+            ${field('Item Name (Swedish)', item['itemname(swedish)'])}
+            ${field('Item #1', item.itemnumber)}
+            ${field('Item #2', item.itemnumber2)}
+            ${field('Item #3 (Internal)', item.itemnumber3)}
+            ${field('Manufacturer', item.Manufacturer)}
+            ${field('System ID (BTK)', id)}
+            ${field('Stock (Number of items)', item.Numberofitems)}
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Inventory Location:</span><span>${getStr(item.Inventorylocation)}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;"><span style="font-weight:600;color:var(--text-muted);">Comments:</span><div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div></div>
+            ${field('Images', item.images)}`;
 
         document.getElementById('btn-single-label').onclick = () => {
             selectedItems.clear(); selectedItems.add(id); generateLabelsPreview();
@@ -1618,32 +1626,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 .l-nums{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.3px;margin-top:0.5mm}
 .l-name{font-size:11pt;font-weight:700;color:#000;margin-top:1.5mm}
 .l-btk{font-size:6pt;color:#555;font-weight:600;letter-spacing:0.3px;margin-top:auto}
-@media print{body{background:white!important;padding:0;gap:0;display:block}@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none}}`;
+body{margin:0;padding:0;background:#fff;font-family:Arial,sans-serif}
+@media print{body{padding:0;gap:0}@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none}}`;
         const printDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Brother QL Labels</title><style>${css}</style></head><body onload="window.print()">${cloneContainer.innerHTML}</body></html>`;
-        const iframe = document.createElement('iframe');
-        iframe.style.position = 'fixed'; iframe.style.right = '0'; iframe.style.bottom = '0'; iframe.style.width = '0'; iframe.style.height = '0'; iframe.style.border = '0';
-        document.body.appendChild(iframe);
-        iframe.srcdoc = printDoc;
-        setTimeout(() => { document.body.removeChild(iframe); }, 4000);
-    }
-
-    // Brother label printer: prints the on-screen preview at 90x29mm (select Brother QL in print dialog)
-    function printLabelsBrother() {
-        const container = document.getElementById('label-preview-container');
-        const canvases = Array.from(container.querySelectorAll('.label-qr canvas'));
-        const imgs = Array.from(container.querySelectorAll('.label-qr img'));
-        canvases.forEach((canvas, i) => {
-            const dataUrl = canvas.toDataURL('image/png');
-            if (imgs[i]) { imgs[i].src = dataUrl; imgs[i].style.cssText = 'display:block !important; max-width:100%; max-height:100%;'; }
-            canvas.style.display = 'none';
-        });
-        const resume = () => {
-            canvases.forEach(c => { c.style.display = ''; });
-            imgs.forEach(img => { if (img.src.startsWith('data:')) img.removeAttribute('src'); img.style.cssText = ''; });
-            window.removeEventListener('afterprint', resume);
-        };
-        window.addEventListener('afterprint', resume);
-        window.print();
+        const w = window.open('', '_blank');
+        if (!w) { showToast("Pop-up blocked. Allow pop-ups to print.", "error"); return; }
+        w.document.open(); w.document.write(printDoc); w.document.close();
     }
 
     // ════════════════════════════════════════════════════════════════════════
