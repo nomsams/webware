@@ -5,11 +5,16 @@
 --
 -- Run once in the Supabase SQL Editor, after the earlier migrations.
 
+-- Fix (re-run safe via create or replace): the original version wrote "select role from
+-- profiles ..." inside a function whose RETURNS TABLE also declares an output column named
+-- "role" — plpgsql resolves bare "role" against that output column first, so it collided with
+-- profiles.role and Postgres rejected the query as ambiguous. Every profiles column reference is
+-- now qualified with the "p" alias to rule that out for good, not just patched at this one spot.
 create or replace function public.list_profiles_with_email()
 returns table(id uuid, email text, role text, warehouse_id text)
 language plpgsql security definer as $$
 begin
-  if (select role from public.profiles where id = auth.uid()) != 'admin' then
+  if (select p.role from public.profiles p where p.id = auth.uid()) != 'admin' then
     raise exception 'not authorized';
   end if;
   return query
@@ -23,7 +28,7 @@ grant execute on function public.list_profiles_with_email to authenticated;
 create or replace function public.update_user_role(p_user_id uuid, p_role text)
 returns void language plpgsql security definer as $$
 begin
-  if (select role from public.profiles where id = auth.uid()) != 'admin' then
+  if (select p.role from public.profiles p where p.id = auth.uid()) != 'admin' then
     raise exception 'not authorized';
   end if;
   if p_role not in ('viewer', 'editor', 'admin') then
