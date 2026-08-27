@@ -76,8 +76,15 @@
         input:focus, select:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 4px var(--focus-ring); outline: none; }
         
         .search-wrapper { position: relative; margin-bottom: 1rem; }
-        .search-clear { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: var(--border); border: none; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-main); font-size: 0.8rem; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
-        .search-wrapper.has-text .search-clear { opacity: 1; pointer-events: auto; }
+        .search-clear { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.25rem; line-height: 1; border-radius: 50%; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.2s, background 0.2s; }
+        .search-clear:hover { background: var(--border); color: var(--text-main); }
+        .search-wrapper.has-text .search-clear { opacity: 0.65; pointer-events: auto; }
+        .search-wrapper.has-text .search-clear:hover { opacity: 1; }
+
+        /* Circular theme-adapted selection control */
+        .select-circle { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); background: var(--card-bg); flex-shrink: 0; cursor: pointer; position: relative; transition: all 0.2s; }
+        .select-circle.selected { background: var(--primary); border-color: var(--primary); }
+        .select-circle.selected::after { content: ''; position: absolute; left: 9px; top: 5px; width: 5px; height: 10px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
 
         button { background-color: var(--primary); color: white; border: none; padding: 0.85rem 1.5rem; border-radius: 12px; font-size: 1rem; cursor: pointer; font-weight: 600; transition: all 0.2s; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
         button:hover { background-color: var(--primary-hover); transform: translateY(-1px); }
@@ -162,14 +169,17 @@
             display: flex; align-items: stretch; box-sizing: border-box; padding: 1.5mm;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative; overflow: hidden; margin: 0 auto; border-radius: 2px;
         }
-        .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; }
-        .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
-        .label-text { flex-grow: 1; padding-left: 3mm; display: flex; flex-direction: column; justify-content: flex-start; overflow: hidden; height: 100%; text-align: left; }
+        .label-text { flex-grow: 1; padding-right: 3mm; display: flex; flex-direction: column; justify-content: flex-start; overflow: hidden; height: 100%; text-align: left; min-width: 0; }
         .label-text div { line-height: 1.15; font-family: Arial, Helvetica, sans-serif !important; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .l-num1 { font-size: clamp(9pt, 3.5vw, var(--label-font-cap)); font-weight: 900; color: #000; letter-spacing: -0.5px; margin-top: 1.5mm; }
-        .l-num2 { font-size: clamp(7.5pt, 2.5vw, 11pt); color: #111; font-weight: 700; }
-        .l-num3 { font-size: clamp(7pt, 2vw, 10pt); color: #333; font-weight: 600; }
-        .l-name { font-size: 7pt; margin-top: auto; padding-top: 1mm; font-style: italic; border-top: 0.5px solid #bbb; color: #000; }
+        .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; margin-left: 2mm; }
+        .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+        .l-num1 { font-size: clamp(10pt, 4vw, var(--label-font-cap)); font-weight: 900; color: #000; letter-spacing: -0.5px; margin-top: 1mm; }
+        .l-num2 { font-size: clamp(8pt, 3vw, 13pt); color: #111; font-weight: 800; margin-top: 1mm; }
+        .l-name { font-size: clamp(8pt, 2.5vw, 12pt); font-weight: 700; color: #000; margin-top: 1.5mm; }
+        .l-sub  { font-size: 7.5pt; color: #333; font-weight: 600; margin-top: auto; }
+        .l-btk  { font-size: 6pt; color: #555; font-weight: 600; letter-spacing: 0.3px; margin-top: 0.5mm; }
+
+        .kit-detail-count { font-size: 1.8rem; font-weight: 900; color: var(--primary); letter-spacing: -0.5px; }
 
         /* --- IMAGE GALLERY --- */
         .item-image-gallery { display: flex; gap: 10px; overflow-x: auto; padding: 0.5rem 0 1rem; scrollbar-width: thin; }
@@ -354,6 +364,11 @@
 
         <div id="wh-meta-container"></div>
 
+        <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <label class="modal-label" for="warehouse-switcher" style="margin: 0; text-transform: none;">Warehouse:</label>
+            <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" style="width: auto; min-width: 160px; margin: 0;"></select>
+        </div>
+
         <div id="items-only-controls">
             <div class="search-wrapper" id="search-container">
                 <input type="text" id="search-box" aria-label="Search Inventory" placeholder="Search name, number, BTK, manufacturer, location..." oninput="debounceSearch()">
@@ -400,6 +415,7 @@
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
             <button class="secondary" onclick="backFromItem()" style="flex-shrink:0;">← Back</button>
             <button class="secondary" id="btn-edit-item" onclick="openEditItemModal()" style="flex-shrink:0;">✏️ Edit</button>
+            <button id="btn-prev-item" class="hidden secondary" onclick="prevInKit()" style="flex-shrink:0;">⬅️ Prev</button>
             <button id="btn-next-item" class="hidden secondary" onclick="nextInKit()" style="flex-shrink:0;">➡️ Next</button>
             <button id="btn-single-label" style="flex:1; min-width:160px;">🏷️ Create Label</button>
         </div>
@@ -693,7 +709,7 @@ HÄNY,BTK000004,None,4/3 WAY SOLENOID VALVE,,None,1014485,2,Best,None,
 HÄNY,BTK000005,None,HYDRAULIC PLUNGER,2511-HK-11,None,0,Best,None,
 HÄNY,BTK000006,None,GUIDE BUSH - ZMP600,2511-FF-11,None,2,Best,None,
 HÄNY,BTK000007,359.061,LOCK WASHER M8,None,None,5,Best,None,
-HÄNY,BTK000008,613.034,IMPELLER DISC,2261-ED-11,None,3,Best,None,
+HÄNY,BTK000008,613.034,IMPELLER DISC,2261-ED-11,None,3,3,Best,None,
 HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
 
     // Demo seed data (CSV A format — Kit Matrix). Columns = BTKnumber.
@@ -769,16 +785,15 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     async function ensureDemoVault() {
         const vault = getEnvelopeVault();
-        if (!vault['1']) {
-            try {
-                const items = parseCSVString(DEMO_CSV_B);
-                const kits = parseKitsCSVString(DEMO_CSV_A);
-                const env = await encryptEnvelope({ items, kits }, [DEMO_PASSPHRASE]);
-                vault['1'] = env;
-                setEnvelopeVault(vault);
-                console.log("Demo vault created for warehouse 1 (items + kits).");
-            } catch (e) { console.error("Demo vault bootstrap failed:", e); }
-        }
+        try {
+            const items = parseCSVString(DEMO_CSV_B);
+            const kits = parseKitsCSVString(DEMO_CSV_A);
+            const env = await encryptEnvelope({ items, kits }, [DEMO_PASSPHRASE]);
+            // varuhuset can see every warehouse: seed all demo warehouses with the same data.
+            WAREHOUSES.forEach(w => { if (!vault[w.l]) vault[w.l] = env; });
+            setEnvelopeVault(vault);
+            console.log("Demo vaults created for all warehouses (items + kits).");
+        } catch (e) { console.error("Demo vault bootstrap failed:", e); }
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1070,6 +1085,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (forceMode) listMode = forceMode;
         switchView('list-view');
         renderWarehouseMeta();
+        populateWarehouseSwitcher();
         switchListMode(listMode, true);
     }
 
@@ -1089,6 +1105,34 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const meta = getWarehouseMeta(currentWarehouseId);
         document.getElementById('wh-meta-container').innerHTML =
             `<div class="wh-meta">🏬 <strong>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address}</div>`;
+    }
+
+    function populateWarehouseSwitcher() {
+        const sel = document.getElementById('warehouse-switcher');
+        if (!sel) return;
+        sel.innerHTML = WAREHOUSES.map(w => `<option value="${w.l}">${w.name}</option>`).join('');
+        sel.value = currentWarehouseId;
+    }
+
+    async function switchWarehouse(wid) {
+        if (!requireAuth()) return;
+        if (wid === currentWarehouseId) return;
+        const vault = getEnvelopeVault();
+        if (!vault[wid]) return showToast(`No data for warehouse ${wid}.`, "warning");
+        try {
+            const data = await decryptEnvelope(vault[wid], currentActiveKey);
+            currentWarehouseId = wid;
+            applyDecrypted(data, wid);
+            renderWarehouseMeta();
+            populateWarehouseSwitcher();
+            if (listMode === 'items') { filterList(true); }
+            else { renderKitsList(); }
+            showToast(`Switched to warehouse ${wid}.`, "success");
+        } catch (e) {
+            console.error("Warehouse switch decrypt failed:", e);
+            document.getElementById('warehouse-switcher').value = currentWarehouseId;
+            showToast("Cannot open warehouse — invalid key for this device.", "error");
+        }
     }
 
     // ── ITEMS ──
@@ -1154,7 +1198,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const isChecked = selectedItems.has(id);
             const subNum = [item.itemnumber, item.itemnumber2, item.itemnumber3].find(n => n && n !== 'None') || '';
             div.innerHTML = `
-                <input type="checkbox" class="custom-checkbox" ${isChecked ? 'checked' : ''} aria-hidden="true">
+                <div class="select-circle ${isChecked ? 'selected' : ''}" data-id="${id}" aria-hidden="true" title="Select for label"></div>
                 <div class="item-info">
                     <div class="item-id">${id}</div>
                     <div class="item-title">${item['itemname(english)'] || 'Unnamed'}</div>
@@ -1162,17 +1206,15 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                         <span>${item.Manufacturer && item.Manufacturer !== 'None' ? item.Manufacturer : ''} ${subNum ? '· ' + subNum : ''}</span>
                         <span>Stock: <strong>${item.Numberofitems || 0}</strong></span>
                     </div>
-                </div>
-                <button class="icon-btn" aria-label="View Details" style="min-width:40px;min-height:40px;padding:4px;margin-left:8px;flex-shrink:0;" onclick="handleViewDetails(event,'${id}','global')">
-                    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
-                </button>`;
-            div.onclick = (e) => {
-                if (e.target.closest('.icon-btn')) return;
-                const cb = div.querySelector('.custom-checkbox');
-                cb.checked = !cb.checked;
-                toggleSelection(id, cb.checked);
-            };
+                </div>`;
+            div.onclick = () => openItem(id, { type: 'global' });
             div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); div.click(); } };
+            const circle = div.querySelector('.select-circle');
+            circle.onclick = (e) => {
+                e.stopPropagation();
+                const willSelect = !selectedItems.has(id);
+                toggleSelection(id, willSelect);
+            };
             frag.appendChild(div);
         });
         container.appendChild(frag);
@@ -1231,7 +1273,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         switchView('kit-view');
         document.getElementById('kit-detail-name').innerText = kit.name || 'Unnamed Kit';
         const count = Object.keys(kit.items || {}).length;
-        document.getElementById('kit-detail-sub').innerHTML = `🧰 Kit #<strong>${kit.kitnumber}</strong> &nbsp;·&nbsp; ${count} distinct item(s)`;
+        document.getElementById('kit-detail-sub').innerHTML =
+            `🧰 Kit #<strong>${kit.kitnumber}</strong> &nbsp;·&nbsp; <span class="kit-detail-count">${count}</span> distinct item(s)`;
 
         const container = document.getElementById('kit-detail-items');
         container.innerHTML = '';
@@ -1248,11 +1291,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const div = document.createElement('div');
             div.className = 'kit-row';
             div.setAttribute('role', 'button'); div.tabIndex = 0;
+            const kNum1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : btk;
+            const kNum2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
             div.innerHTML = `
                 <div class="kit-info">
-                    <div class="item-id">${btk}</div>
-                    <div class="item-title">${item['itemname(english)'] || 'Unnamed'}</div>
-                    <div class="item-sub"><span>${item.Manufacturer && item.Manufacturer !== 'None' ? item.Manufacturer : ''}</span></div>
+                    <div class="item-id">${kNum1}</div>
+                    ${kNum2 ? `<div class="item-title">${kNum2}</div>` : ''}
+                    <div class="item-sub"><strong>${item['itemname(english)'] || 'Unnamed'}</strong>${item.Manufacturer && item.Manufacturer !== 'None' ? ' · ' + item.Manufacturer : ''}</div>
                 </div>
                 <span class="kit-qty-badge">×${qty}</span>`;
             div.onclick = () => openItem(btk, { type: 'kit', kitnumber: kit.kitnumber, kitName: kit.name, items: btks });
@@ -1263,28 +1308,34 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     // ── SELECTION (items) ──
+    function updateCircleStates() {
+        document.querySelectorAll('.select-circle').forEach(c => {
+            c.classList.toggle('selected', selectedItems.has(c.dataset.id));
+        });
+    }
     function toggleSelection(id, isSelected) {
         if (isSelected) selectedItems.add(id); else selectedItems.delete(id);
-        updateFab(); syncSelectAllCheckbox();
+        updateCircleStates(); updateFab(); syncSelectAllCheckbox();
     }
     function toggleSelectAllBanner() {
         const cb = document.getElementById('select-all-cb');
         const targetState = !(cb.checked && !cb.indeterminate);
         currentlyVisibleIds.forEach(id => { if (targetState) selectedItems.add(id); else selectedItems.delete(id); });
-        document.querySelectorAll('.item-row .custom-checkbox').forEach((checkbox, i) => { if (currentlyVisibleIds[i]) checkbox.checked = targetState; });
+        updateCircleStates();
         syncSelectAllCheckbox(); updateFab();
     }
     function syncSelectAllCheckbox() {
         const cb = document.getElementById('select-all-cb');
-        if (currentlyVisibleIds.length === 0) { cb.checked = false; cb.indeterminate = false; return; }
+        if (currentlyVisibleIds.length === 0) { cb.checked = false; cb.indeterminate = false; updateCircleStates(); return; }
         const visCount = currentlyVisibleIds.filter(id => selectedItems.has(id)).length;
         if (visCount === 0)                               { cb.checked = false; cb.indeterminate = false; }
         else if (visCount === currentlyVisibleIds.length) { cb.checked = true;  cb.indeterminate = false; }
         else                                              { cb.checked = false; cb.indeterminate = true; }
+        updateCircleStates();
     }
     function clearSelection() {
         selectedItems.clear();
-        document.querySelectorAll('.item-row .custom-checkbox').forEach(cb => cb.checked = false);
+        updateCircleStates();
         syncSelectAllCheckbox(); updateFab();
     }
     function updateFab() {
@@ -1324,9 +1375,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             });
         }
 
-        // Next button visibility (kit context with more than one item)
-        const nextBtn = document.getElementById('btn-next-item');
-        nextBtn.classList.toggle('hidden', !(navigationContext.type === 'kit' && navigationContext.items && navigationContext.items.length > 1));
+        // Prev/Next button visibility (kit context with more than one item)
+        const kitNav = navigationContext.type === 'kit' && navigationContext.items && navigationContext.items.length > 1;
+        document.getElementById('btn-next-item').classList.toggle('hidden', !kitNav);
+        document.getElementById('btn-prev-item').classList.toggle('hidden', !kitNav);
 
         const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
 
@@ -1381,6 +1433,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const idx = arr.indexOf(currentItemBTK);
         const next = arr[(idx + 1) % arr.length];
         openItem(next, navigationContext);
+    }
+
+    function prevInKit() {
+        if (!navigationContext || navigationContext.type !== 'kit' || !navigationContext.items) return;
+        const arr = navigationContext.items;
+        const idx = arr.indexOf(currentItemBTK);
+        const prev = arr[(idx - 1 + arr.length) % arr.length];
+        openItem(prev, navigationContext);
     }
 
     // ─── LIGHTBOX ────────────────────────────────────────────────────────
@@ -1501,18 +1561,20 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const textDiv = document.createElement('div');
             textDiv.className = 'label-text';
 
-            const num1 = item.BTKnumber || id;
-            const num2 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
-            const num3 = (item.itemnumber3 && item.itemnumber3 !== 'None') ? item.itemnumber3 : '';
+            const num1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
+            const num2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
+            const internal = (item.itemnumber3 && item.itemnumber3 !== 'None') ? item.itemnumber3 : '';
+            const name = item['itemname(english)'] || item['itemname(swedish)'] || 'Unknown';
 
             textDiv.innerHTML = `
-                <div class="l-num1">${num1}</div>
+                ${num1 ? `<div class="l-num1">${num1}</div>` : ''}
                 ${num2 ? `<div class="l-num2">${num2}</div>` : ''}
-                ${num3 ? `<div class="l-num3">${num3}</div>` : ''}
-                <div class="l-name">${item['itemname(english)'] || 'Unknown'}</div>`;
+                <div class="l-name">${name}</div>
+                ${internal ? `<div class="l-sub">Internal: ${internal}</div>` : ''}
+                <div class="l-btk">${item.BTKnumber || id}</div>`;
 
-            labelEl.appendChild(qrDiv);
             labelEl.appendChild(textDiv);
+            labelEl.appendChild(qrDiv);
             container.appendChild(labelEl);
 
             // True alphanumeric QR: #<COMPRESSED>/<WAREHOUSE> — no =, no &
@@ -1532,21 +1594,33 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     //  PRINT
     // ════════════════════════════════════════════════════════════════════════
     function printLabels() {
-        const container = document.getElementById('label-preview-container');
-        const canvases = Array.from(container.querySelectorAll('.label-qr canvas'));
-        const imgs = Array.from(container.querySelectorAll('.label-qr img'));
-        canvases.forEach((canvas, i) => {
-            const dataUrl = canvas.toDataURL('image/png');
-            if (imgs[i]) { imgs[i].src = dataUrl; imgs[i].style.cssText = 'display:block !important; max-width:100%; max-height:100%;'; }
-            canvas.style.display = 'none';
-        });
-        setTimeout(() => {
-            window.print();
-            setTimeout(() => {
-                canvases.forEach(c => { c.style.display = ''; });
-                imgs.forEach(img => { if (img.src.startsWith('data:')) img.removeAttribute('src'); img.style.cssText = ''; });
-            }, 1500);
-        }, 200);
+        const originalContainer = document.getElementById('label-preview-container');
+        const cloneContainer = originalContainer.cloneNode(true);
+        const originalCanvases = originalContainer.querySelectorAll('canvas');
+        const clonedCanvases = cloneContainer.querySelectorAll('canvas');
+        const clonedImages = cloneContainer.querySelectorAll('img');
+        for (let i = 0; i < originalCanvases.length; i++) {
+            const dataUrl = originalCanvases[i].toDataURL("image/png");
+            if (clonedImages[i]) { clonedImages[i].src = dataUrl; clonedImages[i].style.display = 'block'; }
+            if (clonedCanvases[i]?.parentNode) clonedCanvases[i].parentNode.removeChild(clonedCanvases[i]);
+        }
+        const css = `.label-card{width:90mm;height:29mm;background:white;color:black;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm;overflow:hidden;position:relative}
+.label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-left:2mm}
+.label-qr img{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
+.label-text{flex-grow:1;padding-right:3mm;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden;height:100%;text-align:left;min-width:0}
+.label-text div{line-height:1.15;font-family:Arial,Helvetica,sans-serif!important;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.l-num1{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.5px;margin-top:1mm}
+.l-num2{font-size:11pt;color:#111;font-weight:800;margin-top:1mm}
+.l-name{font-size:11pt;font-weight:700;color:#000;margin-top:1.5mm}
+.l-sub{font-size:8pt;color:#333;font-weight:600;margin-top:auto}
+.l-btk{font-size:6pt;color:#555;font-weight:600;letter-spacing:0.3px;margin-top:0.5mm}
+@media print{body{background:white!important;padding:0;gap:0;display:block}@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none}}`;
+        const printDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Brother QL Labels</title><style>${css}</style></head><body onload="window.print()">${cloneContainer.innerHTML}</body></html>`;
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed'; iframe.style.right = '0'; iframe.style.bottom = '0'; iframe.style.width = '0'; iframe.style.height = '0'; iframe.style.border = '0';
+        document.body.appendChild(iframe);
+        iframe.srcdoc = printDoc;
+        setTimeout(() => { document.body.removeChild(iframe); }, 4000);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1571,12 +1645,13 @@ body{margin:0;padding:0;background:#e2e8f0;font-family:Arial,sans-serif;display:
 .label-card{width:90mm;height:29mm;background:white;color:black;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm;overflow:hidden;position:relative}
 .label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center}
 .label-qr img{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
-.label-text{flex-grow:1;padding-left:3mm;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden;height:100%;text-align:left}
+.label-text{flex-grow:1;padding-right:3mm;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden;height:100%;text-align:left;min-width:0}
 .label-text div{line-height:1.15;font-family:Arial,Helvetica,sans-serif!important;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.l-num1{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.5px;margin-top:1.5mm}
-.l-num2{font-size:10pt;color:#111;font-weight:700}
-.l-num3{font-size:9pt;color:#333;font-weight:600}
-.l-name{font-size:7pt;margin-top:auto;padding-top:1mm;font-style:italic;border-top:0.5px solid #bbb;color:#000}
+.l-num1{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.5px;margin-top:1mm}
+.l-num2{font-size:11pt;color:#111;font-weight:800;margin-top:1mm}
+.l-name{font-size:11pt;font-weight:700;color:#000;margin-top:1.5mm}
+.l-sub{font-size:8pt;color:#333;font-weight:600;margin-top:auto}
+.l-btk{font-size:6pt;color:#555;font-weight:600;letter-spacing:0.3px;margin-top:0.5mm}
 @media print{body{background:white!important;padding:0;gap:0;display:block}@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none}}
 </style></head><body onload="window.print()">${cloneContainer.innerHTML}</body></html>`;
         const blob = new Blob([exportDoc], { type: 'text/html' });
