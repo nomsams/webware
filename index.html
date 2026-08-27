@@ -149,6 +149,10 @@
         .kit-tag { background: var(--primary-light); color: var(--primary); border: 1px solid var(--primary); border-radius: 20px; padding: 6px 14px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
         .kit-tag:hover { background: var(--primary); color: white; }
 
+        /* Clickable identifier fields on item detail — find other items sharing the same value */
+        .field-link { color: var(--primary); cursor: pointer; font-weight: 600; border-radius: 4px; }
+        .field-link:hover { text-decoration: underline; }
+
         /* Floating Action Bar */
         .fab-container { position: fixed; bottom: 50px; left: 0; right: 0; display: flex; justify-content: center; z-index: 90; pointer-events: none; padding: 0 1rem; }
         .fab-wrapper { background: var(--card-bg); padding: 6px; border-radius: 50px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2); display: flex; gap: 6px; pointer-events: auto; border: 1px solid var(--border); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); transform: translateY(150%); }
@@ -166,13 +170,14 @@
         [data-theme="dark"] .preview-grid { background: #0f172a; border: 1px inset #334155; }
         
         .label-card {
-            --pad-l: 2mm; --pad-r: 2mm; --fs: 1;
-            width: 90mm; height: 29mm; background: white !important; color: black !important;
+            --pad-l: 2mm; --pad-r: 2mm; --fs: 1; --label-w: 90mm; --label-h: 29mm;
+            width: var(--label-w); height: var(--label-h); background: white !important; color: black !important;
             display: flex; align-items: stretch; box-sizing: border-box;
             padding: 1.5mm var(--pad-r) 1.5mm var(--pad-l);
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative; overflow: hidden; margin: 0 auto; border-radius: 2px;
         }
-        .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; margin-right: 4mm; }
+        /* QR box scales with label height so it keeps fitting as --label-h shrinks/grows across paper formats */
+        .label-qr { width: calc(var(--label-h) - 3mm); height: calc(var(--label-h) - 3mm); flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; margin-right: 4mm; }
         .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
         .label-text { flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-start; align-items: flex-end; overflow: hidden; height: 100%; text-align: right; min-width: 0; }
         .label-text div { line-height: 1.2; font-family: Arial, Helvetica, sans-serif !important; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -250,8 +255,11 @@
             #preview-view, #preview-view .preview-grid, #preview-view .label-card, #preview-view .label-card * { display: flex !important; }
             #preview-view { position: absolute; left: 0; top: 0; margin: 0; padding: 0; width: 100%; background: white !important; }
             .preview-grid { display: block !important; margin: 0; padding: 0; background: none !important; gap: 0; max-height: none; overflow: visible; }
+            /* Fallback only — the Print/HTML Export buttons build a fresh document with the
+               correct @page size baked in for the selected paper (see buildLabelPrintHTML). This
+               static @page only applies if someone prints the app view directly (e.g. Ctrl+P). */
             @page { size: 90mm 29mm; margin: 0; }
-            .label-card { box-shadow: none !important; margin: 0; page-break-after: always; width: 90mm; height: 29mm; background: white !important; color: black !important; border: none !important; border-radius: 0 !important; }
+            .label-card { box-shadow: none !important; margin: 0; page-break-after: always; width: var(--label-w); height: var(--label-h); background: white !important; color: black !important; border: none !important; border-radius: 0 !important; }
             .l-nums, .l-name, .l-btk { color: black !important; }
             .no-print { display: none !important; }
         }
@@ -476,6 +484,19 @@
 
         <div class="no-print label-controls" style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;background:var(--border);padding:10px 14px;border-radius:10px;margin-bottom:1rem;">
             <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-weight:600;font-size:0.85rem;">Paper</span>
+                <select id="label-paper-type" onchange="onPaperTypeChange()" style="width:auto; min-width:170px; margin:0; padding:6px 10px; font-size:0.85rem;">
+                    <option value="default" selected>29mm × 90mm (Brother QL)</option>
+                    <option value="wide68">68mm wide × custom length</option>
+                </select>
+            </div>
+            <div id="wide68-height-control" class="hidden" style="display:flex;align-items:center;gap:6px;">
+                <span style="font-weight:600;font-size:0.85rem;">Length</span>
+                <button class="secondary" style="min-width:28px;padding:2px 8px;" onclick="stepWide68Height(-1)">−</button>
+                <span id="label-wide68-height-val" class="range-value">28mm</span>
+                <button class="secondary" style="min-width:28px;padding:2px 8px;" onclick="stepWide68Height(1)">+</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
                 <span style="font-weight:600;font-size:0.85rem;">Left margin</span>
                 <button class="secondary" style="min-width:28px;padding:2px 8px;" onclick="stepPad('l',-1)">−</button>
                 <span id="label-pad-left-val" class="range-value">2mm</span>
@@ -495,11 +516,16 @@
             <button class="secondary" onclick="copyLabelURLs()">📋 Copy URLs</button>
         </div>
 
-        <p class="no-print" style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem; background: var(--border); padding: 8px 12px; border-radius: 8px;">
-            ℹ️ Format: <strong>Brother QL 29mm × 90mm</strong>. Set printer margins to <strong>None</strong>. QR encodes an ID-only fragment link (no key). Adjust margins/text size above — preview matches print exactly. URLs shown below are preview-only and never printed.
+        <p class="no-print" id="label-format-hint" style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem; background: var(--border); padding: 8px 12px; border-radius: 8px;">
+            ℹ️ Format: <strong>Brother QL 29mm × 90mm</strong>. Set printer margins to <strong>None</strong>. QR encodes an ID-only fragment link (no key). Adjust paper/margins/text size above — preview matches print exactly.
         </p>
 
         <div id="label-preview-container" class="preview-grid"></div>
+
+        <div class="no-print" id="label-url-panel" style="margin-top:1.5rem;">
+            <h3 style="font-size:0.95rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:0.75rem;">🔗 Preview URLs — reference only, never printed on any label</h3>
+            <div id="label-url-list" style="display:flex; flex-direction:column; gap:4px; font-family:monospace; font-size:0.8rem; color:var(--text-muted); word-break:break-all;"></div>
+        </div>
     </section>
 
     <!-- View 5: Settings -->
@@ -564,6 +590,8 @@
     var DEMO_VERSION = 3;
     var labelPadLeft = 2, labelPadRight = 2, labelFontScale = 1;
     var labelMode = 'items';
+    var labelPaperType = 'default'; // 'default' (29x90 Brother QL) | 'wide68' (68mm wide, custom length)
+    var labelWide68Height = 28; // mm — the adjustable dimension for the wide68 paper type
     var WAREHOUSES = [
         { l: '1', name: 'Main Warehouse — Best', address: 'Best, Sweden', mode: 'supabase' },
         { l: '2', name: 'North Depot', address: 'Stockholm, Sweden' },
@@ -1504,6 +1532,17 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         syncSelectAllCheckbox();
     }
 
+    // Jump from an item's detail view to the list, pre-filtered to items sharing this value
+    // (clicked from Item #1/#2/#3 or Manufacturer — reuses the existing broad search matching).
+    function searchForValue(val) {
+        if (!val || val === 'None') return;
+        showListView('items');
+        const box = document.getElementById('search-box');
+        box.value = val;
+        document.getElementById('search-container').classList.add('has-text');
+        filterList(false);
+    }
+
     function sortItems(arr) {
         const a = [...arr];
         if (sortBy === 'name') a.sort((x, y) => (x['itemname(english)'] || '').localeCompare(y['itemname(english)'] || ''));
@@ -1754,19 +1793,35 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
         const dMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
         const field = (label, val) => `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">${label}:</span><span>${getStr(val)}</span></div>`;
+        const fieldLink = (label, key, val) => {
+            const clickable = val && val !== 'None';
+            const valHtml = clickable
+                ? `<span class="field-link" role="button" tabindex="0" data-field-key="${key}" title="Find other items with this value">${getStr(val)} 🔍</span>`
+                : getStr(val);
+            return `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">${label}:</span><span>${valHtml}</span></div>`;
+        };
         document.getElementById('detail-content').innerHTML = `
             <div style="margin-bottom:14px;font-size:1rem;color:var(--text-muted);"><strong style="color:var(--text-main);">${dMfr ? dMfr + ' · ' : ''}</strong><span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span></div>
             ${field('Item Name (English)', item['itemname(english)'])}
             ${field('Item Name (Swedish)', item['itemname(swedish)'])}
-            ${field('Item #1', item.itemnumber)}
-            ${field('Item #2', item.itemnumber2)}
-            ${field('Item #3 (Internal)', item.itemnumber3)}
-            ${field('Manufacturer', item.Manufacturer)}
+            ${fieldLink('Item #1', 'itemnumber', item.itemnumber)}
+            ${fieldLink('Item #2', 'itemnumber2', item.itemnumber2)}
+            ${fieldLink('Item #3 (Internal)', 'itemnumber3', item.itemnumber3)}
+            ${fieldLink('Manufacturer', 'Manufacturer', item.Manufacturer)}
             ${field('System ID (BTK)', id)}
             ${field('Stock (Number of items)', item.Numberofitems)}
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Inventory Location:</span><span>${getStr(item.Inventorylocation)}</span></div>
             <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;"><span style="font-weight:600;color:var(--text-muted);">Comments:</span><div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div></div>
             ${field('Images', item.images)}`;
+
+        // Bind click/keyboard handlers as DOM properties keyed off data-field-key (not inline HTML
+        // attributes with interpolated values) so field values with quotes can't break the markup,
+        // and so hidden ('None') fields don't desync a positional index -> value mapping.
+        document.getElementById('detail-content').querySelectorAll('.field-link').forEach(el => {
+            const val = item[el.dataset.fieldKey];
+            el.onclick = () => searchForValue(val);
+            el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } };
+        });
 
         document.getElementById('btn-single-label').onclick = () => {
             selectedItems.clear(); selectedItems.add(id); generateLabelsPreview();
@@ -1920,10 +1975,20 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ════════════════════════════════════════════════════════════════════════
     //  LABEL GENERATION (optimized QR — ID-only fragment, no key)
     // ════════════════════════════════════════════════════════════════════════
+    // Resolves the current paper type to physical mm dimensions. 'default' matches the Brother
+    // QL 29x90 format this app was built around; 'wide68' is a fixed 68mm roll width with a
+    // user-adjustable printed length (labelWide68Height, default 28mm).
+    function getLabelDims() {
+        return labelPaperType === 'wide68' ? { w: 68, h: labelWide68Height } : { w: 90, h: 29 };
+    }
+
     function applyLabelVars(el) {
+        const dims = getLabelDims();
         el.style.setProperty('--pad-l', labelPadLeft + 'mm');
         el.style.setProperty('--pad-r', labelPadRight + 'mm');
         el.style.setProperty('--fs', labelFontScale);
+        el.style.setProperty('--label-w', dims.w + 'mm');
+        el.style.setProperty('--label-h', dims.h + 'mm');
     }
 
     function syncLabelControls() {
@@ -1931,10 +1996,32 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const pr = document.getElementById('label-pad-right-val');
         const fsv = document.getElementById('label-font-scale-val');
         const fs = document.getElementById('label-font-scale');
+        const paperSel = document.getElementById('label-paper-type');
+        const wideVal = document.getElementById('label-wide68-height-val');
         if (pl) pl.textContent = labelPadLeft + 'mm';
         if (pr) pr.textContent = labelPadRight + 'mm';
         if (fs) fs.value = labelFontScale;
         if (fsv) fsv.textContent = Number(labelFontScale).toFixed(2) + '×';
+        if (paperSel) paperSel.value = labelPaperType;
+        if (wideVal) wideVal.textContent = labelWide68Height + 'mm';
+        document.getElementById('wide68-height-control').classList.toggle('hidden', labelPaperType !== 'wide68');
+        const dims = getLabelDims();
+        const hint = document.getElementById('label-format-hint');
+        if (hint) {
+            hint.innerHTML = labelPaperType === 'wide68'
+                ? `ℹ️ Format: <strong>68mm × ${labelWide68Height}mm (custom)</strong>. Set printer margins to <strong>None</strong>. QR encodes an ID-only fragment link (no key). Adjust paper/margins/text size above — preview matches print exactly.`
+                : `ℹ️ Format: <strong>Brother QL 29mm × 90mm</strong>. Set printer margins to <strong>None</strong>. QR encodes an ID-only fragment link (no key). Adjust paper/margins/text size above — preview matches print exactly.`;
+        }
+    }
+
+    function onPaperTypeChange() {
+        labelPaperType = document.getElementById('label-paper-type').value;
+        applyLabelSettings();
+    }
+
+    function stepWide68Height(delta) {
+        labelWide68Height = Math.max(10, Math.min(150, labelWide68Height + delta));
+        applyLabelSettings();
     }
 
     function generateLabelsPreview(silent) {
@@ -1950,7 +2037,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (backBtn) backBtn.classList.add('hidden');
         switchView('preview-view');
         const container = document.getElementById('label-preview-container');
+        const urlList = document.getElementById('label-url-list');
         container.innerHTML = '';
+        urlList.innerHTML = '';
         let errorCount = 0;
 
         Array.from(selectedItems).forEach(id => {
@@ -1988,16 +2077,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 qrDiv.innerHTML = '<span style="font-size:8px;color:red;text-align:center;">QR failed</span>';
             }
 
-            // Show URL under label in preview ONLY (hidden on print via .no-print)
-            const urlDiv = document.createElement('div');
-            urlDiv.className = 'label-url no-print';
-            urlDiv.textContent = targetUrl;
+            container.appendChild(labelEl);
 
-            const cell = document.createElement('div');
-            cell.className = 'label-cell';
-            cell.appendChild(labelEl);
-            cell.appendChild(urlDiv);
-            container.appendChild(cell);
+            // URL shown in a separate reference panel below the grid — never inside the printable
+            // area, so it can never end up on a physical label regardless of paper format.
+            const urlDiv = document.createElement('div');
+            urlDiv.className = 'label-url';
+            urlDiv.textContent = `${name} — ${targetUrl}`;
+            urlList.appendChild(urlDiv);
         });
         if (errorCount > 0 && !silent) showToast(`${errorCount} QR code(s) failed.`, "error");
     }
@@ -2012,7 +2099,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (backBtn) backBtn.classList.remove('hidden');
         switchView('preview-view');
         const container = document.getElementById('label-preview-container');
+        const urlList = document.getElementById('label-url-list');
         container.innerHTML = '';
+        urlList.innerHTML = '';
         let errorCount = 0;
 
         WAREHOUSES.forEach(w => {
@@ -2045,15 +2134,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 qrDiv.innerHTML = '<span style="font-size:8px;color:red;text-align:center;">QR failed</span>';
             }
 
-            const urlDiv = document.createElement('div');
-            urlDiv.className = 'label-url no-print';
-            urlDiv.textContent = targetUrl;
+            container.appendChild(labelEl);
 
-            const cell = document.createElement('div');
-            cell.className = 'label-cell';
-            cell.appendChild(labelEl);
-            cell.appendChild(urlDiv);
-            container.appendChild(cell);
+            const urlDiv = document.createElement('div');
+            urlDiv.className = 'label-url';
+            urlDiv.textContent = `Warehouse ${w.l} — ${targetUrl}`;
+            urlList.appendChild(urlDiv);
         });
 
         if (errorCount > 0 && !silent) showToast(`${errorCount} warehouse QR code(s) failed.`, "error");
@@ -2067,14 +2153,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function applyLabelSettings() {
-        const fs = parseFloat(document.getElementById('label-font-scale').value);
-        labelFontScale = fs;
-        const pl = document.getElementById('label-pad-left-val');
-        const pr = document.getElementById('label-pad-right-val');
-        const fsv = document.getElementById('label-font-scale-val');
-        if (pl) pl.textContent = labelPadLeft + 'mm';
-        if (pr) pr.textContent = labelPadRight + 'mm';
-        if (fsv) fsv.textContent = fs.toFixed(2) + '×';
+        labelFontScale = parseFloat(document.getElementById('label-font-scale').value);
+        syncLabelControls();
         if (labelMode === 'warehouse') generateWarehouseLabelsPreview(true);
         else generateLabelsPreview(true);
     }
@@ -2084,7 +2164,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function copyLabelURLs() {
-        const urls = Array.from(document.querySelectorAll('#label-preview-container .label-url')).map(d => d.textContent);
+        const urls = Array.from(document.querySelectorAll('#label-url-list .label-url')).map(d => d.textContent);
         if (!urls.length) return showToast("No URLs to copy.", "warning");
         navigator.clipboard.writeText(urls.join('\n')).then(
             () => showToast(`Copied ${urls.length} URL(s) to clipboard.`, "success"),
@@ -2095,8 +2175,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // Shared label print HTML builder
     function buildLabelPrintHTML(cloneContainer, options = {}) {
         const { forExport = false, onloadPrint = true } = options;
-        const css = `.label-card{--pad-l:2mm;--pad-r:2mm;--fs:1;width:90mm;height:29mm;background:#fff!important;color:#000;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm var(--pad-r) 1.5mm var(--pad-l);overflow:hidden;position:relative}
-.label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-right:4mm}
+        // Cloned .label-card elements already carry their own --label-w/--label-h/--pad-l/--pad-r/--fs
+        // as inline style (set by applyLabelVars on the live preview, preserved through cloneNode), which
+        // wins over these stylesheet defaults. @page size can't be driven by a custom property though,
+        // so that one has to be resolved from the current paper type here, at build time.
+        const dims = getLabelDims();
+        const css = `.label-card{--pad-l:2mm;--pad-r:2mm;--fs:1;--label-w:${dims.w}mm;--label-h:${dims.h}mm;width:var(--label-w);height:var(--label-h);background:#fff!important;color:#000;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm var(--pad-r) 1.5mm var(--pad-l);overflow:hidden;position:relative}
+.label-qr{width:calc(var(--label-h) - 3mm);height:calc(var(--label-h) - 3mm);flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-right:4mm}
 .label-qr img,.label-qr canvas{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
 .label-text{flex-grow:1;display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-end;overflow:hidden;height:100%;text-align:right;min-width:0}
 .label-text div{line-height:1.2;font-family:Arial,Helvetica,sans-serif!important;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2106,7 +2191,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 .preview-grid{background:none!important;display:block;padding:0;gap:0;margin:0;max-height:none;overflow:visible}
 .no-print{display:none!important}
 body{margin:0;padding:0;background:#fff;font-family:Arial,sans-serif}
-@media print{@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none;border-radius:0}}`;
+@media print{@page{size:${dims.w}mm ${dims.h}mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none;border-radius:0}}`;
         const onload = onloadPrint ? ' onload="window.print()"' : '';
         if (forExport) {
             return `<!DOCTYPE html>
