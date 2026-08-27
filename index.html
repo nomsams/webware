@@ -677,6 +677,17 @@
                 <span style="color:var(--text-muted);">kg</span>
             </div>
         </div>
+
+        <!-- Saving an order requires a Supabase warehouse (there's nowhere else to save it) -->
+        <div class="setting-row hidden" id="pack-order-recipient-section">
+            <label for="pack-order-recipient-name">Recipient</label>
+            <input type="text" id="pack-order-recipient-name" placeholder="Person's name" oninput="onPackRecipientInput()">
+            <label class="modal-label" for="pack-order-recipient-address" style="margin-top:0.5rem;">Address</label>
+            <textarea id="pack-order-recipient-address" placeholder="Street, city, postal code, country..." oninput="onPackRecipientInput()"></textarea>
+        </div>
+
+        <button class="full-width hidden" id="btn-save-pack-order" onclick="savePackOrder()" style="margin-top:0.5rem;">💾 Save Order</button>
+        <p id="pack-order-saved-note" class="hidden" style="color:var(--success); font-weight:600; margin-top:0.75rem;"></p>
     </section>
 
     <!-- View 4: Label Preview & Generation -->
@@ -855,6 +866,8 @@
     var packOrderPreviousView = 'list-view';
     var packOrderEditMode = false;
     var packOrderBox = { preset: '', length: '', width: '', height: '', weight: '' };
+    var packOrderRecipient = { name: '', address: '' };
+    var packOrderSavedNumber = null; // set once savePackOrder() succeeds, e.g. "ORD000042"
     const PACK_BOX_PRESETS = {
         small:  { length: 200, width: 150, height: 100 },
         medium: { length: 300, width: 200, height: 150 },
@@ -2808,6 +2821,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         switchView('pack-order-view');
         renderPackOrderItems();
         syncPackOrderBoxInputs();
+        syncPackOrderRecipientInputs();
+        // Saving an order needs a Supabase warehouse (and editor/admin) — nowhere else to save it.
+        const canSaveOrder = getWarehouseMeta(currentWarehouseId).mode === 'supabase' && canEditItems();
+        document.getElementById('pack-order-recipient-section').classList.toggle('hidden', !canSaveOrder);
+        document.getElementById('btn-save-pack-order').classList.toggle('hidden', !canSaveOrder);
     }
 
     function closePackOrderView() { switchView(packOrderPreviousView || 'list-view'); }
@@ -2817,9 +2835,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!confirm("Clear the entire pack order? This can't be undone.")) return;
         packOrder = [];
         packOrderBox = { preset: '', length: '', width: '', height: '', weight: '' };
+        packOrderRecipient = { name: '', address: '' };
+        packOrderSavedNumber = null;
         updatePackOrderBadge();
         renderPackOrderItems();
         syncPackOrderBoxInputs();
+        syncPackOrderRecipientInputs();
     }
 
     // ── Package dimensions/weight — plain session state alongside the pick list itself ──
@@ -2853,6 +2874,47 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     function onPackBoxWeightInput() {
         packOrderBox.weight = document.getElementById('pack-box-weight').value;
+    }
+
+    // ── Recipient + saving as a persistent order (Supabase mode only) ──
+    function syncPackOrderRecipientInputs() {
+        document.getElementById('pack-order-recipient-name').value = packOrderRecipient.name || '';
+        document.getElementById('pack-order-recipient-address').value = packOrderRecipient.address || '';
+        const note = document.getElementById('pack-order-saved-note');
+        if (packOrderSavedNumber) {
+            note.textContent = `✅ Saved as ${packOrderSavedNumber}. Saving again will create a new order.`;
+            note.classList.remove('hidden');
+        } else {
+            note.classList.add('hidden');
+        }
+    }
+
+    function onPackRecipientInput() {
+        packOrderRecipient.name = document.getElementById('pack-order-recipient-name').value;
+        packOrderRecipient.address = document.getElementById('pack-order-recipient-address').value;
+    }
+
+    // Order numbers (ORDxxxxxx, same shape as BTK numbers) are generated server-side by a
+    // sequence-backed column default — see supabase/schema_orders.sql — so there's no client-side
+    // coordination or collision risk even with multiple people saving orders at once.
+    async function savePackOrder() {
+        if (!packOrder.length) { showToast("Nothing to save — the pack order is empty.", "warning"); return; }
+        if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') { showToast("Saving orders requires a Supabase warehouse.", "warning"); return; }
+        const row = {
+            warehouse_id: currentWarehouseId,
+            recipient_name: packOrderRecipient.name.trim() || null,
+            recipient_address: packOrderRecipient.address.trim() || null,
+            box_length: packOrderBox.length || null,
+            box_width: packOrderBox.width || null,
+            box_height: packOrderBox.height || null,
+            box_weight: packOrderBox.weight || null,
+            items: packOrder
+        };
+        const { data, error } = await sb.from('orders').insert(row).select().single();
+        if (error) { showToast("Could not save order: " + error.message, "error"); return; }
+        packOrderSavedNumber = data.order_number;
+        syncPackOrderRecipientInputs();
+        showToast(`Order saved as ${data.order_number}.`, "success", 6000);
     }
 
     function togglePacked(btk) {
@@ -3003,8 +3065,9 @@ th, td { border: 1px solid #999; padding: 6px 8px; font-size: 0.9rem; text-align
 th { background: #eee; }
 </style></head>
 <body onload="window.print()">
-    <h1>📦 Pack Order</h1>
+    <h1>📦 Pack Order${packOrderSavedNumber ? ' — ' + escapeHtml(packOrderSavedNumber) : ''}</h1>
     <p class="meta">Warehouse: ${escapeHtml(getWarehouseMeta(currentWarehouseId).name)} &nbsp;·&nbsp; Generated: ${escapeHtml(new Date().toLocaleString())} &nbsp;·&nbsp; ${packOrder.length} item(s)</p>
+    ${(packOrderRecipient.name || packOrderRecipient.address) ? `<p class="meta"><strong>To:</strong> ${escapeHtml(packOrderRecipient.name || '')}${packOrderRecipient.address ? ' — ' + escapeHtml(packOrderRecipient.address).replace(/\n/g, ', ') : ''}</p>` : ''}
     ${boxLine}
     <table>
         <thead><tr><th>Qty</th><th>Item</th><th>BTK / Item #</th><th>Location</th><th>Packed</th><th>Backorder</th></tr></thead>
