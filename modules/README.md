@@ -26,14 +26,24 @@ node --test modules/tests/*.test.js
   like 'plocka item 1 and item 2...'": turns free text into a structured
   `{ items, recipient, from }` pack-order draft via `groq-client.js`. Each item reference is
   resolved to a real BTK + quantity in order: an exact match against a pre-loaded item list, a
-  bare BTK number used as-is, or (new) a live database search via a caller-supplied
-  `searchItemCandidates(text)` function, scored by `bestCandidateMatch()` to find the closest hit
-  — so it isn't limited to items already loaded into memory. Optionally uses `web-search.js` to
-  look up a recipient's address when the text names them but doesn't give one. `fromAddress` is
-  passed straight through (it's the app's own known data — the warehouse's address — not
-  something to infer from free text). See the multi-warehouse note in its file header for how
-  `searchItemCandidates` should be scoped when the same product can exist in more than one
-  warehouse.
+  bare BTK number used as-is, or a live database search via a caller-supplied
+  `searchItemCandidates(text)` function (scoped to the current warehouse), scored by
+  `bestCandidateMatch()` to find the closest hit. Optionally uses `web-search.js` to look up a
+  recipient's address when the text names them but doesn't give one. `fromAddress` is passed
+  straight through (it's the app's own known data — the warehouse's address — not something to
+  infer from free text).
+
+  **Multi-warehouse handling**: orders are already single-warehouse (`orders.warehouse_id`) and,
+  per the user, pack orders are only ever sent from one warehouse at a time — so item resolution
+  deliberately never crosses warehouses; `searchItemCandidates` should always filter
+  `.eq('warehouse_id', currentWarehouseId)`. The same physical product existing as a separate row
+  in another warehouse is still visible, though: an optional `searchOtherWarehouses(text)`
+  callback (querying `.neq('warehouse_id', currentWarehouseId)`) attaches a non-blocking
+  `elsewhere: { btk, name, warehouseId, quantity }` note to an otherwise-unresolved item — e.g.
+  "not here, but 12 in Warehouse 2" — for a human to act on, never an automatic substitution. No
+  schema change was needed for this: items already carry `manufacturer` + `itemnumber` (the
+  manufacturer's own part number), which is what actually identifies "the same product" across
+  warehouses if you want to match on that instead of by name.
 - **`img-square.js`** — pads an image to a square, filling the new space with a solid color or a
   color sampled from the image's own edges. Ported from `github.com/nomsams/imgsquare`. Intended
   to slot into the existing item-photo/manufacturer-logo canvas editor as an extra step.

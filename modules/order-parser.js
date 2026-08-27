@@ -19,17 +19,26 @@
 //      loaded for the current warehouse).
 //   2. Looks like a bare BTK (e.g. "BTK000012") — used as-is.
 //   3. searchItemCandidates(text), if provided — a caller-supplied function that queries the
-//      live items table (see the multi-warehouse note below) for candidates matching the
-//      reference text, scored by bestCandidateMatch() to pick the closest one.
-//   4. Unresolved — btk stays null, matchedName stays null, left for the user to fix by hand.
+//      live items table *scoped to the current warehouse* for candidates matching the reference
+//      text, scored by bestCandidateMatch() to pick the closest one.
+//   4. Still nothing — if searchOtherWarehouses is provided, check whether the item exists in a
+//      *different* warehouse and attach it as `elsewhere` (informational only — never used as
+//      this item's btk).
+//   5. Unresolved — btk stays null, matchedName stays null, left for the user to fix by hand.
 //
-// Multi-warehouse note: this module has no built-in warehouse concept — searchItemCandidates is
-// entirely the caller's function, so scope its query to whichever warehouse_id the pack order is
-// being built for (orders are already single-warehouse: orders.warehouse_id is one value). If a
-// reference isn't found in that warehouse, prefer having searchItemCandidates report that
-// explicitly (e.g. a { btk: null, name, warehouseId, quantity } candidate found elsewhere) so the
-// caller can flag it (similar to the existing pack-order backorder concept) rather than silently
-// resolving to stock that isn't physically at the warehouse this order ships from.
+// Multi-warehouse handling: a saved order already belongs to exactly one warehouse
+// (orders.warehouse_id) and pack orders are only ever sent from one warehouse at a time, so btk
+// resolution deliberately never crosses warehouses — searchItemCandidates should be scoped with
+// `.eq('warehouse_id', currentWarehouseId)`. The same physical product can still be a separate
+// row (its own BTK, its own numberofitems) in another warehouse; there's no new "product family"
+// column for that — items already carry `manufacturer` + `itemnumber` (the manufacturer's own
+// part number), which is what actually identifies "the same product" across warehouses, so
+// matching on those is enough without a schema change. searchOtherWarehouses is how you plug
+// that in: same shape as searchItemCandidates but querying `.neq('warehouse_id', currentWarehouseId)`
+// (or matching manufacturer+itemnumber directly). Its only effect is a non-blocking `elsewhere`
+// note on the item — e.g. "not in this warehouse, but 12 in Warehouse 2" — for a human to act on
+// (transfer stock first, or tell the recipient it's coming from elsewhere), never an automatic
+// cross-warehouse substitution.
 //
 // Usage:
 //   import { parseOrderRequest } from './order-parser.js';
@@ -39,11 +48,14 @@
 //     searchItemCandidates: (text) => sb.from('items').select('BTK,Name')
 //       .eq('warehouse_id', currentWarehouseId).ilike('Name', `%${text}%`).limit(5)
 //       .then(({ data }) => (data || []).map(r => ({ btk: r.BTK, name: r.Name }))),
+//     searchOtherWarehouses: (text) => sb.from('items').select('BTK,Name,warehouse_id,numberofitems')
+//       .neq('warehouse_id', currentWarehouseId).ilike('Name', `%${text}%`).limit(5)
+//       .then(({ data }) => (data || []).map(r => ({ btk: r.BTK, name: r.Name, warehouseId: r.warehouse_id, quantity: r.numberofitems }))),
 //     webSearch, fetchPageText, // omit to skip address lookup entirely
 //     fromAddress: { name: warehouseName, address: warehouseAddress }, // the app's own known data, not inferred
 //   });
 //   // draft: {
-//   //   items: [{ reference, quantity, btk, matchedName }],
+//   //   items: [{ reference, quantity, btk, matchedName, elsewhere }],
 //   //   recipient: { name, address, confidence },
 //   //   from: { name, address } | null,
 //   // }
@@ -62,6 +74,7 @@ const EXTRACTION_SYSTEM_PROMPT = `You extract structured pack-order data from fr
 export async function parseOrderRequest(groqClient, text, {
   knownItems = [],
   searchItemCandidates,
+  searchOtherWarehouses,
   webSearch,
   fetchPageText,
   fromAddress = null,
@@ -84,7 +97,7 @@ export async function parseOrderRequest(groqClient, text, {
   });
 
   const extracted = parseJsonReply(reply);
-  const items = await Promise.all(extracted.items.map((entry) => resolveItem(entry, knownItems, searchItemCandidates)));
+  const items = await Promise.all(extracted.items.map((entry) => resolveItem(entry, knownItems, searchItemCandidates, searchOtherWarehouses)));
 
   const draft = {
     items,
@@ -104,23 +117,31 @@ export async function parseOrderRequest(groqClient, text, {
   return draft;
 }
 
-async function resolveItem(entry, knownItems, searchItemCandidates) {
+async function resolveItem(entry, knownItems, searchItemCandidates, searchOtherWarehouses) {
   const quantity = entry.quantity && entry.quantity > 0 ? entry.quantity : 1;
 
   const known = matchKnownItem(entry.reference, knownItems);
-  if (known) return { ...entry, quantity, btk: known.btk, matchedName: known.name };
+  if (known) return { ...entry, quantity, btk: known.btk, matchedName: known.name, elsewhere: null };
 
   if (looksLikeBtk(entry.reference)) {
-    return { ...entry, quantity, btk: entry.reference.trim().toUpperCase(), matchedName: null };
+    return { ...entry, quantity, btk: entry.reference.trim().toUpperCase(), matchedName: null, elsewhere: null };
   }
 
   if (searchItemCandidates) {
     const candidates = await searchItemCandidates(entry.reference);
     const match = bestCandidateMatch(entry.reference, candidates);
-    if (match) return { ...entry, quantity, btk: match.btk, matchedName: match.name };
+    if (match) return { ...entry, quantity, btk: match.btk, matchedName: match.name, elsewhere: null };
   }
 
-  return { ...entry, quantity, btk: null, matchedName: null };
+  // Not found in this warehouse. Check whether it exists in another one — purely informational:
+  // this order still belongs to one warehouse, so it's never used as the resolved btk.
+  let elsewhere = null;
+  if (searchOtherWarehouses) {
+    const otherCandidates = await searchOtherWarehouses(entry.reference);
+    elsewhere = bestCandidateMatch(entry.reference, otherCandidates);
+  }
+
+  return { ...entry, quantity, btk: null, matchedName: null, elsewhere };
 }
 
 // Exported standalone so the "model replied with prose/code-fences around the JSON anyway" path

@@ -78,8 +78,8 @@ test('parseOrderRequest resolves item ordinals, defaults quantity to 1, and skip
   const draft = await parseOrderRequest(fakeGroq, 'plocka item 1 och item 2 x3 till Acme AB', { knownItems: KNOWN_ITEMS });
 
   assert.deepEqual(draft.items, [
-    { reference: 'item 1', quantity: 1, btk: 'BTK000001', matchedName: 'Widget A' },
-    { reference: 'item 2', quantity: 3, btk: 'BTK000002', matchedName: 'Widget B' },
+    { reference: 'item 1', quantity: 1, btk: 'BTK000001', matchedName: 'Widget A', elsewhere: null },
+    { reference: 'item 2', quantity: 3, btk: 'BTK000002', matchedName: 'Widget B', elsewhere: null },
   ]);
   assert.equal(draft.recipient.name, 'Acme AB');
   assert.equal(draft.recipient.address, null);
@@ -103,7 +103,7 @@ test('parseOrderRequest falls back to searchItemCandidates when a reference is n
   const draft = await parseOrderRequest(fakeGroq, 'plocka en blue widget', { knownItems: [], searchItemCandidates });
 
   assert.equal(searchedWith, 'blue widget');
-  assert.deepEqual(draft.items, [{ reference: 'blue widget', quantity: 2, btk: 'BTK000099', matchedName: 'Blue Widget Large' }]);
+  assert.deepEqual(draft.items, [{ reference: 'blue widget', quantity: 2, btk: 'BTK000099', matchedName: 'Blue Widget Large', elsewhere: null }]);
 });
 
 test('parseOrderRequest leaves an item unresolved when search finds nothing close enough', async () => {
@@ -119,6 +119,44 @@ test('parseOrderRequest leaves an item unresolved when search finds nothing clos
 
   assert.equal(draft.items[0].btk, null);
   assert.equal(draft.items[0].matchedName, null);
+  assert.equal(draft.items[0].elsewhere, null);
+});
+
+test('parseOrderRequest flags an item found in another warehouse as `elsewhere`, without resolving it as this order\'s btk', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: 'blue widget', quantity: 1 }],
+      recipientName: null, recipientAddressHint: null, needsAddressLookup: false,
+    }),
+  };
+  const searchItemCandidates = async () => []; // nothing in the current warehouse
+  let searchedOtherWith = null;
+  const searchOtherWarehouses = async (text) => {
+    searchedOtherWith = text;
+    return [{ btk: 'BTK000200', name: 'Blue Widget', warehouseId: '2', quantity: 12 }];
+  };
+
+  const draft = await parseOrderRequest(fakeGroq, 'plocka en blue widget', { searchItemCandidates, searchOtherWarehouses });
+
+  assert.equal(searchedOtherWith, 'blue widget');
+  assert.equal(draft.items[0].btk, null); // never resolved cross-warehouse
+  assert.deepEqual(draft.items[0].elsewhere, { btk: 'BTK000200', name: 'Blue Widget', warehouseId: '2', quantity: 12 });
+});
+
+test('parseOrderRequest does not call searchOtherWarehouses once the item is already resolved', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: 'item 1', quantity: 1 }],
+      recipientName: null, recipientAddressHint: null, needsAddressLookup: false,
+    }),
+  };
+  let otherCalled = false;
+  const searchOtherWarehouses = async () => { otherCalled = true; return []; };
+
+  const draft = await parseOrderRequest(fakeGroq, 'plocka item 1', { knownItems: KNOWN_ITEMS, searchOtherWarehouses });
+
+  assert.equal(otherCalled, false);
+  assert.equal(draft.items[0].elsewhere, null);
 });
 
 test('parseOrderRequest does not call searchItemCandidates when a reference already matched knownItems or looks like a BTK', async () => {
