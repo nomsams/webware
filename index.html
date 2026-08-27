@@ -2311,12 +2311,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // "Add Image" / "Take Picture" buttons — only shown while quick-editing (images are managed
     // as part of the same edit session as the fields), and only for admin/editor. Placed above the
     // field list when the item has no images yet, or below it (just before the map) once it does.
+    // Available directly from the read-only item view — no need to enter quick-edit or press
+    // Edit first — since adding/replacing a photo is low-risk and shouldn't need extra clicks.
     function renderImageAddControls(hasImages) {
         const top = document.getElementById('img-add-controls-top');
         const bottom = document.getElementById('img-add-controls-bottom');
         top.innerHTML = ''; bottom.innerHTML = '';
         top.classList.add('hidden'); bottom.classList.add('hidden');
-        if (!quickEditMode || !canEditItems()) return;
+        if (!canEditItems()) return;
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
         // Supabase items get one photo (replaced on re-upload) — static items keep the multi-image gallery.
         document.getElementById('editor-file-input').multiple = !isSupa;
