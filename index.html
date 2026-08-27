@@ -6,8 +6,7 @@
     <meta name="theme-color" content="#f8fafc" id="meta-theme-color">
     <title>Webware Inventory</title>
     
-    <!-- External Libraries -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <!-- External Libraries (CryptoJS removed — native WebCrypto used instead) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
@@ -247,7 +246,11 @@
         .setting-desc { font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-top: 6px; }
         input[type="range"] { width: 100%; min-height: unset; padding: 0; border: none; background: none; box-shadow: none; margin-bottom: 0; accent-color: var(--primary); cursor: pointer; }
         .range-value { display: inline-block; font-weight: 700; color: var(--primary); min-width: 36px; text-align: center; }
-        
+
+        /* --- WAREHOUSE META --- */
+        .wh-meta { background: var(--primary-light); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 1rem; font-size: 0.9rem; }
+        .wh-meta strong { color: var(--primary); }
+
         /* --- PRINT STYLES --- */
         @media print {
             body { background: white !important; }
@@ -279,17 +282,23 @@
         <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">Fill in the item details below.</p>
 
         <div class="modal-notice">
-            ⚠️ <strong>Session only.</strong> This item exists only while the browser tab is open. It will not be saved to the database after your session ends. To permanently add items, contact the admin.
+            ⚠️ <strong>Session only.</strong> This item exists only while the browser tab is open and is kept in an autosaved local draft. It is <strong>not</strong> written to the encrypted database. To permanently save items, export the encrypted database (or contact the admin).
         </div>
 
         <label class="modal-label" for="ai-manufacturer">Manufacturer</label>
         <input type="text" id="ai-manufacturer" placeholder="e.g. HÄNY">
 
-        <label class="modal-label" for="ai-name">Item Name <span style="color:var(--danger)">*</span></label>
-        <input type="text" id="ai-name" placeholder="e.g. O-RING 102 X 4">
+        <label class="modal-label" for="ai-btknumber">BTK Number <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="ai-btknumber" placeholder="e.g. BTK000024">
 
-        <label class="modal-label" for="ai-num1">Item Number</label>
-        <input type="text" id="ai-num1" placeholder="e.g. 955.248B">
+        <label class="modal-label" for="ai-itemnumber">Item Number</label>
+        <input type="text" id="ai-itemnumber" placeholder="e.g. 955.248B">
+
+        <label class="modal-label" for="ai-name-en">Item Name (English) <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="ai-name-en" placeholder="e.g. O-RING 102 X 4">
+
+        <label class="modal-label" for="ai-name-sv">Item Name (Swedish)</label>
+        <input type="text" id="ai-name-sv" placeholder="e.g. O-RING 102 X 4">
 
         <label class="modal-label" for="ai-num2">Item Number 2</label>
         <input type="text" id="ai-num2" placeholder="e.g. 2261-ED-11">
@@ -336,13 +345,16 @@
     <!-- View 1: Auth -->
     <section id="auth-view" class="card">
         <h2 style="margin-bottom: 0.5rem;">Secure Unlock</h2>
-        <p style="margin-bottom: 1.5rem; color: var(--text-muted);">Enter decryption key to load database.</p>
+        <p style="margin-bottom: 1.5rem; color: var(--text-muted);">Enter warehouse ID and decryption key to load its database.</p>
+        <label class="modal-label" for="auth-warehouse">Warehouse ID</label>
+        <input type="text" id="auth-warehouse" aria-label="Warehouse ID" placeholder="e.g. 1" value="1">
         <input type="password" id="decryption-key" aria-label="Decryption Key" placeholder="Enter decryption key" onkeydown="if(event.key === 'Enter') attemptManualDecryption()">
         <button class="full-width" onclick="attemptManualDecryption()">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>
             Unlock Inventory
         </button>
         <p id="auth-error" style="color: var(--danger); margin-top: 1rem; display: none; font-weight: 600; text-align: center;">Invalid key or corrupted data.</p>
+        <p style="color: var(--text-muted); margin-top: 1rem; font-size: 0.85rem; text-align:center;">Tip: a link like <code>#L=1&amp;K=pass</code> can unlock &amp; save the key automatically.</p>
     </section>
 
     <!-- View 2: List / Multi-select -->
@@ -356,12 +368,17 @@
                 <button class="secondary" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">
                     📥 Import CSV
                 </button>
+                <button class="secondary" onclick="exportEncryptedDatabase()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">
+                    💾 Export
+                </button>
             </div>
             <input type="file" id="csv-upload" accept=".csv" class="hidden" onchange="handleCSVUpload(event)" aria-label="Upload CSV">
         </div>
+
+        <div id="wh-meta-container"></div>
         
         <div class="search-wrapper" id="search-container">
-            <input type="text" id="search-box" aria-label="Search Inventory" placeholder="Search name, number, manufacturer, location..." oninput="debounceSearch()">
+            <input type="text" id="search-box" aria-label="Search Inventory" placeholder="Search name, number, BTK, manufacturer, location..." oninput="debounceSearch()">
             <button class="search-clear" onclick="clearSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
         </div>
         
@@ -417,7 +434,7 @@
             </div>
         </div>
         <p class="no-print" style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem; background: var(--border); padding: 8px 12px; border-radius: 8px;">
-            ℹ️ Format: <strong>Brother QL 29mm × 90mm</strong>. Set printer margins to <strong>None</strong>.
+            ℹ️ Format: <strong>Brother QL 29mm × 90mm</strong>. Set printer margins to <strong>None</strong>. QR encodes an ID-only fragment link (no key).
         </p>
         
         <div id="label-preview-container" class="preview-grid"></div>
@@ -430,12 +447,11 @@
         <div class="setting-row">
             <label for="qr-ecc">QR Code Error Correction</label>
             <select id="qr-ecc">
-                <option value="L">Level L — Low (best for tiny 28mm labels)</option>
+                <option value="L">Level L — Low (fewest dots, best for tiny 28mm labels)</option>
                 <option value="M" selected>Level M — Medium (default)</option>
                 <option value="Q">Level Q — Quartile</option>
-                <option value="H">Level H — High (may fail if URL is long)</option>
             </select>
-            <p class="setting-desc">Lower ECC makes QR modules larger — critical for micro-labels so scanners can read them reliably.</p>
+            <p class="setting-desc">Lower ECC makes QR modules larger — critical for thermal micro-labels so scanners can read them reliably. (Level H removed: too many dots smudge on thermal print.)</p>
         </div>
 
         <div class="setting-row">
@@ -445,7 +461,7 @@
             </label>
             <input type="range" id="label-font-cap-range" min="10" max="24" step="1" value="16"
                    oninput="previewFontCap(this.value)">
-            <p class="setting-desc">Max font size for the main item number on printed labels. Range: 10 – 24pt.</p>
+            <p class="setting-desc">Max font size for the main item number (BTKnumber) on printed labels. Range: 10 – 24pt.</p>
         </div>
         
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>
@@ -470,7 +486,11 @@
 </div>
 
 <script>
-    // ─── LOGGER ──────────────────────────────────────────────────────────────
+    "use strict";
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  LOGGER
+    // ════════════════════════════════════════════════════════════════════════
     const logs = [];
     const maxLogs = 500;
     
@@ -481,8 +501,7 @@
         logs.push(entry);
         if (logs.length > maxLogs) logs.shift();
         const div = document.createElement('div');
-        div.className = 'log-entry';
-        div.style.color = type === 'error' ? '#f87171' : (type === 'warn' ? '#fbbf24' : 'inherit');
+        div.className = 'log-entry' + (type === 'error' ? ' error' : type === 'warn' ? ' warn' : '');
         div.innerText = entry;
         const out = document.getElementById('console-output');
         if (out) { out.appendChild(div); out.scrollTop = out.scrollHeight; }
@@ -498,7 +517,9 @@
     function copyLogs(e)  { e.stopPropagation(); navigator.clipboard.writeText(logs.join('\n')).then(() => showToast("Logs copied!", "success")); }
     function clearLogs(e) { e.stopPropagation(); logs.length = 0; document.getElementById('console-output').innerHTML = ''; console.log("Console cleared."); }
 
-    // ─── TOAST ───────────────────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    //  TOAST
+    // ════════════════════════════════════════════════════════════════════════
     function showToast(message, type = 'info', duration = 3500) {
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
@@ -512,52 +533,254 @@
         setTimeout(() => { if (toast.parentElement) { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); } }, duration);
     }
 
-    // ─── STATE ───────────────────────────────────────────────────────────────
-    const BASE_URL = window.location.origin + window.location.pathname;
+    // ════════════════════════════════════════════════════════════════════════
+    //  WEBCRYPTO — MULTI-KEY ENVELOPE ENCRYPTION (replaces CryptoJS)
+    // ════════════════════════════════════════════════════════════════════════
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
 
-    // Built-in CSV now includes an `images` column (empty by default)
-    const rawCSV = `Manufacturer,itemnumber,item name,itemnumber2,itemnumber3,Numberofitems,Inventorylocation,Comments,images\r\nHÄNY,None,IC310 inklusive Jean Lutz,IC310,None,0,Best,None,\r\nHÄNY,955.248B,O-RING 102 X 4,None,1001007,7,Best,None,\r\nHÄNY,None,KONTAKTKABEL JEAN LUTZ,None,101133010,1,Best,None,\r\nHÄNY,None,4/3 WAY SOLENOID VALVE,None,1014485,2,Best,None,\r\nHÄNY,None,HYDRAULIC PLUNGER,2511-HK-11,None,0,Best,None,\r\nHÄNY,None,GUIDE BUSH - ZMP600,2511-FF-11,None,2,Best,None,\r\nHÄNY,359.061,LOCK WASHER M8,None,None,5,Best,None,\r\nHÄNY,613.034,IMPELLER DISC,2261-ED-11,None,3,Best,None,\r\nHÄNY,613.036,GREASE RING,None,None,11,Best,None,`;
+    function bufToB64(buf) {
+        const bytes = new Uint8Array(buf);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        return btoa(bin);
+    }
+    function b64ToBuf(b64) {
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return bytes.buffer;
+    }
 
-    let ENCRYPTED_PAYLOAD = CryptoJS.AES.encrypt(rawCSV, "varuhuset").toString();
+    async function sha256Hex(str) {
+        const h = await crypto.subtle.digest('SHA-256', enc.encode(str));
+        return bufToB64(h);
+    }
+
+    async function deriveKEK(passphrase, saltBuf) {
+        const baseKey = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+        return crypto.subtle.deriveKey(
+            { name: 'PBKDF2', salt: saltBuf, iterations: 150000, hash: 'SHA-256' },
+            baseKey,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt', 'decrypt']
+        );
+    }
+
+    async function genContentKey() {
+        return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+    }
+
+    // Encrypt a JS object into an envelope. `passphrases` = array of authorized keys.
+    async function encryptEnvelope(payloadObj, passphrases) {
+        const contentKey = await genContentKey();
+        const contentIv = crypto.getRandomValues(new Uint8Array(12));
+        const plaintext = enc.encode(JSON.stringify(payloadObj));
+        const ciphertext = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: contentIv }, contentKey, plaintext
+        );
+
+        const wrappedKeys = [];
+        for (const pass of passphrases) {
+            const salt = crypto.getRandomValues(new Uint8Array(16));
+            const kek = await deriveKEK(pass, salt);
+            const rawCk = await crypto.subtle.exportKey('raw', contentKey);
+            const wrapIv = crypto.getRandomValues(new Uint8Array(12));
+            const wrapped = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv: wrapIv }, kek, rawCk
+            );
+            wrappedKeys.push({
+                keyId: await sha256Hex(pass),
+                salt: bufToB64(salt),
+                wrapIv: bufToB64(wrapIv),
+                wrappedKey: bufToB64(wrapped)
+            });
+        }
+
+        return {
+            version: 1,
+            contentIv: bufToB64(contentIv),
+            wrappedKeys,
+            ciphertext: bufToB64(ciphertext)
+        };
+    }
+
+    // Decrypt an envelope with a single passphrase.
+    async function decryptEnvelope(env, passphrase) {
+        if (!env || env.version !== 1) throw new Error("Unsupported envelope version");
+        const keyId = await sha256Hex(passphrase);
+        const wk = env.wrappedKeys.find(w => w.keyId === keyId);
+        if (!wk) throw new Error("Passphrase does not match any wrapped key");
+
+        const salt = b64ToBuf(wk.salt);
+        const kek = await deriveKEK(passphrase, salt);
+        const wrapIv = b64ToBuf(wk.wrapIv);
+        const wrapped = b64ToBuf(wk.wrappedKey);
+
+        const rawCk = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: wrapIv }, kek, wrapped);
+        const contentKey = await crypto.subtle.importKey('raw', rawCk, 'AES-GCM', true, ['encrypt', 'decrypt']);
+
+        const ct = b64ToBuf(env.ciphertext);
+        const iv = b64ToBuf(env.contentIv);
+        const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, contentKey, ct);
+        return JSON.parse(dec.decode(plaintext));
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  STORAGE — KEY VAULT, ENCRYPTED VAULT, DRAFT AUTOSAVE
+    // ════════════════════════════════════════════════════════════════════════
+    const LS_KEYS   = 'webware_keys';     // { warehouseId: passphrase }
+    const LS_VAULT  = 'webware_vault';    // { warehouseId: envelopeJSON }
+    const LS_DRAFT  = 'webware_draft';    // { warehouseId: itemsJSON }
+
+    function getKeyVault() {
+        try { return JSON.parse(localStorage.getItem(LS_KEYS) || '{}'); }
+        catch { return {}; }
+    }
+    function setKeyVault(obj) { localStorage.setItem(LS_KEYS, JSON.stringify(obj)); }
+
+    function getEnvelopeVault() {
+        try { return JSON.parse(localStorage.getItem(LS_VAULT) || '{}'); }
+        catch { return {}; }
+    }
+    function setEnvelopeVault(obj) { localStorage.setItem(LS_VAULT, JSON.stringify(obj)); }
+
+    function saveDraft(wid, items) {
+        const all = JSON.parse(localStorage.getItem(LS_DRAFT) || '{}');
+        all[wid] = items;
+        localStorage.setItem(LS_DRAFT, JSON.stringify(all));
+    }
+    function loadDraft(wid) {
+        const all = JSON.parse(localStorage.getItem(LS_DRAFT) || '{}');
+        return all[wid] || null;
+    }
+    function clearDraft(wid) {
+        const all = JSON.parse(localStorage.getItem(LS_DRAFT) || '{}');
+        delete all[wid];
+        localStorage.setItem(LS_DRAFT, JSON.stringify(all));
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  SCHEMA CONSTANTS
+    // ════════════════════════════════════════════════════════════════════════
+    const COLUMNS_B = [
+        'Manufacturer', 'BTKnumber', 'itemnumber', 'itemname(english)', 'itemname(swedish)',
+        'itemnumber2', 'itemnumber3', 'Numberofitems', 'Inventorylocation', 'Comments', 'images'
+    ];
+
+    // CSV C — Warehouse lookup metadata (non-secret, embedded for offline UX)
+    const WAREHOUSES = [
+        { l: '1', name: 'Main Warehouse — Best', address: 'Best, Sweden' },
+        { l: '2', name: 'North Depot', address: 'Stockholm, Sweden' },
+        { l: '3', name: 'South Depot', address: 'Malmö, Sweden' }
+    ];
+    function getWarehouseMeta(id) {
+        return WAREHOUSES.find(w => w.l === String(id)) || { l: id, name: 'Warehouse ' + id, address: '—' };
+    }
+
+    // Demo seed data (CSV B format) — used to bootstrap warehouse 1 on first run.
+    const DEMO_CSV_B = `Manufacturer,BTKnumber,itemnumber,itemname(english),itemname(swedish),itemnumber2,itemnumber3,Numberofitems,Inventorylocation,Comments,images
+HÄNY,BTK000001,None,IC310 inklusive Jean Lutz,,IC310,None,0,Best,None,
+HÄNY,BTK000002,955.248B,O-RING 102 X 4,,None,1001007,7,Best,None,
+HÄNY,BTK000003,None,KONTAKTKABEL JEAN LUTZ,,None,101133010,1,Best,None,
+HÄNY,BTK000004,None,4/3 WAY SOLENOID VALVE,,None,1014485,2,Best,None,
+HÄNY,BTK000005,None,HYDRAULIC PLUNGER,2511-HK-11,None,0,Best,None,
+HÄNY,BTK000006,None,GUIDE BUSH - ZMP600,2511-FF-11,None,2,Best,None,
+HÄNY,BTK000007,359.061,LOCK WASHER M8,None,None,5,Best,None,
+HÄNY,BTK000008,613.034,IMPELLER DISC,2261-ED-11,None,3,Best,None,
+HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
+
+    const DEMO_PASSPHRASE = 'varuhuset'; // bootstrap key for warehouse 1 demo
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  ID COMPRESSION (BTK000024 -> 24,  24 -> BTK000024)
+    // ════════════════════════════════════════════════════════════════════════
+    function compressId(btk) {
+        if (typeof btk === 'string' && btk.toUpperCase().startsWith('BTK')) {
+            const n = parseInt(btk.slice(3), 10);
+            return isNaN(n) ? btk : String(n);
+        }
+        return btk;
+    }
+    function decompressId(s) {
+        if (/^\d+$/.test(s)) {
+            return 'BTK' + String(parseInt(s, 10)).padStart(6, '0');
+        }
+        return s;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  STATE
+    // ════════════════════════════════════════════════════════════════════════
+    const BASE_URL = (window.location.origin + window.location.pathname).toUpperCase();
+
     let globalInventory = [];
-    let currentActiveKey = "";
+    let currentWarehouseId = '1';
+    let currentActiveKey = '';           // passphrase for active warehouse (session only)
     let selectedItems = new Set();
     let qrEccLevel = QRCode.CorrectLevel.M;
     let searchTimeout = null;
     let currentlyVisibleIds = [];
     let activeView = 'auth-view';
+    let pendingItemId = null;            // item to open after auth (from #I= route)
 
-    // ─── INIT ─────────────────────────────────────────────────────────────────
-    window.onload = () => {
-        console.log("Initializing App...");
+    // ════════════════════════════════════════════════════════════════════════
+    //  INIT
+    // ════════════════════════════════════════════════════════════════════════
+    window.onload = async () => {
+        console.log("Initializing App (WebCrypto envelope mode)...");
+        if (!window.crypto || !window.crypto.subtle) {
+            showToast("WebCrypto unavailable. Serve over https:// or localhost.", "error", 8000);
+        }
         initTheme();
         initSettings();
-
-        const urlParams = new URLSearchParams(window.location.search);
-        const urlKey = urlParams.get('key');
-        const urlId  = urlParams.get('id');
-        const sessionPayload = sessionStorage.getItem('webware_payload');
-        const sessionKey     = sessionStorage.getItem('webware_key');
-
-        if (urlKey) {
-            console.log("Key found in URL, auto-decrypting...");
-            attemptDecryption(urlKey, urlId, ENCRYPTED_PAYLOAD);
-        } else if (sessionPayload && sessionKey) {
-            console.log("Restoring session from memory...");
-            attemptDecryption(sessionKey, null, sessionPayload);
-        } else {
-            switchView('auth-view');
-        }
+        await ensureDemoVault();
+        window.addEventListener('hashchange', handleRoute);
+        await handleRoute();
     };
 
-    // ─── THEME ────────────────────────────────────────────────────────────────
+    // Bootstrap envelope for warehouse 1 if none exists.
+    async function ensureDemoVault() {
+        const vault = getEnvelopeVault();
+        if (!vault['1']) {
+            try {
+                const items = parseCSVString(DEMO_CSV_B);
+                const env = await encryptEnvelope(items, [DEMO_PASSPHRASE]);
+                vault['1'] = env;
+                setEnvelopeVault(vault);
+                console.log("Demo vault created for warehouse 1.");
+            } catch (e) { console.error("Demo vault bootstrap failed:", e); }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  CSV (B) PARSING -> JSON RUNTIME
+    // ════════════════════════════════════════════════════════════════════════
+    function parseCSVString(csvText) {
+        const res = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+        return normalizeItems(res.data);
+    }
+    function normalizeItems(rows) {
+        return rows
+            .filter(r => r && (r.BTKnumber && r.BTKnumber.trim() !== '' && r.BTKnumber !== 'None'))
+            .map(r => {
+                const item = {};
+                COLUMNS_B.forEach(c => { item[c] = (r[c] != null ? String(r[c]).trim() : ''); });
+                if (item['itemname(english)'] === '') item['itemname(english)'] = 'Unnamed';
+                if (item['Numberofitems'] === '') item['Numberofitems'] = '0';
+                return item;
+            });
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  THEME
+    // ════════════════════════════════════════════════════════════════════════
     function initTheme() {
-        // Default: light. Only switch to dark if the user explicitly saved it.
         const savedTheme = localStorage.getItem('theme') || 'light';
         document.documentElement.setAttribute('data-theme', savedTheme);
         updateMetaThemeColor(savedTheme);
     }
-
     function toggleTheme() {
         const root = document.documentElement;
         const newTheme = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
@@ -566,7 +789,6 @@
         updateMetaThemeColor(newTheme);
         console.log(`Theme set to ${newTheme}`);
     }
-
     function updateMetaThemeColor(theme) {
         document.getElementById('meta-theme-color').content = theme === 'dark' ? '#0b1120' : '#f8fafc';
     }
@@ -580,73 +802,164 @@
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    // ─── DECRYPTION ───────────────────────────────────────────────────────────
-    function attemptManualDecryption() {
-        const key = document.getElementById('decryption-key').value.trim();
-        if (!key) return showToast("Please enter a key", "error");
-        const payloadToUse = sessionStorage.getItem('webware_payload') || ENCRYPTED_PAYLOAD;
-        attemptDecryption(key, null, payloadToUse);
+    // ════════════════════════════════════════════════════════════════════════
+    //  ROUTING (URL FRAGMENTS ONLY)
+    // ════════════════════════════════════════════════════════════════════════
+    async function handleRoute() {
+        const hash = window.location.hash;
+        if (hash.startsWith('#L=') && hash.includes('&K=')) {
+            await setupRoute(hash.slice(1));
+            return;
+        }
+        if (hash.startsWith('#I=')) {
+            await itemRoute(hash.slice(1));
+            return;
+        }
+        await startupRoute();
     }
 
-    function attemptDecryption(key, targetId, payload) {
-        try {
-            const bytes = CryptoJS.AES.decrypt(payload, key);
-            const decryptedCSV = bytes.toString(CryptoJS.enc.Utf8);
-            if (!decryptedCSV) throw new Error("Decryption empty");
+    async function setupRoute(query) {
+        const params = new URLSearchParams(query);
+        const wid = params.get('L');
+        const pass = params.get('K');
+        if (!wid || !pass) { showToast("Invalid setup link.", "error"); return; }
 
-            console.log("Decryption Success");
-            currentActiveKey = key;
-            ENCRYPTED_PAYLOAD = payload;
-            sessionStorage.setItem('webware_payload', payload);
-            sessionStorage.setItem('webware_key', key);
-            document.getElementById('auth-error').style.display = 'none';
-            if (!targetId) showToast("Database unlocked", "success");
-            parseCSVData(decryptedCSV, targetId);
-        } catch(e) {
-            console.error("Decryption Failed:", e.message);
-            document.getElementById('auth-error').style.display = 'block';
-            showToast("Invalid decryption key", "error");
-            switchView('auth-view');
-            sessionStorage.clear();
+        const keys = getKeyVault();
+        keys[wid] = pass;
+        setKeyVault(keys);
+
+        // Scrub fragment from URL to prevent shoulder-surfing / server logs.
+        history.replaceState(null, null, ' ');
+
+        showToast(`Warehouse ${wid} unlocked on this device.`, "success");
+        currentWarehouseId = wid;
+        currentActiveKey = pass;
+
+        const vault = getEnvelopeVault();
+        if (vault[wid]) {
+            try {
+                globalInventory = await decryptEnvelope(vault[wid], pass);
+                saveDraft(wid, globalInventory);
+                showListView();
+            } catch (e) {
+                console.error("Setup decrypt failed:", e);
+                showAuth();
+                showToast("Key saved but database could not be decrypted.", "error");
+            }
+        } else {
+            showAuth();
+            showToast("Key saved. No database present for this warehouse yet.", "warning");
         }
     }
 
-    function generateConsistentId(row) {
-        if (row.itemid && row.itemid !== 'None' && row.itemid.trim() !== '') return row.itemid;
-        const str = (row['item name'] || '') + (row.itemnumber || '');
-        const hash = CryptoJS.SHA256(str).toString(CryptoJS.enc.Hex).substring(0, 8).toUpperCase();
-        return "ITM-" + hash;
+    async function itemRoute(query) {
+        const params = new URLSearchParams(query);
+        const compressed = params.get('I');
+        const wid = params.get('L') || '1';
+        const btk = decompressId(compressed);
+        const keys = getKeyVault();
+
+        if (keys[wid]) {
+            currentWarehouseId = wid;
+            currentActiveKey = keys[wid];
+            const vault = getEnvelopeVault();
+            if (!vault[wid]) { pendingItemId = btk; showAuth(); return; }
+            try {
+                globalInventory = await decryptEnvelope(vault[wid], keys[wid]);
+                saveDraft(wid, globalInventory);
+                // Restore draft edits on top if present
+                const draft = loadDraft(wid);
+                if (draft) {
+                    globalInventory = mergeById(globalInventory, draft);
+                    console.log("Draft merged over decrypted database.");
+                }
+                openItem(btk);
+            } catch (e) {
+                console.error("Item route decrypt failed:", e);
+                pendingItemId = btk;
+                showAuth();
+                showToast("Invalid key for this warehouse.", "error");
+            }
+        } else {
+            pendingItemId = btk;
+            showAuth();
+        }
     }
 
-    function parseCSVData(csvText, targetId = null, isMerge = false) {
-        Papa.parse(csvText, {
-            header: true,
-            skipEmptyLines: true,
-            complete: function(results) {
-                if (!results.data || results.data.length === 0) {
-                    showToast("CSV parsed but found no valid data rows.", "error");
-                    return;
+    async function startupRoute() {
+        const keys = getKeyVault();
+        if (keys[currentWarehouseId] && getEnvelopeVault()[currentWarehouseId]) {
+            try {
+                currentActiveKey = keys[currentWarehouseId];
+                const env = getEnvelopeVault()[currentWarehouseId];
+                globalInventory = await decryptEnvelope(env, currentActiveKey);
+                const draft = loadDraft(currentWarehouseId);
+                if (draft && draft.length) {
+                    globalInventory = mergeById(globalInventory, draft);
+                    showToast("Restored your unsaved local draft.", "info");
                 }
-                const processed = results.data.map(row => ({ ...row, generatedId: generateConsistentId(row) }));
-                if (isMerge) {
-                    const idMap = new Map(globalInventory.map(i => [i.generatedId, i]));
-                    processed.forEach(p => idMap.set(p.generatedId, p));
-                    globalInventory = Array.from(idMap.values());
-                    showToast(`Merged ${processed.length} items. Total: ${globalInventory.length}`, "success");
-                } else {
-                    globalInventory = processed;
-                }
-                if (targetId) openItem(targetId);
-                else showListView();
-            },
-            error: function(err) {
-                console.error("CSV Parse Error:", err);
-                showToast("Failed to parse CSV structure.", "error");
+                showListView();
+                return;
+            } catch (e) {
+                console.error("Startup decrypt failed:", e);
             }
+        }
+        showAuth();
+    }
+
+    function mergeById(base, overrides) {
+        const map = new Map(base.map(i => [i.BTKnumber, i]));
+        overrides.forEach(o => map.set(o.BTKnumber, o));
+        return Array.from(map.values());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  AUTH
+    // ════════════════════════════════════════════════════════════════════════
+    function showAuth() {
+        document.getElementById('auth-warehouse').value = currentWarehouseId;
+        switchView('auth-view');
+    }
+
+    function attemptManualDecryption() {
+        const wid = document.getElementById('auth-warehouse').value.trim() || '1';
+        const key = document.getElementById('decryption-key').value.trim();
+        if (!key) return showToast("Please enter a key", "error");
+
+        const vault = getEnvelopeVault();
+        const env = vault[wid];
+        if (!env) {
+            document.getElementById('auth-error').style.display = 'block';
+            return showToast("No database found for this warehouse ID.", "error");
+        }
+
+        decryptEnvelope(env, key).then(items => {
+            currentWarehouseId = wid;
+            currentActiveKey = key;
+            const keys = getKeyVault();
+            keys[wid] = key;
+            setKeyVault(keys);
+
+            globalInventory = items;
+            const draft = loadDraft(wid);
+            if (draft && draft.length) {
+                globalInventory = mergeById(globalInventory, draft);
+                showToast("Restored your unsaved local draft.", "info");
+            }
+            document.getElementById('auth-error').style.display = 'none';
+            showToast("Database unlocked", "success");
+            if (pendingItemId) { const id = pendingItemId; pendingItemId = null; openItem(id); }
+            else showListView();
+        }).catch(e => {
+            console.error("Decryption Failed:", e.message);
+            document.getElementById('auth-error').style.display = 'block';
+            showToast("Invalid decryption key", "error");
         });
     }
 
-    // ─── CSV IMPORT ───────────────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    //  CSV IMPORT
+    // ════════════════════════════════════════════════════════════════════════
     function triggerCSVImport() { document.getElementById('csv-upload').click(); }
 
     function handleCSVUpload(event) {
@@ -655,69 +968,110 @@
         console.log(`Importing: ${file.name}`);
         const reader = new FileReader();
         reader.onload = function(e) {
-            parseCSVData(e.target.result, null, true);
-            const newCsvStr = Papa.unparse(globalInventory);
-            const newPayload = CryptoJS.AES.encrypt(newCsvStr, currentActiveKey).toString();
-            ENCRYPTED_PAYLOAD = newPayload;
-            sessionStorage.setItem('webware_payload', newPayload);
+            const items = parseCSVString(e.target.result);
+            if (!items.length) { showToast("No valid rows (need BTKnumber column).", "error"); return; }
+            globalInventory = items;
+            saveDraft(currentWarehouseId, globalInventory);
             clearSelection();
             document.getElementById('search-box').value = '';
             filterList(true);
+            showToast(`Imported ${items.length} items (draft autosaved).`, "success");
         };
         reader.readAsText(file);
         event.target.value = '';
     }
 
-    // ─── ADD ITEM (session-only) ──────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    //  EXPORT (ENCRYPTED ENVELOPE)
+    // ════════════════════════════════════════════════════════════════════════
+    async function exportEncryptedDatabase() {
+        if (!globalInventory.length) return showToast("Nothing to export.", "warning");
+        if (!currentActiveKey) return showToast("Unlock a warehouse first.", "error");
+
+        try {
+            // Re-wrap with the current passphrase (structure supports multiple keys).
+            const env = await encryptEnvelope(globalInventory, [currentActiveKey]);
+            const vault = getEnvelopeVault();
+            vault[currentWarehouseId] = env;
+            setEnvelopeVault(vault);
+            clearDraft(currentWarehouseId);
+
+            const blob = new Blob([JSON.stringify(env, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `warehouse-${currentWarehouseId}-db.json`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast("Encrypted database exported & saved to this device.", "success");
+        } catch (e) {
+            console.error("Export failed:", e);
+            showToast("Export failed: " + e.message, "error");
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  ADD ITEM (session-only, autosaved draft)
+    // ════════════════════════════════════════════════════════════════════════
     function openAddItemModal() {
-        ['ai-manufacturer','ai-name','ai-num1','ai-num2','ai-num3','ai-qty','ai-location','ai-comments']
+        ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-location','ai-comments']
             .forEach(id => { document.getElementById(id).value = ''; });
         document.getElementById('add-item-modal').classList.add('open');
     }
-
     function closeAddItemModal() {
         document.getElementById('add-item-modal').classList.remove('open');
     }
-
     function handleModalOverlayClick(e) {
         if (e.target === document.getElementById('add-item-modal')) closeAddItemModal();
     }
 
     function submitAddItem() {
-        const name = document.getElementById('ai-name').value.trim();
-        if (!name) { showToast("Item Name is required.", "error"); return; }
+        const btk = document.getElementById('ai-btknumber').value.trim();
+        const nameEn = document.getElementById('ai-name-en').value.trim();
+        if (!btk || !nameEn) { showToast("BTK Number and English Name are required.", "error"); return; }
 
         const newItem = {
-            Manufacturer:      document.getElementById('ai-manufacturer').value.trim() || 'None',
-            itemnumber:        document.getElementById('ai-num1').value.trim()         || 'None',
-            'item name':       name,
-            itemnumber2:       document.getElementById('ai-num2').value.trim()         || 'None',
-            itemnumber3:       document.getElementById('ai-num3').value.trim()         || 'None',
-            Numberofitems:     document.getElementById('ai-qty').value.trim()          || '0',
-            Inventorylocation: document.getElementById('ai-location').value.trim()     || 'None',
-            Comments:          document.getElementById('ai-comments').value.trim()     || 'None',
-            images:            '',
+            'Manufacturer':      document.getElementById('ai-manufacturer').value.trim() || 'None',
+            'BTKnumber':         btk,
+            'itemnumber':        document.getElementById('ai-itemnumber').value.trim() || 'None',
+            'itemname(english)': nameEn,
+            'itemname(swedish)': document.getElementById('ai-name-sv').value.trim() || 'None',
+            'itemnumber2':       document.getElementById('ai-num2').value.trim() || 'None',
+            'itemnumber3':       document.getElementById('ai-num3').value.trim() || 'None',
+            'Numberofitems':     document.getElementById('ai-qty').value.trim() || '0',
+            'Inventorylocation': document.getElementById('ai-location').value.trim() || 'None',
+            'Comments':          document.getElementById('ai-comments').value.trim() || 'None',
+            'images':            ''
         };
-        newItem.generatedId = generateConsistentId(newItem);
 
-        // Avoid collision
-        if (globalInventory.find(i => i.generatedId === newItem.generatedId)) {
-            newItem.generatedId += '-' + Date.now().toString(36).toUpperCase();
-        }
+        // Avoid duplicate BTKnumber (primary key)
+        const existing = globalInventory.findIndex(i => i.BTKnumber === btk);
+        if (existing >= 0) globalInventory[existing] = newItem;
+        else globalInventory.push(newItem);
 
-        globalInventory.push(newItem);
+        saveDraft(currentWarehouseId, globalInventory);
         closeAddItemModal();
         filterList(false);
         showToast(
-            "Item added — session only. It will not persist after closing. Contact admin to save permanently.",
-            "warning",
-            7000
+            "Item added — session only (autosaved draft). Export the encrypted database to persist it.",
+            "warning", 7000
         );
-        console.log(`Session item added: ${newItem.generatedId}`);
+        console.log(`Session item added: ${btk}`);
     }
 
-    // ─── LIST & SELECTION ─────────────────────────────────────────────────────
-    function showListView() { switchView('list-view'); filterList(); }
+    // ════════════════════════════════════════════════════════════════════════
+    //  LIST & SELECTION
+    // ════════════════════════════════════════════════════════════════════════
+    function showListView() {
+        switchView('list-view');
+        renderWarehouseMeta();
+        filterList();
+    }
+
+    function renderWarehouseMeta() {
+        const meta = getWarehouseMeta(currentWarehouseId);
+        document.getElementById('wh-meta-container').innerHTML =
+            `<div class="wh-meta">🏬 <strong>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address}</div>`;
+    }
 
     function debounceSearch() {
         const wrapper = document.getElementById('search-container');
@@ -741,23 +1095,16 @@
 
         if (query !== "") {
             filtered = globalInventory.filter(item => {
-                // Search across ALL meaningful fields
                 const fields = [
-                    item['item name'],
-                    item.generatedId,
-                    item.itemnumber,
-                    item.itemnumber2,
-                    item.itemnumber3,
-                    item.Manufacturer,
-                    item.Inventorylocation,
-                    item.Comments,
-                    item.Numberofitems,
+                    item['itemname(english)'], item['itemname(swedish)'], item.BTKnumber,
+                    item.itemnumber, item.itemnumber2, item.itemnumber3,
+                    item.Manufacturer, item.Inventorylocation, item.Comments, item.Numberofitems
                 ];
                 return fields.some(f => f && f.toString().toLowerCase().includes(query));
             });
         }
 
-        currentlyVisibleIds = filtered.map(i => i.generatedId);
+        currentlyVisibleIds = filtered.map(i => i.BTKnumber);
         document.getElementById('list-stats').innerText = `Showing ${filtered.length} of ${globalInventory.length} items`;
         renderList(filtered);
         syncSelectAllCheckbox();
@@ -779,24 +1126,24 @@
 
         const frag = document.createDocumentFragment();
         items.forEach(item => {
-            const id = item.generatedId;
+            const id = item.BTKnumber;
             const div = document.createElement('div');
             div.className = 'item-row';
             div.setAttribute('role', 'button');
             div.tabIndex = 0;
 
             const isChecked = selectedItems.has(id);
-            // Best display number: first non-None itemnumber field
-            const displayNum = [item.itemnumber, item.itemnumber2, item.itemnumber3]
-                .find(n => n && n !== 'None') || id;
+            const displayNum = id; // BTKnumber is the primary ID on the left
+            const subNum = [item.itemnumber, item.itemnumber2, item.itemnumber3]
+                .find(n => n && n !== 'None') || '';
 
             div.innerHTML = `
                 <input type="checkbox" class="custom-checkbox" ${isChecked ? 'checked' : ''} aria-hidden="true">
                 <div class="item-info">
                     <div class="item-id">${displayNum}</div>
-                    <div class="item-title">${item['item name'] || 'Unnamed'}</div>
+                    <div class="item-title">${item['itemname(english)'] || 'Unnamed'}</div>
                     <div class="item-sub">
-                        <span>${item.Manufacturer && item.Manufacturer !== 'None' ? item.Manufacturer : ''}</span>
+                        <span>${item.Manufacturer && item.Manufacturer !== 'None' ? item.Manufacturer : ''} ${subNum ? '· ' + subNum : ''}</span>
                         <span>Stock: <strong>${item.Numberofitems || 0}</strong></span>
                     </div>
                 </div>
@@ -838,9 +1185,9 @@
         const cb = document.getElementById('select-all-cb');
         if (currentlyVisibleIds.length === 0) { cb.checked = false; cb.indeterminate = false; return; }
         const visCount = currentlyVisibleIds.filter(id => selectedItems.has(id)).length;
-        if (visCount === 0)                            { cb.checked = false; cb.indeterminate = false; }
-        else if (visCount === currentlyVisibleIds.length) { cb.checked = true;  cb.indeterminate = false; }
-        else                                           { cb.checked = false; cb.indeterminate = true; }
+        if (visCount === 0)                                  { cb.checked = false; cb.indeterminate = false; }
+        else if (visCount === currentlyVisibleIds.length)    { cb.checked = true;  cb.indeterminate = false; }
+        else                                                 { cb.checked = false; cb.indeterminate = true; }
     }
 
     function clearSelection() {
@@ -855,13 +1202,15 @@
         selectedItems.size > 0 ? fab.classList.add('visible') : fab.classList.remove('visible');
     }
 
-    // ─── ITEM DETAIL ──────────────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    //  ITEM DETAIL
+    // ════════════════════════════════════════════════════════════════════════
     function openItem(id) {
-        const item = globalInventory.find(i => i.generatedId === id);
+        const item = globalInventory.find(i => i.BTKnumber === id);
         if (!item) return showToast("Item not found", "error");
 
         switchView('item-view');
-        document.getElementById('detail-name').innerText = item['item name'] || 'Unnamed Item';
+        document.getElementById('detail-name').innerText = item['itemname(english)'] || 'Unnamed Item';
 
         const getStr = val => (!val || val === 'None')
             ? '<span style="color:var(--text-muted)">N/A</span>'
@@ -889,18 +1238,20 @@
             }
         }
 
-        // ── Detail fields ──
+        // ── Detail fields (new schema) ──
         document.getElementById('detail-content').innerHTML = `
             <div style="margin-bottom:12px;display:flex;gap:10px;">
-                <span style="font-weight:600;width:120px;">System ID:</span>
+                <span style="font-weight:600;width:140px;">System ID:</span>
                 <span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span>
             </div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:120px;">Manufacturer:</span><span>${getStr(item.Manufacturer)}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:120px;">Item #1:</span><span>${getStr(item.itemnumber)}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:120px;">Item #2:</span><span>${getStr(item.itemnumber2)}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:120px;">Item #3:</span><span>${getStr(item.itemnumber3)}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Manufacturer:</span><span>${getStr(item.Manufacturer)}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">English Name:</span><span>${getStr(item['itemname(english)'])}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Swedish Name:</span><span>${getStr(item['itemname(swedish)'])}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Item #:</span><span>${getStr(item.itemnumber)}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Item #2:</span><span>${getStr(item.itemnumber2)}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Item #3:</span><span>${getStr(item.itemnumber3)}</span></div>
             <div style="margin-bottom:12px;display:flex;gap:10px;">
-                <span style="font-weight:600;width:120px;">Stock:</span>
+                <span style="font-weight:600;width:140px;">Stock:</span>
                 <span style="font-weight:600;color:var(--primary);">${getStr(item.Numberofitems)}</span>
                 &nbsp;units @ ${getStr(item.Inventorylocation)}
             </div>
@@ -919,19 +1270,18 @@
         renderMockMap(id);
     }
 
-    // ─── LIGHTBOX ─────────────────────────────────────────────────────────────
+    // ─── LIGHTBOX ────────────────────────────────────────────────────────
     function openLightbox(src) {
         document.getElementById('lightbox-img').src = src;
         document.getElementById('lightbox').classList.add('open');
     }
     function closeLightbox(e) {
-        // Only close when clicking the overlay or close button (not the image itself)
         if (!e || e.target !== document.getElementById('lightbox-img')) {
             document.getElementById('lightbox').classList.remove('open');
         }
     }
 
-    // ─── WAREHOUSE MAP ────────────────────────────────────────────────────────
+    // ─── WAREHOUSE MAP ───────────────────────────────────────────────────
     function renderMockMap(id) {
         const map = document.getElementById('mock-map');
         map.innerHTML = '';
@@ -948,8 +1298,11 @@
         }
     }
 
-    // ─── LABEL GENERATION ─────────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    //  LABEL GENERATION (optimized QR — ID-only fragment, uppercase, no key)
+    // ════════════════════════════════════════════════════════════════════════
     function generateLabelsPreview() {
+        if (selectedItems.size === 0) return showToast("Select at least one item.", "warning");
         console.log(`Generating labels for ${selectedItems.size} items...`);
         switchView('preview-view');
         const container = document.getElementById('label-preview-container');
@@ -957,7 +1310,7 @@
         let errorCount = 0;
 
         Array.from(selectedItems).forEach(id => {
-            const item = globalInventory.find(i => i.generatedId === id);
+            const item = globalInventory.find(i => i.BTKnumber === id);
             if (!item) return;
 
             const labelEl = document.createElement('div');
@@ -969,41 +1322,48 @@
             const textDiv = document.createElement('div');
             textDiv.className = 'label-text';
 
-            const num1 = (item.itemnumber  && item.itemnumber  !== 'None') ? item.itemnumber  : id;
-            const num2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
+            const num1 = item.BTKnumber || id;
+            const num2 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
             const num3 = (item.itemnumber3 && item.itemnumber3 !== 'None') ? item.itemnumber3 : '';
 
             textDiv.innerHTML = `
                 <div class="l-num1">${num1}</div>
                 ${num2 ? `<div class="l-num2">${num2}</div>` : ''}
                 ${num3 ? `<div class="l-num3">${num3}</div>` : ''}
-                <div class="l-name">${item['item name'] || 'Unknown'}</div>
+                <div class="l-name">${item['itemname(english)'] || 'Unknown'}</div>
             `;
 
             labelEl.appendChild(qrDiv);
             labelEl.appendChild(textDiv);
             container.appendChild(labelEl);
 
-            const targetUrl = `${BASE_URL}?id=${id}&key=${encodeURIComponent(currentActiveKey)}`;
+            // Optimized QR: uppercase fragment URL, NO key, ID-compressed.
+            const targetUrl = `${BASE_URL}#I=${compressId(id)}&L=${currentWarehouseId}`;
             try {
-                new QRCode(qrDiv, { text: targetUrl, width: 110, height: 110, colorDark: "#000000", colorLight: "#ffffff", correctLevel: qrEccLevel });
+                new QRCode(qrDiv, {
+                    text: targetUrl,
+                    width: 110, height: 110,
+                    colorDark: "#000000", colorLight: "#ffffff",
+                    correctLevel: qrEccLevel
+                });
             } catch(err) {
                 console.error("QR Generate Error:", err);
                 errorCount++;
-                qrDiv.innerHTML = '<span style="font-size:8px;color:red;text-align:center;">Data too long for ECC level</span>';
+                qrDiv.innerHTML = '<span style="font-size:8px;color:red;text-align:center;">QR failed</span>';
             }
         });
 
-        if (errorCount > 0) showToast(`${errorCount} QR code(s) failed. Try a lower ECC level in settings.`, "error");
+        if (errorCount > 0) showToast(`${errorCount} QR code(s) failed.`, "error");
     }
 
-    // ─── PRINT (fixes blank-rectangle issue by converting canvas→img first) ───
+    // ════════════════════════════════════════════════════════════════════════
+    //  PRINT (canvas -> img so thermal/PDF engines render it)
+    // ════════════════════════════════════════════════════════════════════════
     function printLabels() {
         const container = document.getElementById('label-preview-container');
         const canvases  = Array.from(container.querySelectorAll('.label-qr canvas'));
         const imgs      = Array.from(container.querySelectorAll('.label-qr img'));
 
-        // Bake canvas pixels into the sibling <img> elements so the print engine sees raster images
         canvases.forEach((canvas, i) => {
             const dataUrl = canvas.toDataURL('image/png');
             if (imgs[i]) {
@@ -1013,10 +1373,8 @@
             canvas.style.display = 'none';
         });
 
-        // Give the browser a tick to paint the new img srcs, then open print dialog
         setTimeout(() => {
             window.print();
-            // After the print dialog closes, restore the original canvas display
             setTimeout(() => {
                 canvases.forEach(c => { c.style.display = ''; });
                 imgs.forEach(img => { if (img.src.startsWith('data:')) img.removeAttribute('src'); img.style.cssText = ''; });
@@ -1024,7 +1382,9 @@
         }, 200);
     }
 
-    // ─── HTML EXPORT ──────────────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    //  HTML EXPORT
+    // ════════════════════════════════════════════════════════════════════════
     function exportLabelsAsHTML() {
         showToast("Generating HTML print file...", "info");
         const originalContainer = document.getElementById('label-preview-container');
@@ -1064,13 +1424,13 @@ body{margin:0;padding:0;background:#e2e8f0;font-family:Arial,sans-serif;display:
         showToast("Labels exported successfully!", "success");
     }
 
-    // ─── SETTINGS ─────────────────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    //  SETTINGS
+    // ════════════════════════════════════════════════════════════════════════
     function initSettings() {
-        // QR ECC
         const savedEcc = localStorage.getItem('qr-ecc');
         if (savedEcc) { document.getElementById('qr-ecc').value = savedEcc; updateQREccVar(savedEcc); }
 
-        // Label font cap
         const savedCap = localStorage.getItem('label-font-cap') || '16';
         document.getElementById('label-font-cap-range').value = savedCap;
         document.getElementById('font-cap-display').innerText = savedCap + 'pt';
@@ -1085,7 +1445,7 @@ body{margin:0;padding:0;background:#e2e8f0;font-family:Arial,sans-serif;display:
     function showSettings() { switchView('settings-view'); }
 
     function saveSettings() {
-        const eccVal    = document.getElementById('qr-ecc').value;
+        const eccVal     = document.getElementById('qr-ecc').value;
         const fontCapVal = document.getElementById('label-font-cap-range').value;
 
         localStorage.setItem('qr-ecc', eccVal);
@@ -1101,13 +1461,14 @@ body{margin:0;padding:0;background:#e2e8f0;font-family:Arial,sans-serif;display:
     }
 
     function updateQREccVar(val) {
-        const map = { L: QRCode.CorrectLevel.L, Q: QRCode.CorrectLevel.Q, H: QRCode.CorrectLevel.H };
+        const map = { L: QRCode.CorrectLevel.L, M: QRCode.CorrectLevel.M, Q: QRCode.CorrectLevel.Q };
         qrEccLevel = map[val] ?? QRCode.CorrectLevel.M;
     }
 
     function clearSession() {
-        sessionStorage.removeItem('webware_payload');
-        sessionStorage.removeItem('webware_key');
+        localStorage.removeItem(LS_KEYS);
+        localStorage.removeItem(LS_VAULT);
+        localStorage.removeItem(LS_DRAFT);
         window.location.href = window.location.pathname;
     }
 </script>
