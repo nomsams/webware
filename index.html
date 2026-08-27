@@ -619,6 +619,15 @@
             <p class="setting-desc">Lower ECC makes QR modules larger — critical for thermal micro-labels so scanners can read them reliably. (Level H removed.)</p>
         </div>
 
+        <div class="setting-row">
+            <label>Image Storage (Supabase)</label>
+            <div style="background:var(--border); border-radius:8px; height:10px; overflow:hidden; margin-bottom:6px;">
+                <div id="storage-usage-bar" style="height:100%; background:var(--primary); width:0%; transition:width 0.3s;"></div>
+            </div>
+            <p class="setting-desc" id="storage-usage-text">Checking…</p>
+            <button class="secondary" onclick="refreshStorageUsage()" style="margin-top:0.5rem;">🔄 Refresh</button>
+        </div>
+
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>
         <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
     </section>
@@ -700,6 +709,12 @@
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFhZ2Ria3ZjZ3h1cm5xb3dsb2t4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4MTY0MDEsImV4cCI6MjEwMzM5MjQwMX0.tteGQHJTQ775oB0IllbS0oOIPlshngD9yqy_elVl5NU'; // safe to publish — RLS enforces access
     const sb = (typeof window.supabase !== 'undefined') ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
     var currentUserRole = null; // 'viewer' | 'editor' | 'admin' — kept in memory only, never persisted
+
+    // Item photos live in Supabase Storage now (one full + one thumbnail per item, flat filenames
+    // keyed by BTK so re-uploading just overwrites in place). Free plan is 1GB — keep a 10% margin.
+    const SUPABASE_STORAGE_BUCKET = 'item-images';
+    const SUPABASE_STORAGE_QUOTA_BYTES = 1 * 1024 * 1024 * 1024;
+    const SUPABASE_STORAGE_BUDGET_BYTES = Math.floor(SUPABASE_STORAGE_QUOTA_BYTES * 0.9);
 
     // ═════════════════════════════════════════════════════════════════════════
     //  LOGGER
@@ -957,8 +972,43 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             Numberofitems: String(row.numberofitems ?? '0'),
             Inventorylocation: row.inventorylocation || 'None',
             Comments: row.comments || 'None',
-            images: row.images || ''
+            images: row.images || '', // legacy static-mode field, unused for Supabase-mode items now
+            imageFullUrl: row.image_full_url || '',
+            imageThumbUrl: row.image_thumb_url || ''
         };
+    }
+
+    // ── Storage usage / budget (Free plan quota, kept at 90%) ──
+    async function getStorageUsageBytes() {
+        const { data, error } = await sb.storage.from(SUPABASE_STORAGE_BUCKET).list('', { limit: 1000 });
+        if (error) { console.error("Storage list failed:", error); return null; }
+        return (data || []).reduce((sum, f) => sum + (f.metadata?.size || 0), 0);
+    }
+
+    async function checkStorageBudget(additionalBytes) {
+        const used = await getStorageUsageBytes();
+        if (used === null) return true; // fail open — don't block uploads just because the usage check failed
+        return (used + additionalBytes) <= SUPABASE_STORAGE_BUDGET_BYTES;
+    }
+
+    async function refreshStorageUsage() {
+        const textEl = document.getElementById('storage-usage-text');
+        const barEl = document.getElementById('storage-usage-bar');
+        if (!textEl) return;
+        textEl.textContent = 'Checking…';
+        const used = await getStorageUsageBytes();
+        if (used === null) {
+            textEl.textContent = "Couldn't check storage usage right now.";
+            barEl.style.width = '0%';
+            return;
+        }
+        const usedMb = (used / 1024 / 1024).toFixed(1);
+        const quotaMb = (SUPABASE_STORAGE_QUOTA_BYTES / 1024 / 1024).toFixed(0);
+        const budgetMb = (SUPABASE_STORAGE_BUDGET_BYTES / 1024 / 1024).toFixed(0);
+        const pctOfBudget = Math.min(100, (used / SUPABASE_STORAGE_BUDGET_BYTES) * 100);
+        barEl.style.width = pctOfBudget + '%';
+        barEl.style.background = pctOfBudget > 90 ? 'var(--danger)' : pctOfBudget > 70 ? '#f59e0b' : 'var(--primary)';
+        textEl.textContent = `${usedMb} MB used of ${budgetMb} MB budget (${pctOfBudget.toFixed(1)}%) — kept at 90% of Supabase's ${quotaMb} MB free-tier limit as a safety margin.`;
     }
 
     async function loadSupabaseSession(wid) {
@@ -1017,12 +1067,6 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         openItem(btk, { type: 'global' });
     }
 
-    // Persist an item's `images` field back to Supabase (used by single/batch image upload).
-    async function supabasePersistImages(btk, images) {
-        const { error } = await sb.from('items').update({ images }).eq('btk', btk);
-        if (error) throw error;
-    }
-
     // ════════════════════════════════════════════════════════════════════════
     //  IMAGES — client-side resize (Canvas API), single + batch upload
     // ════════════════════════════════════════════════════════════════════════
@@ -1073,6 +1117,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         event.target.value = '';
         if (!files.length) return;
 
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
         const matched = [], unmatched = [];
         for (const file of files) {
             const m = file.name.match(BTK_RE);
@@ -1080,24 +1125,36 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const item = btk && globalInventory.find(i => i.BTKnumber === btk);
             if (!item) { unmatched.push(file.name); continue; }
             const { full, thumb, filename, thumbName } = await resizeImage(file, btk);
-            item.images = appendImageFilename(item.images, filename);
+            if (!isSupa) item.images = appendImageFilename(item.images, filename);
             matched.push({ btk, filename, thumbName, full, thumb });
         }
 
         if (!matched.length) { showToast("No filenames matched a BTK number.", "warning"); return; }
+        const unmatchedMsg = unmatched.length ? ` ${unmatched.length} file(s) unmatched: ${unmatched.join(', ')}` : '';
 
-        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
-            await Promise.all(matched.map(m => {
-                const item = globalInventory.find(i => i.BTKnumber === m.btk);
-                return supabasePersistImages(m.btk, item.images).catch(e => console.error(`Persist failed for ${m.btk}:`, e));
-            }));
-        } else {
-            saveDraft(currentWarehouseId);
+        if (isSupa) {
+            const totalBytes = matched.reduce((s, m) => s + m.full.size + m.thumb.size, 0);
+            if (!(await checkStorageBudget(totalBytes))) {
+                showToast("Storage budget would be exceeded — batch not uploaded. Check Settings for usage.", "error", 8000);
+                return;
+            }
+            let uploaded = 0;
+            for (const m of matched) {
+                try {
+                    const { fullUrl, thumbUrl } = await uploadItemPhotoToSupabase(m.btk, m.full, m.thumb);
+                    const item = globalInventory.find(i => i.BTKnumber === m.btk);
+                    if (item) { item.imageFullUrl = fullUrl; item.imageThumbUrl = thumbUrl; }
+                    uploaded++;
+                } catch (e) { console.error(`Upload failed for ${m.btk}:`, e); }
+            }
+            if (listMode === 'items') filterList(false);
+            showToast(`Uploaded ${uploaded} of ${matched.length} photo(s) to Supabase.${unmatchedMsg}`, "success", 8000);
+            return;
         }
 
+        saveDraft(currentWarehouseId);
         await downloadImageZip(matched);
         if (listMode === 'items') filterList(false);
-        const unmatchedMsg = unmatched.length ? ` ${unmatched.length} file(s) unmatched: ${unmatched.join(', ')}` : '';
         showToast(`Matched ${matched.length} image(s), zip downloaded. Unzip into assets/.${unmatchedMsg}`, "success", 8000);
     }
 
@@ -1368,6 +1425,23 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     // All accepted images in this batch are downloaded and linked to the item together, once the
     // queue is empty — same "download + drop into assets/" convention as the rest of the app.
+    // Uploads a single item's full+thumb blobs to Supabase Storage (flat filenames keyed by BTK,
+    // upsert so re-uploading just replaces in place — no old-version cleanup needed) and links them
+    // on the item row. Cache-busts the URL so the browser doesn't keep showing a stale replaced image.
+    async function uploadItemPhotoToSupabase(btk, full, thumb) {
+        const fullPath = `${btk}_full.jpg`, thumbPath = `${btk}_thumb.jpg`;
+        const up1 = await sb.storage.from(SUPABASE_STORAGE_BUCKET).upload(fullPath, full, { upsert: true, contentType: 'image/jpeg' });
+        if (up1.error) throw up1.error;
+        const up2 = await sb.storage.from(SUPABASE_STORAGE_BUCKET).upload(thumbPath, thumb, { upsert: true, contentType: 'image/jpeg' });
+        if (up2.error) throw up2.error;
+        const bust = '?v=' + Date.now();
+        const fullUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(fullPath).data.publicUrl + bust;
+        const thumbUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(thumbPath).data.publicUrl + bust;
+        const { error } = await sb.from('items').update({ image_full_url: fullUrl, image_thumb_url: thumbUrl }).eq('btk', btk);
+        if (error) throw error;
+        return { fullUrl, thumbUrl };
+    }
+
     async function finishImageEditorQueue() {
         document.getElementById('image-editor-modal').classList.remove('open');
         const accepted = imgEditorAccepted;
@@ -1376,19 +1450,36 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
         const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
         if (!item) return;
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
 
-        let images = item.images || '';
-        accepted.forEach(a => { images = appendImageFilename(images, a.filename); });
-        item.images = images;
-        accepted.forEach(a => { downloadBlob(a.full, a.filename); downloadBlob(a.thumb, a.thumbName); });
-
-        try {
-            if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') await supabasePersistImages(currentItemBTK, images);
-            else saveDraft(currentWarehouseId);
-            showToast(`${accepted.length} image(s) added. Drop the downloaded files into assets/.`, "success", 7000);
-        } catch (e) {
-            console.error("Image persist failed:", e);
-            showToast("Images downloaded but couldn't save to the item: " + e.message, "error");
+        if (isSupa) {
+            // One photo per item — only the last confirmed image in this batch is kept.
+            const last = accepted[accepted.length - 1];
+            try {
+                const totalBytes = last.full.size + last.thumb.size;
+                if (!(await checkStorageBudget(totalBytes))) {
+                    showToast("Storage budget would be exceeded — photo not uploaded. Check Settings for usage.", "error", 8000);
+                } else {
+                    const { fullUrl, thumbUrl } = await uploadItemPhotoToSupabase(currentItemBTK, last.full, last.thumb);
+                    item.imageFullUrl = fullUrl; item.imageThumbUrl = thumbUrl;
+                    showToast(accepted.length > 1 ? `Photo uploaded (only the last of ${accepted.length} is kept — one photo per item).` : "Photo uploaded.", "success");
+                }
+            } catch (e) {
+                console.error("Photo upload failed:", e);
+                showToast("Photo upload failed: " + e.message, "error");
+            }
+        } else {
+            let images = item.images || '';
+            accepted.forEach(a => { images = appendImageFilename(images, a.filename); });
+            item.images = images;
+            accepted.forEach(a => { downloadBlob(a.full, a.filename); downloadBlob(a.thumb, a.thumbName); });
+            try {
+                saveDraft(currentWarehouseId);
+                showToast(`${accepted.length} image(s) added. Drop the downloaded files into assets/.`, "success", 7000);
+            } catch (e) {
+                console.error("Image persist failed:", e);
+                showToast("Images downloaded but couldn't save to the item: " + e.message, "error");
+            }
         }
 
         if (quickEditMode) {
@@ -2170,33 +2261,48 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     // Read-only image gallery. In quick-edit mode each thumbnail gets a remove (✕) button.
     // Returns the current filename list (callers use its length to decide add-controls placement).
+    // Supabase-mode items get a single cloud-stored photo (thumbnail shown, full-res on click);
+    // static-mode items keep the original multi-image assets/ gallery, unchanged.
     function renderItemGallery(item) {
         const imagesEl = document.getElementById('detail-images');
         imagesEl.innerHTML = '';
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+
+        function addThumb(gallery, thumbSrc, fullSrc, alt, onRemove) {
+            const wrap = document.createElement('div');
+            wrap.className = 'img-thumb-wrap';
+            const img = document.createElement('img');
+            img.src = thumbSrc; img.alt = alt; img.title = alt;
+            img.onerror = function() { this.style.display = 'none'; };
+            img.onclick = () => openLightbox(fullSrc);
+            wrap.appendChild(img);
+            if (quickEditMode && canEditItems()) {
+                const rm = document.createElement('button');
+                rm.type = 'button';
+                rm.className = 'img-remove-btn';
+                rm.setAttribute('aria-label', 'Remove image');
+                rm.innerText = '✕';
+                rm.onclick = (e) => { e.stopPropagation(); onRemove(); };
+                wrap.appendChild(rm);
+            }
+            gallery.appendChild(wrap);
+        }
+
+        if (isSupa) {
+            if (!item.imageThumbUrl) return [];
+            const gallery = document.createElement('div');
+            gallery.className = 'item-image-gallery';
+            addThumb(gallery, item.imageThumbUrl, item.imageFullUrl || item.imageThumbUrl, 'Item photo', () => removeItemImage());
+            imagesEl.appendChild(gallery);
+            return [item.imageThumbUrl];
+        }
+
         const rawImages = (item.images || '').trim();
         const filenames = (rawImages && rawImages !== 'None') ? rawImages.split(';').map(s => s.trim()).filter(Boolean) : [];
         if (filenames.length > 0) {
             const gallery = document.createElement('div');
             gallery.className = 'item-image-gallery';
-            filenames.forEach(fn => {
-                const wrap = document.createElement('div');
-                wrap.className = 'img-thumb-wrap';
-                const img = document.createElement('img');
-                img.src = `assets/${fn}`; img.alt = fn; img.title = fn;
-                img.onerror = function() { this.style.display = 'none'; };
-                img.onclick = () => openLightbox(`assets/${fn}`);
-                wrap.appendChild(img);
-                if (quickEditMode && canEditItems()) {
-                    const rm = document.createElement('button');
-                    rm.type = 'button';
-                    rm.className = 'img-remove-btn';
-                    rm.setAttribute('aria-label', 'Remove image');
-                    rm.innerText = '✕';
-                    rm.onclick = (e) => { e.stopPropagation(); removeItemImage(fn); };
-                    wrap.appendChild(rm);
-                }
-                gallery.appendChild(wrap);
-            });
+            filenames.forEach(fn => addThumb(gallery, `assets/${fn}`, `assets/${fn}`, fn, () => removeItemImage(fn)));
             imagesEl.appendChild(gallery);
         }
         return filenames;
@@ -2211,9 +2317,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         top.innerHTML = ''; bottom.innerHTML = '';
         top.classList.add('hidden'); bottom.classList.add('hidden');
         if (!quickEditMode || !canEditItems()) return;
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        // Supabase items get one photo (replaced on re-upload) — static items keep the multi-image gallery.
+        document.getElementById('editor-file-input').multiple = !isSupa;
+        const addLabel = (isSupa && hasImages) ? '🔁 Replace Photo' : '➕ Add Image';
         const target = hasImages ? bottom : top;
         target.innerHTML = `<div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <button class="secondary" onclick="document.getElementById('editor-file-input').click()">➕ Add Image</button>
+            <button class="secondary" onclick="document.getElementById('editor-file-input').click()">${addLabel}</button>
             <button class="secondary" onclick="document.getElementById('editor-camera-input').click()">📷 Take Picture</button>
         </div>`;
         target.classList.remove('hidden');
@@ -2395,20 +2505,36 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // Unlinks an image from the item (the file itself is left in assets/ — this only edits the
     // item's `images` field). Persists immediately, same as image add, rather than deferring to
     // the quick-edit Save button.
+    // Static mode: unlinks one filename from the images text field (file stays in assets/).
+    // Supabase mode: clears the item's single photo (called with no filename) and deletes the
+    // stored objects, since there's only ever one slot to replace/clear.
     async function removeItemImage(filename) {
-        if (!confirm("Remove this image from the item? (The file stays in assets/ — this only unlinks it.)")) return;
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        const confirmMsg = isSupa
+            ? "Remove this item's photo? This deletes it from storage."
+            : "Remove this image from the item? (The file stays in assets/ — this only unlinks it.)";
+        if (!confirm(confirmMsg)) return;
         const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
         if (!item) return;
-        const images = (item.images || '').split(';').map(s => s.trim()).filter(f => f && f !== filename).join(';');
-        item.images = images;
-        try {
-            if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') await supabasePersistImages(currentItemBTK, images);
-            else saveDraft(currentWarehouseId);
-            showToast("Image removed.", "success");
-        } catch (e) {
-            console.error("Image removal persist failed:", e);
-            showToast("Could not save removal: " + e.message, "error");
+
+        if (isSupa) {
+            try {
+                await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove([`${currentItemBTK}_full.jpg`, `${currentItemBTK}_thumb.jpg`]);
+                const { error } = await sb.from('items').update({ image_full_url: null, image_thumb_url: null }).eq('btk', currentItemBTK);
+                if (error) throw error;
+                item.imageFullUrl = ''; item.imageThumbUrl = '';
+                showToast("Photo removed.", "success");
+            } catch (e) {
+                console.error("Photo removal failed:", e);
+                showToast("Could not remove photo: " + e.message, "error");
+            }
+        } else {
+            const images = (item.images || '').split(';').map(s => s.trim()).filter(f => f && f !== filename).join(';');
+            item.images = images;
+            try { saveDraft(currentWarehouseId); showToast("Image removed.", "success"); }
+            catch (e) { console.error("Image removal persist failed:", e); showToast("Could not save removal: " + e.message, "error"); }
         }
+
         const filenames = renderItemGallery(item);
         renderImageAddControls(filenames.length > 0);
     }
@@ -2840,9 +2966,9 @@ ${css}
     }
     function toggleSettings() {
         if (activeView === 'settings-view') { switchView(previousView); }
-        else { previousView = activeView; switchView('settings-view'); }
+        else { previousView = activeView; switchView('settings-view'); refreshStorageUsage(); }
     }
-    function showSettings() { if (!requireAuth()) return; previousView = activeView; switchView('settings-view'); }
+    function showSettings() { if (!requireAuth()) return; previousView = activeView; switchView('settings-view'); refreshStorageUsage(); }
 
     function saveSettings() {
         const eccVal = document.getElementById('qr-ecc').value;
