@@ -169,15 +169,13 @@
             display: flex; align-items: stretch; box-sizing: border-box; padding: 1.5mm;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative; overflow: hidden; margin: 0 auto; border-radius: 2px;
         }
-        .label-text { flex-grow: 1; padding-right: 3mm; display: flex; flex-direction: column; justify-content: flex-start; overflow: hidden; height: 100%; text-align: left; min-width: 0; }
-        .label-text div { line-height: 1.15; font-family: Arial, Helvetica, sans-serif !important; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; margin-left: 2mm; }
+        .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; margin-right: 2.5mm; }
         .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
-        .l-num1 { font-size: clamp(10pt, 4vw, var(--label-font-cap)); font-weight: 900; color: #000; letter-spacing: -0.5px; margin-top: 1mm; }
-        .l-num2 { font-size: clamp(8pt, 3vw, 13pt); color: #111; font-weight: 800; margin-top: 1mm; }
-        .l-name { font-size: clamp(8pt, 2.5vw, 12pt); font-weight: 700; color: #000; margin-top: 1.5mm; }
-        .l-sub  { font-size: 7.5pt; color: #333; font-weight: 600; margin-top: auto; }
-        .l-btk  { font-size: 6pt; color: #555; font-weight: 600; letter-spacing: 0.3px; margin-top: 0.5mm; }
+        .label-text { flex-grow: 1; padding-left: 1mm; display: flex; flex-direction: column; justify-content: flex-start; align-items: flex-end; overflow: hidden; height: 100%; text-align: right; min-width: 0; }
+        .label-text div { line-height: 1.2; font-family: Arial, Helvetica, sans-serif !important; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .l-nums { font-size: clamp(11pt, 4.5vw, var(--label-font-cap)); font-weight: 900; color: #000; letter-spacing: -0.3px; margin-top: 0.5mm; }
+        .l-name { font-size: clamp(8pt, 2.8vw, 12pt); font-weight: 700; color: #000; margin-top: 1.5mm; }
+        .l-btk  { font-size: 6pt; color: #555; font-weight: 600; letter-spacing: 0.3px; margin-top: auto; }
 
         .kit-detail-count { font-size: 1.8rem; font-weight: 900; color: var(--primary); letter-spacing: -0.5px; }
 
@@ -249,7 +247,7 @@
             .preview-grid { display: block !important; margin: 0; padding: 0; background: none !important; gap: 0; max-height: none; overflow: visible; }
             @page { size: 90mm 29mm; margin: 0; }
             .label-card { box-shadow: none !important; margin: 0; page-break-after: always; width: 90mm; height: 29mm; background: white !important; color: black !important; border: none !important; border-radius: 0 !important; }
-            .l-num1, .l-num2, .l-num3, .l-name { color: black !important; }
+            .l-nums, .l-name, .l-btk { color: black !important; }
             .no-print { display: none !important; }
         }
     </style>
@@ -420,7 +418,7 @@
             <button id="btn-single-label" style="flex:1; min-width:160px;">🏷️ Create Label</button>
         </div>
 
-        <h1 id="detail-name" style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.5rem;">Item Name</h1>
+        <h1 id="detail-name" style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">Item Name</h1>
 
         <div id="detail-kit-tags" class="kit-tags"></div>
 
@@ -450,7 +448,8 @@
             <h2 style="margin:0;">Label Preview</h2>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button class="secondary" onclick="showListView()">Cancel</button>
-                <button onclick="printLabels()">🖨️ Print</button>
+                <button onclick="printLabels()">🖨️ Print (HTML)</button>
+                <button onclick="printLabelsBrother()">🖨️ Print (Brother)</button>
                 <button onclick="exportLabelsAsHTML()">💾 HTML Export</button>
             </div>
         </div>
@@ -704,13 +703,13 @@
     const DEMO_CSV_B = `Manufacturer,BTKnumber,itemnumber,itemname(english),itemname(swedish),itemnumber2,itemnumber3,Numberofitems,Inventorylocation,Comments,images
 HÄNY,BTK000001,None,IC310 inklusive Jean Lutz,,IC310,None,0,Best,None,
 HÄNY,BTK000002,955.248B,O-RING 102 X 4,,None,1001007,7,Best,None,
-HÄNY,BTK000003,None,KONTAKTKABEL JEAN LUTZ,,None,101133010,1,Best,None,
+HÄNY,BTK000003,None,KONTAKTKABEL JEAN Lutz,,None,101133010,1,Best,None,
 HÄNY,BTK000004,None,4/3 WAY SOLENOID VALVE,,None,1014485,2,Best,None,
-HÄNY,BTK000005,None,HYDRAULIC PLUNGER,2511-HK-11,None,0,Best,None,
-HÄNY,BTK000006,None,GUIDE BUSH - ZMP600,2511-FF-11,None,2,Best,None,
-HÄNY,BTK000007,359.061,LOCK WASHER M8,None,None,5,Best,None,
-HÄNY,BTK000008,613.034,IMPELLER DISC,2261-ED-11,None,3,3,Best,None,
-HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
+HÄNY,BTK000005,None,HYDRAULIC PLUNGER,2511-HK-11,None,None,0,Best,None,
+HÄNY,BTK000006,None,GUIDE BUSH - ZMP600,2511-FF-11,None,None,2,Best,None,
+HÄNY,BTK000007,359.061,LOCK WASHER M8,None,None,None,5,Best,None,
+HÄNY,BTK000008,613.034,IMPELLER DISC,2261-ED-11,None,None,3,Best,None,
+HÄNY,BTK000009,613.036,GREASE RING,None,None,None,11,Best,None,`;
 
     // Demo seed data (CSV A format — Kit Matrix). Columns = BTKnumber.
     const DEMO_CSV_A = `Spare-part-kit name,kitnumber,BTK000001,BTK000002,BTK000003,BTK000004,BTK000005,BTK000006,BTK000007,BTK000008,BTK000009
@@ -718,6 +717,7 @@ SPARE PART KIT IC 310,None,None,None,None,None,None,None,1,1,1
 SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     const DEMO_PASSPHRASE = 'varuhuset'; // bootstrap key for warehouse 1 demo
+    const DEMO_VERSION = 3; // bump to force re-seed when demo data changes
 
     // ════════════════════════════════════════════════════════════════════════
     //  ID COMPRESSION (BTK000024 -> 24,  24 -> BTK000024)
@@ -785,14 +785,18 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     async function ensureDemoVault() {
         const vault = getEnvelopeVault();
+        const stored = parseInt(localStorage.getItem('webware_demo_version') || '0', 10);
+        const seeded = WAREHOUSES.every(w => vault[w.l]);
+        if (stored === DEMO_VERSION && seeded) return; // already up to date
         try {
             const items = parseCSVString(DEMO_CSV_B);
             const kits = parseKitsCSVString(DEMO_CSV_A);
             const env = await encryptEnvelope({ items, kits }, [DEMO_PASSPHRASE]);
             // varuhuset can see every warehouse: seed all demo warehouses with the same data.
-            WAREHOUSES.forEach(w => { if (!vault[w.l]) vault[w.l] = env; });
+            WAREHOUSES.forEach(w => { vault[w.l] = env; });
             setEnvelopeVault(vault);
-            console.log("Demo vaults created for all warehouses (items + kits).");
+            localStorage.setItem('webware_demo_version', String(DEMO_VERSION));
+            console.log("Demo vaults (re)seeded for all warehouses (items + kits).");
         } catch (e) { console.error("Demo vault bootstrap failed:", e); }
     }
 
@@ -1293,11 +1297,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             div.setAttribute('role', 'button'); div.tabIndex = 0;
             const kNum1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : btk;
             const kNum2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
+            const kNums = [kNum1, kNum2].filter(Boolean).join(' · ');
+            const kName = item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed';
+            const kMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
             div.innerHTML = `
                 <div class="kit-info">
-                    <div class="item-id">${kNum1}</div>
-                    ${kNum2 ? `<div class="item-title">${kNum2}</div>` : ''}
-                    <div class="item-sub"><strong>${item['itemname(english)'] || 'Unnamed'}</strong>${item.Manufacturer && item.Manufacturer !== 'None' ? ' · ' + item.Manufacturer : ''}</div>
+                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${kName}</div>
+                    ${kNums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${kNums}</div>` : ''}
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${kMfr ? kMfr + ' ' : ''}${btk}</div>
                 </div>
                 <span class="kit-qty-badge">×${qty}</span>`;
             div.onclick = () => openItem(btk, { type: 'kit', kitnumber: kit.kitnumber, kitName: kit.name, items: btks });
@@ -1402,15 +1409,16 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             }
         }
 
+        const dNum1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
+        const dNum2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
+        const dNums = [dNum1, dNum2].filter(Boolean).join(' · ');
+        const dMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
         document.getElementById('detail-content').innerHTML = `
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">System ID:</span><span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Manufacturer:</span><span>${getStr(item.Manufacturer)}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">English Name:</span><span>${getStr(item['itemname(english)'])}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Swedish Name:</span><span>${getStr(item['itemname(swedish)'])}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Item #:</span><span>${getStr(item.itemnumber)}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Item #2:</span><span>${getStr(item.itemnumber2)}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Item #3:</span><span>${getStr(item.itemnumber3)}</span></div>
+            ${dNums ? `<div style="margin-bottom:10px;font-size:1.25rem;font-weight:800;color:var(--text-main);">${dNums}</div>` : ''}
+            <div style="margin-bottom:14px;font-size:1rem;color:var(--text-muted);"><strong style="color:var(--text-main);">${dMfr ? dMfr + ' · ' : ''}</strong><span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span></div>
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Stock:</span><span style="font-weight:600;color:var(--primary);">${getStr(item.Numberofitems)}</span> &nbsp;units @ ${getStr(item.Inventorylocation)}</div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Swedish Name:</span><span>${getStr(item['itemname(swedish)'])}</span></div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Item #3:</span><span>${getStr(item.itemnumber3)}</span></div>
             <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;"><span style="font-weight:600;">Comments:</span><div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div></div>`;
 
         document.getElementById('btn-single-label').onclick = () => {
@@ -1563,18 +1571,16 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
             const num1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
             const num2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
-            const internal = (item.itemnumber3 && item.itemnumber3 !== 'None') ? item.itemnumber3 : '';
+            const nums = [num1, num2].filter(Boolean).join(' · ');
             const name = item['itemname(english)'] || item['itemname(swedish)'] || 'Unknown';
 
             textDiv.innerHTML = `
-                ${num1 ? `<div class="l-num1">${num1}</div>` : ''}
-                ${num2 ? `<div class="l-num2">${num2}</div>` : ''}
+                ${nums ? `<div class="l-nums">${nums}</div>` : ''}
                 <div class="l-name">${name}</div>
-                ${internal ? `<div class="l-sub">Internal: ${internal}</div>` : ''}
                 <div class="l-btk">${item.BTKnumber || id}</div>`;
 
-            labelEl.appendChild(textDiv);
             labelEl.appendChild(qrDiv);
+            labelEl.appendChild(textDiv);
             container.appendChild(labelEl);
 
             // True alphanumeric QR: #<COMPRESSED>/<WAREHOUSE> — no =, no &
@@ -1605,15 +1611,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             if (clonedCanvases[i]?.parentNode) clonedCanvases[i].parentNode.removeChild(clonedCanvases[i]);
         }
         const css = `.label-card{width:90mm;height:29mm;background:white;color:black;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm;overflow:hidden;position:relative}
-.label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-left:2mm}
+.label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-right:2.5mm}
 .label-qr img{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
-.label-text{flex-grow:1;padding-right:3mm;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden;height:100%;text-align:left;min-width:0}
-.label-text div{line-height:1.15;font-family:Arial,Helvetica,sans-serif!important;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.l-num1{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.5px;margin-top:1mm}
-.l-num2{font-size:11pt;color:#111;font-weight:800;margin-top:1mm}
+.label-text{flex-grow:1;padding-left:1mm;display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-end;overflow:hidden;height:100%;text-align:right;min-width:0}
+.label-text div{line-height:1.2;font-family:Arial,Helvetica,sans-serif!important;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.l-nums{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.3px;margin-top:0.5mm}
 .l-name{font-size:11pt;font-weight:700;color:#000;margin-top:1.5mm}
-.l-sub{font-size:8pt;color:#333;font-weight:600;margin-top:auto}
-.l-btk{font-size:6pt;color:#555;font-weight:600;letter-spacing:0.3px;margin-top:0.5mm}
+.l-btk{font-size:6pt;color:#555;font-weight:600;letter-spacing:0.3px;margin-top:auto}
 @media print{body{background:white!important;padding:0;gap:0;display:block}@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none}}`;
         const printDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Brother QL Labels</title><style>${css}</style></head><body onload="window.print()">${cloneContainer.innerHTML}</body></html>`;
         const iframe = document.createElement('iframe');
@@ -1621,6 +1625,25 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.body.appendChild(iframe);
         iframe.srcdoc = printDoc;
         setTimeout(() => { document.body.removeChild(iframe); }, 4000);
+    }
+
+    // Brother label printer: prints the on-screen preview at 90x29mm (select Brother QL in print dialog)
+    function printLabelsBrother() {
+        const container = document.getElementById('label-preview-container');
+        const canvases = Array.from(container.querySelectorAll('.label-qr canvas'));
+        const imgs = Array.from(container.querySelectorAll('.label-qr img'));
+        canvases.forEach((canvas, i) => {
+            const dataUrl = canvas.toDataURL('image/png');
+            if (imgs[i]) { imgs[i].src = dataUrl; imgs[i].style.cssText = 'display:block !important; max-width:100%; max-height:100%;'; }
+            canvas.style.display = 'none';
+        });
+        const resume = () => {
+            canvases.forEach(c => { c.style.display = ''; });
+            imgs.forEach(img => { if (img.src.startsWith('data:')) img.removeAttribute('src'); img.style.cssText = ''; });
+            window.removeEventListener('afterprint', resume);
+        };
+        window.addEventListener('afterprint', resume);
+        window.print();
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1643,15 +1666,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 <style>
 body{margin:0;padding:0;background:#e2e8f0;font-family:Arial,sans-serif;display:flex;flex-direction:column;align-items:center;gap:1rem;padding:1rem}
 .label-card{width:90mm;height:29mm;background:white;color:black;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm;overflow:hidden;position:relative}
-.label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center}
+.label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-right:2.5mm}
 .label-qr img{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
-.label-text{flex-grow:1;padding-right:3mm;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden;height:100%;text-align:left;min-width:0}
-.label-text div{line-height:1.15;font-family:Arial,Helvetica,sans-serif!important;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.l-num1{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.5px;margin-top:1mm}
-.l-num2{font-size:11pt;color:#111;font-weight:800;margin-top:1mm}
+.label-text{flex-grow:1;padding-left:1mm;display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-end;overflow:hidden;height:100%;text-align:right;min-width:0}
+.label-text div{line-height:1.2;font-family:Arial,Helvetica,sans-serif!important;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.l-nums{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.3px;margin-top:0.5mm}
 .l-name{font-size:11pt;font-weight:700;color:#000;margin-top:1.5mm}
-.l-sub{font-size:8pt;color:#333;font-weight:600;margin-top:auto}
-.l-btk{font-size:6pt;color:#555;font-weight:600;letter-spacing:0.3px;margin-top:0.5mm}
+.l-btk{font-size:6pt;color:#555;font-weight:600;letter-spacing:0.3px;margin-top:auto}
 @media print{body{background:white!important;padding:0;gap:0;display:block}@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none}}
 </style></head><body onload="window.print()">${cloneContainer.innerHTML}</body></html>`;
         const blob = new Blob([exportDoc], { type: 'text/html' });
