@@ -199,6 +199,21 @@
         .item-image-gallery { display: flex; gap: 10px; overflow-x: auto; padding: 0.5rem 0 1rem; scrollbar-width: thin; }
         .item-image-gallery img { height: 130px; width: auto; object-fit: cover; border-radius: 10px; border: 2px solid var(--border); cursor: pointer; transition: transform 0.2s, border-color 0.2s; flex-shrink: 0; }
         .item-image-gallery img:hover { transform: scale(1.04); border-color: var(--primary); }
+        .img-thumb-wrap { position: relative; flex-shrink: 0; }
+        .img-remove-btn { position: absolute; top: -8px; right: -8px; width: 26px; height: 26px; min-height: unset; padding: 0; border-radius: 50%; background: var(--danger); color: white; font-weight: 700; font-size: 0.9rem; box-shadow: 0 2px 6px rgba(0,0,0,0.3); z-index: 2; }
+        .img-remove-btn:hover { background: #dc2626; transform: none; }
+
+        /* --- IMAGE EDITOR MODAL --- */
+        .img-editor-canvas-wrap { position: relative; width: 100%; max-height: 55vh; display: flex; align-items: center; justify-content: center; background: #111; border-radius: 12px; overflow: hidden; margin-bottom: 1rem; touch-action: none; }
+        .img-editor-canvas-wrap canvas { max-width: 100%; max-height: 55vh; display: block; }
+        .img-editor-crop-overlay { position: absolute; pointer-events: none; box-shadow: 0 0 0 9999px rgba(0,0,0,0.6); border: 2px dashed rgba(255,255,255,0.9); cursor: grab; }
+        .img-editor-crop-overlay.active { pointer-events: auto; }
+        .img-editor-crop-overlay:active { cursor: grabbing; }
+        .img-editor-toolbar { display: flex; flex-direction: column; gap: 10px; background: var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 1rem; }
+        .img-editor-tool-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .img-editor-swatch { width: 30px; height: 30px; min-height: unset; padding: 0; border-radius: 50%; border: 2px solid var(--card-bg); box-shadow: 0 0 0 1.5px var(--text-muted); flex-shrink: 0; }
+        .img-editor-swatch.active { box-shadow: 0 0 0 2.5px var(--primary); }
+        .img-editor-toolbar button.active { background: var(--primary); color: white; }
 
         /* --- LIGHTBOX --- */
         .lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 9998; align-items: center; justify-content: center; }
@@ -279,6 +294,51 @@
 <div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
     <button class="lightbox-close" onclick="closeLightbox(event)" aria-label="Close lightbox">✕</button>
     <img id="lightbox-img" src="" alt="Item image enlarged">
+</div>
+
+<!-- Image Editor Modal (rotate / crop / pen annotate) — used by both "Add Image" and "Take Picture" -->
+<div class="modal-overlay" id="image-editor-modal" onclick="handleImageEditorOverlayClick(event)">
+    <div class="modal-box" style="max-width:480px;">
+        <h3>🖼️ Edit Image <span id="img-editor-progress" style="font-size:0.8rem;font-weight:500;color:var(--text-muted);"></span></h3>
+        <p id="img-editor-error" class="hidden" style="color:var(--danger); font-weight:600; font-size:0.85rem; margin-bottom:0.5rem;"></p>
+
+        <div id="img-editor-canvas-wrap" class="img-editor-canvas-wrap">
+            <canvas id="img-editor-canvas"></canvas>
+            <div id="img-editor-crop-overlay" class="img-editor-crop-overlay"></div>
+        </div>
+
+        <div class="img-editor-toolbar">
+            <div class="img-editor-tool-group">
+                <span class="modal-label" style="margin:0;">Rotate</span>
+                <button class="secondary" style="min-width:44px;padding:6px 10px;" onclick="imgEditorRotate90(-1)">⟲ 90°</button>
+                <button class="secondary" style="min-width:44px;padding:6px 10px;" onclick="imgEditorRotate90(1)">⟳ 90°</button>
+                <input type="range" id="img-editor-fine-rotate" min="-45" max="45" step="1" value="0" style="width:100px;" oninput="imgEditorPreviewFineRotate(this.value)" onchange="imgEditorBakeFineRotate(this.value)">
+                <span id="img-editor-fine-rotate-val" class="range-value" style="min-width:32px;">0°</span>
+            </div>
+
+            <div class="img-editor-tool-group">
+                <span class="modal-label" style="margin:0;">Crop</span>
+                <button class="secondary" id="img-editor-crop-square" style="padding:6px 10px;" onclick="imgEditorSetCropMode('square')">◻ 1:1</button>
+                <button class="secondary" id="img-editor-crop-free" style="padding:6px 10px;" onclick="imgEditorSetCropMode('free')">⬜ Full image</button>
+                <input type="range" id="img-editor-crop-zoom" min="20" max="100" step="1" value="100" style="width:100px;" oninput="imgEditorSetCropZoom(this.value)">
+            </div>
+
+            <div class="img-editor-tool-group">
+                <span class="modal-label" style="margin:0;">Pen</span>
+                <button class="secondary" id="img-editor-pen-toggle" style="padding:6px 10px;" onclick="imgEditorTogglePen()">🖊️ Draw</button>
+                <button class="img-editor-swatch" data-color="#ef4444" style="background:#ef4444;" onclick="setImgEditorColor('#ef4444')" aria-label="Red"></button>
+                <button class="img-editor-swatch" data-color="#111111" style="background:#111111;" onclick="setImgEditorColor('#111111')" aria-label="Black"></button>
+                <button class="img-editor-swatch" data-color="#f59e0b" style="background:#f59e0b;" onclick="setImgEditorColor('#f59e0b')" aria-label="Yellow"></button>
+                <input type="color" id="img-editor-color-picker" value="#ef4444" oninput="setImgEditorColor(this.value)" aria-label="Custom color" style="width:36px;height:36px;padding:2px;min-height:unset;">
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="imgEditorSkip()">Skip This Image</button>
+            <button class="success-btn full-width" onclick="imgEditorConfirm()">✔ Use This Image</button>
+        </div>
+        <button class="secondary full-width" style="margin-top:0.5rem;" onclick="closeImageEditor()">Cancel All</button>
+    </div>
 </div>
 
 <!-- Add/Edit Item Modal -->
@@ -446,19 +506,30 @@
             <button id="btn-single-label" style="flex:1; min-width:160px;">🏷️ Create Label</button>
         </div>
 
+        <!-- Quick-edit save/cancel bar — shown only while inline-editing (double-click to enter) -->
+        <div id="quick-edit-bar" class="hidden" style="display:flex; gap:10px; margin-bottom:1.25rem; background:var(--primary-light); border:1px solid var(--primary); border-radius:12px; padding:10px 14px; align-items:center; flex-wrap:wrap;">
+            <span style="font-weight:700; color:var(--primary); flex:1;">✏️ Editing this item</span>
+            <button class="secondary" onclick="cancelQuickEdit()">✕ Cancel</button>
+            <button class="success-btn" onclick="saveQuickEdit()">💾 Save Changes</button>
+        </div>
+
         <h1 id="detail-name" style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">Item Name</h1>
 
         <div id="detail-kit-tags" class="kit-tags"></div>
 
         <div id="detail-images"></div>
 
-        <div id="btn-add-image-wrap" class="hidden" style="margin-bottom:1rem;">
-            <button class="secondary" onclick="document.getElementById('single-image-upload').click()">📷 Add Image</button>
-            <input type="file" id="single-image-upload" accept="image/jpeg,image/png,image/webp" class="hidden" onchange="handleSingleImageUpload(event)" aria-label="Add Image">
-        </div>
+        <div id="img-add-controls-top" class="hidden" style="margin-bottom:1rem;"></div>
 
-        <div id="detail-content" style="margin-top: 1rem; line-height: 1.8; font-size: 1.05rem;"></div>
-        
+        <p id="quick-edit-hint" class="hidden" style="color:var(--text-muted); font-size:0.82rem; margin:-0.5rem 0 0.75rem;">💡 Double-click below to quick-edit this item</p>
+
+        <div id="detail-content" ondblclick="enterQuickEdit()" style="margin-top: 1rem; line-height: 1.8; font-size: 1.05rem;"></div>
+
+        <div id="img-add-controls-bottom" class="hidden" style="margin:1.5rem 0 1rem;"></div>
+
+        <input type="file" id="editor-file-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple class="hidden" onchange="handleEditorFileInput(event)" aria-label="Add Images">
+        <input type="file" id="editor-camera-input" accept="image/*" capture="environment" class="hidden" onchange="handleEditorFileInput(event)" aria-label="Take Picture">
+
         <div style="margin-top: 2rem; margin-bottom: 1rem;">
             <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Warehouse Locator Map</strong>
             <div class="warehouse-map" id="mock-map"></div>
@@ -598,6 +669,24 @@
     var labelMode = 'items';
     var labelPaperType = 'default'; // 'default' (29x90 Brother QL) | 'wide68' (68mm wide, custom length)
     var labelWide68Height = 28; // mm — the adjustable dimension for the wide68 paper type
+
+    // Quick-edit (inline, double-click) state
+    var quickEditMode = false;
+    var quickEditOriginal = null; // snapshot of the item at edit-entry, for dirty-checking
+
+    // Image editor state
+    var imgEditorQueue = [];      // File[] still to process this batch
+    var imgEditorAccepted = [];   // [{filename, thumbName, full, thumb}] confirmed so far this batch
+    var imgEditorTotal = 0;
+    var imgEditorCropMode = 'square'; // 'square' | 'free'
+    var imgEditorCropZoom = 100;      // percent, 20-100 (square mode only)
+    var imgEditorCropCenter = { x: 0.5, y: 0.5 }; // normalized 0-1, pan position within image
+    var imgEditorPenActive = false;
+    var imgEditorColor = '#ef4444';
+    var imgEditorDrawing = false;
+    var imgEditorLastPt = null;
+    var imgEditorFineRotateBase = null; // clean pre-preview canvas snapshot, for non-destructive slider drag
+    var imgEditorPanStart = null;
     var WAREHOUSES = [
         { l: '1', name: 'Main Warehouse — Best', address: 'Best, Sweden', mode: 'supabase' },
         { l: '2', name: 'North Depot', address: 'Stockholm, Sweden' },
@@ -635,6 +724,20 @@
     console.log  = (...a) => { _log(...a);  appLog('info',  ...a); };
     console.error= (...a) => { _err(...a);  appLog('error', ...a); };
     console.warn = (...a) => { _warn(...a); appLog('warn',  ...a); };
+
+    // Escapes text for safe interpolation into both HTML content and quoted attribute values.
+    function escapeHtml(s) {
+        return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    // Whether the current session can edit item fields/images: static-mode warehouses have no role
+    // concept (any unlocked session may edit, matching the existing Add/Edit modal); Supabase-mode
+    // warehouses additionally require a non-viewer role.
+    function canEditItems() {
+        if (!currentActiveKey) return false;
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        return !isSupa || currentUserRole !== 'viewer';
+    }
 
     function toggleConsole() { document.getElementById('console-overlay').classList.toggle('open'); }
     function handleConsoleOverlayClick(e) { if (e.target === document.getElementById('console-overlay')) toggleConsole(); }
@@ -963,27 +1066,6 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         downloadBlob(blob, 'batch-images.zip');
     }
 
-    async function handleSingleImageUpload(event) {
-        const file = event.target.files[0];
-        event.target.value = '';
-        if (!file || !currentItemBTK) return;
-        try {
-            const { full, thumb, filename, thumbName } = await resizeImage(file, currentItemBTK);
-            const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
-            const newImages = appendImageFilename(item.images, filename);
-            downloadBlob(full, filename);
-            downloadBlob(thumb, thumbName);
-            item.images = newImages;
-            if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') await supabasePersistImages(currentItemBTK, newImages);
-            else saveDraft(currentWarehouseId);
-            showToast(`Image resized & downloaded. Drop ${filename} + ${thumbName} into assets/.`, "success", 6000);
-            openItem(currentItemBTK, navigationContext);
-        } catch (e) {
-            console.error("Image upload failed:", e);
-            showToast("Image upload failed: " + e.message, "error");
-        }
-    }
-
     function triggerBatchImageUpload() { if (!requireAuth()) return; document.getElementById('batch-image-upload').click(); }
 
     async function handleBatchImageUpload(event) {
@@ -1020,6 +1102,304 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     // ════════════════════════════════════════════════════════════════════════
+    //  IMAGE EDITOR — rotate (90° snap + manual fine angle), 1:1/free crop with
+    //  zoom+pan, and a solid-colour pen. Used by both "Add Image" and "Take
+    //  Picture" (rear camera). Processes one file at a time from a queue so
+    //  multi-select uploads (from either iPhone's or Android's native picker —
+    //  both just hand back a FileList, nothing platform-specific needed) get
+    //  edited one by one before all being saved together.
+    // ════════════════════════════════════════════════════════════════════════
+    function handleEditorFileInput(event) {
+        const files = Array.from(event.target.files || []);
+        event.target.value = '';
+        if (!files.length || !currentItemBTK) return;
+        openImageEditorQueue(files);
+    }
+
+    function openImageEditorQueue(files) {
+        imgEditorQueue = files;
+        imgEditorAccepted = [];
+        imgEditorTotal = files.length;
+        document.getElementById('image-editor-modal').classList.add('open');
+        loadNextImageIntoEditor();
+    }
+
+    async function loadNextImageIntoEditor() {
+        if (!imgEditorQueue.length) { finishImageEditorQueue(); return; }
+        const file = imgEditorQueue.shift();
+        const doneCount = imgEditorTotal - imgEditorQueue.length;
+        document.getElementById('img-editor-progress').innerText = imgEditorTotal > 1 ? `(${doneCount} of ${imgEditorTotal})` : '';
+        document.getElementById('img-editor-error').classList.add('hidden');
+        resetImgEditorToolState();
+        try {
+            const bmp = await createImageBitmap(file);
+            const canvas = document.getElementById('img-editor-canvas');
+            canvas.width = bmp.width; canvas.height = bmp.height;
+            canvas.getContext('2d').drawImage(bmp, 0, 0);
+            updateCropOverlay();
+        } catch (e) {
+            console.error("Failed to load image:", file.name, e);
+            const err = document.getElementById('img-editor-error');
+            err.textContent = `Couldn't open "${file.name}". If this is an iPhone photo saved as HEIC, try exporting/sharing it as JPEG instead. Click "Skip This Image" to continue.`;
+            err.classList.remove('hidden');
+        }
+    }
+
+    function resetImgEditorToolState() {
+        imgEditorCropMode = 'square';
+        imgEditorCropZoom = 100;
+        imgEditorCropCenter = { x: 0.5, y: 0.5 };
+        imgEditorPenActive = false;
+        imgEditorFineRotateBase = null;
+        document.getElementById('img-editor-crop-zoom').value = 100;
+        document.getElementById('img-editor-fine-rotate').value = 0;
+        document.getElementById('img-editor-fine-rotate-val').innerText = '0°';
+        document.getElementById('img-editor-pen-toggle').classList.remove('active');
+        document.getElementById('img-editor-color-picker').value = imgEditorColor;
+        syncCropButtons();
+    }
+
+    // ── Rotate ──
+    function imgEditorRotate90(dir) {
+        const canvas = document.getElementById('img-editor-canvas');
+        const w = canvas.width, h = canvas.height;
+        const out = document.createElement('canvas');
+        out.width = h; out.height = w;
+        const ctx = out.getContext('2d');
+        if (dir > 0) { ctx.translate(h, 0); ctx.rotate(Math.PI / 2); }
+        else { ctx.translate(0, w); ctx.rotate(-Math.PI / 2); }
+        ctx.drawImage(canvas, 0, 0);
+        canvas.width = out.width; canvas.height = out.height;
+        canvas.getContext('2d').drawImage(out, 0, 0);
+        updateCropOverlay();
+    }
+
+    function imgEditorPreviewFineRotate(deg) {
+        deg = parseFloat(deg);
+        document.getElementById('img-editor-fine-rotate-val').innerText = deg + '°';
+        const canvas = document.getElementById('img-editor-canvas');
+        if (!imgEditorFineRotateBase) {
+            imgEditorFineRotateBase = document.createElement('canvas');
+            imgEditorFineRotateBase.width = canvas.width;
+            imgEditorFineRotateBase.height = canvas.height;
+            imgEditorFineRotateBase.getContext('2d').drawImage(canvas, 0, 0);
+        }
+        const base = imgEditorFineRotateBase;
+        const rad = deg * Math.PI / 180;
+        const w = base.width, h = base.height;
+        const newW = Math.ceil(Math.abs(w * Math.cos(rad)) + Math.abs(h * Math.sin(rad)));
+        const newH = Math.ceil(Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad)));
+        canvas.width = newW; canvas.height = newH;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, newW, newH); // fill corners exposed by rotation
+        ctx.save();
+        ctx.translate(newW / 2, newH / 2);
+        ctx.rotate(rad);
+        ctx.drawImage(base, -w / 2, -h / 2);
+        ctx.restore();
+        updateCropOverlay();
+    }
+
+    function imgEditorBakeFineRotate() {
+        imgEditorFineRotateBase = null; // next drag starts a fresh snapshot from the now-baked pixels
+        document.getElementById('img-editor-fine-rotate').value = 0;
+        document.getElementById('img-editor-fine-rotate-val').innerText = '0°';
+    }
+
+    // ── Crop (centered, aspect-locked zoom + drag-to-pan — simpler and more reliable
+    //    on touch than free-drag resize handles, while still giving real manual control) ──
+    function imgEditorSetCropMode(mode) {
+        imgEditorCropMode = mode;
+        syncCropButtons();
+        updateCropOverlay();
+    }
+
+    function syncCropButtons() {
+        document.getElementById('img-editor-crop-square').classList.toggle('active', imgEditorCropMode === 'square');
+        document.getElementById('img-editor-crop-free').classList.toggle('active', imgEditorCropMode === 'free');
+        document.getElementById('img-editor-crop-zoom').disabled = imgEditorCropMode !== 'square';
+    }
+
+    function imgEditorSetCropZoom(val) {
+        imgEditorCropZoom = parseFloat(val);
+        updateCropOverlay();
+    }
+
+    function computeCropRectPixels() {
+        const canvas = document.getElementById('img-editor-canvas');
+        const w = canvas.width, h = canvas.height;
+        const shortSide = Math.min(w, h);
+        const size = shortSide * (imgEditorCropZoom / 100);
+        const cropW = Math.min(size, w), cropH = Math.min(size, h);
+        let cx = imgEditorCropCenter.x * w, cy = imgEditorCropCenter.y * h;
+        cx = Math.max(cropW / 2, Math.min(w - cropW / 2, cx));
+        cy = Math.max(cropH / 2, Math.min(h - cropH / 2, cy));
+        return { x: cx - cropW / 2, y: cy - cropH / 2, w: cropW, h: cropH };
+    }
+
+    function updateCropOverlay() {
+        const overlay = document.getElementById('img-editor-crop-overlay');
+        if (imgEditorCropMode === 'free') { overlay.style.display = 'none'; return; }
+        const canvas = document.getElementById('img-editor-canvas');
+        const rect = computeCropRectPixels();
+        const dispRect = canvas.getBoundingClientRect();
+        const wrapRect = document.getElementById('img-editor-canvas-wrap').getBoundingClientRect();
+        if (dispRect.width === 0) { overlay.style.display = 'none'; return; }
+        const scale = dispRect.width / canvas.width;
+        overlay.style.display = 'block';
+        overlay.style.left = ((dispRect.left - wrapRect.left) + rect.x * scale) + 'px';
+        overlay.style.top = ((dispRect.top - wrapRect.top) + rect.y * scale) + 'px';
+        overlay.style.width = (rect.w * scale) + 'px';
+        overlay.style.height = (rect.h * scale) + 'px';
+        overlay.classList.toggle('active', !imgEditorPenActive);
+    }
+
+    function imgEditorCropPointerDown(e) {
+        if (imgEditorCropMode !== 'square' || imgEditorPenActive) return;
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        imgEditorPanStart = { x: e.clientX, y: e.clientY, center: { ...imgEditorCropCenter } };
+    }
+    function imgEditorCropPointerMove(e) {
+        if (!imgEditorPanStart) return;
+        const canvas = document.getElementById('img-editor-canvas');
+        const dispRect = canvas.getBoundingClientRect();
+        if (dispRect.width === 0) return;
+        const scale = dispRect.width / canvas.width;
+        const dxNorm = (e.clientX - imgEditorPanStart.x) / scale / canvas.width;
+        const dyNorm = (e.clientY - imgEditorPanStart.y) / scale / canvas.height;
+        imgEditorCropCenter = { x: imgEditorPanStart.center.x + dxNorm, y: imgEditorPanStart.center.y + dyNorm };
+        updateCropOverlay();
+    }
+    function imgEditorCropPointerUp() { imgEditorPanStart = null; }
+
+    // ── Pen (solid colour, freehand) ──
+    function imgEditorTogglePen() {
+        imgEditorPenActive = !imgEditorPenActive;
+        document.getElementById('img-editor-pen-toggle').classList.toggle('active', imgEditorPenActive);
+        updateCropOverlay();
+    }
+
+    function setImgEditorColor(color) {
+        imgEditorColor = color;
+        document.getElementById('img-editor-color-picker').value = color;
+        document.querySelectorAll('.img-editor-swatch').forEach(sw => {
+            sw.classList.toggle('active', sw.dataset.color.toLowerCase() === color.toLowerCase());
+        });
+    }
+
+    function canvasPointFromEvent(e) {
+        const canvas = document.getElementById('img-editor-canvas');
+        const r = canvas.getBoundingClientRect();
+        return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
+    }
+
+    function imgEditorPenPointerDown(e) {
+        if (!imgEditorPenActive) return;
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        imgEditorDrawing = true;
+        imgEditorLastPt = canvasPointFromEvent(e);
+    }
+    function imgEditorPenPointerMove(e) {
+        if (!imgEditorDrawing) return;
+        const canvas = document.getElementById('img-editor-canvas');
+        const ctx = canvas.getContext('2d');
+        const pt = canvasPointFromEvent(e);
+        ctx.strokeStyle = imgEditorColor;
+        ctx.lineWidth = Math.max(4, Math.round(Math.min(canvas.width, canvas.height) * 0.015));
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(imgEditorLastPt.x, imgEditorLastPt.y);
+        ctx.lineTo(pt.x, pt.y);
+        ctx.stroke();
+        imgEditorLastPt = pt;
+    }
+    function imgEditorPenPointerUp() { imgEditorDrawing = false; imgEditorLastPt = null; }
+
+    // One-time listener wiring for the editor's canvas/crop-overlay (elements are static in the
+    // DOM — reused across every image in the queue rather than recreated).
+    function initImageEditorHandlers() {
+        const canvas = document.getElementById('img-editor-canvas');
+        const overlay = document.getElementById('img-editor-crop-overlay');
+        canvas.addEventListener('pointerdown', imgEditorPenPointerDown);
+        canvas.addEventListener('pointermove', imgEditorPenPointerMove);
+        canvas.addEventListener('pointerup', imgEditorPenPointerUp);
+        canvas.addEventListener('pointercancel', imgEditorPenPointerUp);
+        overlay.addEventListener('pointerdown', imgEditorCropPointerDown);
+        overlay.addEventListener('pointermove', imgEditorCropPointerMove);
+        overlay.addEventListener('pointerup', imgEditorCropPointerUp);
+        overlay.addEventListener('pointercancel', imgEditorCropPointerUp);
+    }
+
+    // ── Confirm / skip / queue advance ──
+    async function imgEditorConfirm() {
+        const canvas = document.getElementById('img-editor-canvas');
+        let finalCanvas = canvas;
+        if (imgEditorCropMode === 'square') {
+            const rect = computeCropRectPixels();
+            const cropped = document.createElement('canvas');
+            cropped.width = Math.round(rect.w); cropped.height = Math.round(rect.h);
+            cropped.getContext('2d').drawImage(canvas, rect.x, rect.y, rect.w, rect.h, 0, 0, cropped.width, cropped.height);
+            finalCanvas = cropped;
+        }
+        const bmp = await createImageBitmap(finalCanvas);
+        const btk = currentItemBTK;
+        const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+        const filename = `${btk}_${stamp}.jpg`, thumbName = `${btk}_${stamp}_thumb.jpg`;
+        const full = await drawToBlob(bmp, 1600, 0.85);
+        const thumb = await drawToBlob(bmp, 320, 0.8);
+        imgEditorAccepted.push({ filename, thumbName, full, thumb });
+        loadNextImageIntoEditor();
+    }
+
+    function imgEditorSkip() { loadNextImageIntoEditor(); }
+
+    function closeImageEditor() {
+        document.getElementById('image-editor-modal').classList.remove('open');
+        imgEditorQueue = [];
+        imgEditorAccepted = [];
+        imgEditorFineRotateBase = null;
+    }
+
+    function handleImageEditorOverlayClick(e) {
+        if (e.target === document.getElementById('image-editor-modal')) closeImageEditor();
+    }
+
+    // All accepted images in this batch are downloaded and linked to the item together, once the
+    // queue is empty — same "download + drop into assets/" convention as the rest of the app.
+    async function finishImageEditorQueue() {
+        document.getElementById('image-editor-modal').classList.remove('open');
+        const accepted = imgEditorAccepted;
+        imgEditorAccepted = [];
+        if (!accepted.length) return;
+
+        const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+        if (!item) return;
+
+        let images = item.images || '';
+        accepted.forEach(a => { images = appendImageFilename(images, a.filename); });
+        item.images = images;
+        accepted.forEach(a => { downloadBlob(a.full, a.filename); downloadBlob(a.thumb, a.thumbName); });
+
+        try {
+            if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') await supabasePersistImages(currentItemBTK, images);
+            else saveDraft(currentWarehouseId);
+            showToast(`${accepted.length} image(s) added. Drop the downloaded files into assets/.`, "success", 7000);
+        } catch (e) {
+            console.error("Image persist failed:", e);
+            showToast("Images downloaded but couldn't save to the item: " + e.message, "error");
+        }
+
+        if (quickEditMode) {
+            const filenames = renderItemGallery(item);
+            renderImageAddControls(filenames.length > 0);
+        } else {
+            openItem(currentItemBTK, navigationContext);
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     //  STATE
     // ════════════════════════════════════════════════════════════════════════
     qrEccLevel = (typeof QRCode !== 'undefined' && QRCode.CorrectLevel) ? QRCode.CorrectLevel.M : 1;
@@ -1042,6 +1422,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         }
         initTheme();
         initSettings();
+        initImageEditorHandlers();
         await ensureDemoVault();
         window.addEventListener('hashchange', handleRoute);
         await handleRoute();
@@ -1742,6 +2123,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
         navigationContext = context || { type: 'global' };
         currentItemBTK = id;
+        quickEditMode = false;
+        quickEditOriginal = null;
+        document.getElementById('quick-edit-bar').classList.add('hidden');
 
         switchView('item-view');
         document.getElementById('detail-name').innerText = item['itemname(english)'] || 'Unnamed Item';
@@ -1759,7 +2143,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 const tag = document.createElement('span');
                 tag.className = 'kit-tag';
                 tag.innerText = '🧰 ' + (k.name || k.kitnumber);
-                tag.onclick = () => showKitDetail(k.kitnumber, k.name);
+                tag.onclick = () => { if (confirmDiscardIfDirty()) showKitDetail(k.kitnumber, k.name); };
                 tagsEl.appendChild(tag);
             });
         }
@@ -1769,34 +2153,75 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('btn-next-item').classList.toggle('hidden', !kitNav);
         document.getElementById('btn-prev-item').classList.toggle('hidden', !kitNav);
 
-        // Role-gated controls (only meaningful in Supabase mode — static mode has no role concept)
+        // Role-gated controls (Supabase mode: viewers can't edit; static mode: no role concept)
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
         const isViewer = isSupa && currentUserRole === 'viewer';
         document.getElementById('btn-edit-item').classList.toggle('hidden', isViewer);
-        document.getElementById('btn-add-image-wrap').classList.toggle('hidden', !isSupa || isViewer);
 
-        const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
+        const filenames = renderItemGallery(item);
+        renderImageAddControls(filenames.length > 0);
+        renderItemFields(item, id);
 
-        // Image gallery
+        document.getElementById('btn-single-label').onclick = () => {
+            selectedItems.clear(); selectedItems.add(id); generateLabelsPreview();
+        };
+        renderMockMap(id);
+    }
+
+    // Read-only image gallery. In quick-edit mode each thumbnail gets a remove (✕) button.
+    // Returns the current filename list (callers use its length to decide add-controls placement).
+    function renderItemGallery(item) {
         const imagesEl = document.getElementById('detail-images');
         imagesEl.innerHTML = '';
         const rawImages = (item.images || '').trim();
-        if (rawImages && rawImages !== 'None') {
-            const filenames = rawImages.split(';').map(s => s.trim()).filter(Boolean);
-            if (filenames.length > 0) {
-                const gallery = document.createElement('div');
-                gallery.className = 'item-image-gallery';
-                filenames.forEach(fn => {
-                    const img = document.createElement('img');
-                    img.src = `assets/${fn}`; img.alt = fn; img.title = fn;
-                    img.onerror = function() { this.style.display = 'none'; };
-                    img.onclick = () => openLightbox(`assets/${fn}`);
-                    gallery.appendChild(img);
-                });
-                imagesEl.appendChild(gallery);
-            }
+        const filenames = (rawImages && rawImages !== 'None') ? rawImages.split(';').map(s => s.trim()).filter(Boolean) : [];
+        if (filenames.length > 0) {
+            const gallery = document.createElement('div');
+            gallery.className = 'item-image-gallery';
+            filenames.forEach(fn => {
+                const wrap = document.createElement('div');
+                wrap.className = 'img-thumb-wrap';
+                const img = document.createElement('img');
+                img.src = `assets/${fn}`; img.alt = fn; img.title = fn;
+                img.onerror = function() { this.style.display = 'none'; };
+                img.onclick = () => openLightbox(`assets/${fn}`);
+                wrap.appendChild(img);
+                if (quickEditMode && canEditItems()) {
+                    const rm = document.createElement('button');
+                    rm.type = 'button';
+                    rm.className = 'img-remove-btn';
+                    rm.setAttribute('aria-label', 'Remove image');
+                    rm.innerText = '✕';
+                    rm.onclick = (e) => { e.stopPropagation(); removeItemImage(fn); };
+                    wrap.appendChild(rm);
+                }
+                gallery.appendChild(wrap);
+            });
+            imagesEl.appendChild(gallery);
         }
+        return filenames;
+    }
 
+    // "Add Image" / "Take Picture" buttons — only shown while quick-editing (images are managed
+    // as part of the same edit session as the fields), and only for admin/editor. Placed above the
+    // field list when the item has no images yet, or below it (just before the map) once it does.
+    function renderImageAddControls(hasImages) {
+        const top = document.getElementById('img-add-controls-top');
+        const bottom = document.getElementById('img-add-controls-bottom');
+        top.innerHTML = ''; bottom.innerHTML = '';
+        top.classList.add('hidden'); bottom.classList.add('hidden');
+        if (!quickEditMode || !canEditItems()) return;
+        const target = hasImages ? bottom : top;
+        target.innerHTML = `<div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="secondary" onclick="document.getElementById('editor-file-input').click()">➕ Add Image</button>
+            <button class="secondary" onclick="document.getElementById('editor-camera-input').click()">📷 Take Picture</button>
+        </div>`;
+        target.classList.remove('hidden');
+    }
+
+    // Read-only field display — the default view, and what quick-edit reverts to on save/cancel.
+    function renderItemFields(item, id) {
+        const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
         const dMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
         const field = (label, val) => `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">${label}:</span><span>${getStr(val)}</span></div>`;
         const fieldLink = (label, key, val) => {
@@ -1829,13 +2254,167 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } };
         });
 
-        document.getElementById('btn-single-label').onclick = () => {
-            selectedItems.clear(); selectedItems.add(id); generateLabelsPreview();
+        document.getElementById('quick-edit-hint').classList.toggle('hidden', !canEditItems());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  QUICK EDIT — double-click the item content to edit fields inline.
+    //  Explicit Save/Cancel; navigating away with unsaved changes prompts first.
+    // ════════════════════════════════════════════════════════════════════════
+    function enterQuickEdit() {
+        if (quickEditMode || activeView !== 'item-view') return;
+        if (!canEditItems()) { showToast("You don't have permission to edit this item.", "warning"); return; }
+        const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+        if (!item) return;
+        quickEditMode = true;
+        quickEditOriginal = { ...item };
+        document.getElementById('quick-edit-bar').classList.remove('hidden');
+        renderQuickEditFields(item);
+        const filenames = renderItemGallery(item);
+        renderImageAddControls(filenames.length > 0);
+    }
+
+    function renderQuickEditFields(item) {
+        const val = v => (v && v !== 'None') ? v : '';
+        document.getElementById('detail-content').innerHTML = `
+            <div style="margin-bottom:14px;font-size:0.9rem;color:var(--text-muted);">System ID (BTK): <span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;">${escapeHtml(item.BTKnumber)}</span> <span style="opacity:0.7;">(not editable here)</span></div>
+            <label class="modal-label" for="qe-manufacturer">Manufacturer</label>
+            <input type="text" id="qe-manufacturer" value="${escapeHtml(val(item.Manufacturer))}">
+            <label class="modal-label" for="qe-name-en">Item Name (English) *</label>
+            <input type="text" id="qe-name-en" value="${escapeHtml(val(item['itemname(english)']))}">
+            <label class="modal-label" for="qe-name-sv">Item Name (Swedish)</label>
+            <input type="text" id="qe-name-sv" value="${escapeHtml(val(item['itemname(swedish)']))}">
+            <label class="modal-label" for="qe-itemnumber">Item #1</label>
+            <input type="text" id="qe-itemnumber" value="${escapeHtml(val(item.itemnumber))}">
+            <label class="modal-label" for="qe-itemnumber2">Item #2</label>
+            <input type="text" id="qe-itemnumber2" value="${escapeHtml(val(item.itemnumber2))}">
+            <label class="modal-label" for="qe-itemnumber3">Item #3 (Internal)</label>
+            <input type="text" id="qe-itemnumber3" value="${escapeHtml(val(item.itemnumber3))}">
+            <label class="modal-label" for="qe-qty">Stock (Number of items)</label>
+            <input type="text" id="qe-qty" value="${escapeHtml(val(item.Numberofitems))}">
+            <label class="modal-label" for="qe-location">Inventory Location</label>
+            <input type="text" id="qe-location" value="${escapeHtml(val(item.Inventorylocation))}">
+            <label class="modal-label" for="qe-comments">Comments</label>
+            <textarea id="qe-comments">${escapeHtml(val(item.Comments))}</textarea>`;
+    }
+
+    function readQuickEditFields() {
+        return {
+            Manufacturer: document.getElementById('qe-manufacturer').value.trim(),
+            'itemname(english)': document.getElementById('qe-name-en').value.trim(),
+            'itemname(swedish)': document.getElementById('qe-name-sv').value.trim(),
+            itemnumber: document.getElementById('qe-itemnumber').value.trim(),
+            itemnumber2: document.getElementById('qe-itemnumber2').value.trim(),
+            itemnumber3: document.getElementById('qe-itemnumber3').value.trim(),
+            Numberofitems: document.getElementById('qe-qty').value.trim(),
+            Inventorylocation: document.getElementById('qe-location').value.trim(),
+            Comments: document.getElementById('qe-comments').value.trim(),
         };
-        renderMockMap(id);
+    }
+
+    function isQuickEditDirty() {
+        if (!quickEditMode || !quickEditOriginal) return false;
+        const norm = v => (!v || v === 'None') ? '' : v;
+        const cur = readQuickEditFields();
+        return Object.keys(cur).some(k => cur[k] !== norm(quickEditOriginal[k]));
+    }
+
+    // Call before any navigation away from the item. Returns true if it's safe to proceed
+    // (nothing unsaved, or the user confirmed discarding); false means stay put.
+    function confirmDiscardIfDirty() {
+        if (!quickEditMode) return true;
+        if (!isQuickEditDirty()) { exitQuickEditUI(); return true; }
+        const discard = confirm("Changes have been made to this item. Are you sure you want to discard them?");
+        if (!discard) return false;
+        exitQuickEditUI();
+        return true;
+    }
+
+    // Tears down edit-mode UI and reverts to the read-only view, WITHOUT persisting anything.
+    function exitQuickEditUI() {
+        quickEditMode = false;
+        quickEditOriginal = null;
+        document.getElementById('quick-edit-bar').classList.add('hidden');
+        const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+        if (!item) return;
+        const filenames = renderItemGallery(item);
+        renderImageAddControls(filenames.length > 0);
+        renderItemFields(item, currentItemBTK);
+    }
+
+    function cancelQuickEdit() {
+        if (!isQuickEditDirty()) { exitQuickEditUI(); return; }
+        if (confirm("Changes have been made to this item. Are you sure you want to discard them?")) exitQuickEditUI();
+    }
+
+    async function saveQuickEdit() {
+        const fields = readQuickEditFields();
+        if (!fields['itemname(english)']) { showToast("English name is required.", "error"); return; }
+        const btk = currentItemBTK;
+        const existingImages = (globalInventory.find(i => i.BTKnumber === btk) || {}).images || '';
+        const updated = {
+            Manufacturer: fields.Manufacturer || 'None',
+            BTKnumber: btk,
+            itemnumber: fields.itemnumber || 'None',
+            'itemname(english)': fields['itemname(english)'],
+            'itemname(swedish)': fields['itemname(swedish)'] || 'None',
+            itemnumber2: fields.itemnumber2 || 'None',
+            itemnumber3: fields.itemnumber3 || 'None',
+            Numberofitems: fields.Numberofitems || '0',
+            Inventorylocation: fields.Inventorylocation || 'None',
+            Comments: fields.Comments || 'None',
+            images: existingImages
+        };
+
+        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const row = {
+                manufacturer: updated.Manufacturer, itemnumber: updated.itemnumber,
+                itemname_en: updated['itemname(english)'], itemname_sv: updated['itemname(swedish)'],
+                itemnumber2: updated.itemnumber2, itemnumber3: updated.itemnumber3,
+                numberofitems: parseInt(updated.Numberofitems) || 0,
+                inventorylocation: updated.Inventorylocation, comments: updated.Comments
+            };
+            const { error } = await sb.from('items').update(row).eq('btk', btk);
+            if (error) return showToast("Save blocked: " + error.message, "error");
+            const idx = globalInventory.findIndex(i => i.BTKnumber === btk);
+            if (idx >= 0) globalInventory[idx] = updated;
+            showToast("Saved to Supabase.", "success");
+        } else {
+            const idx = globalInventory.findIndex(i => i.BTKnumber === btk);
+            if (idx >= 0) globalInventory[idx] = updated;
+            saveDraft(currentWarehouseId);
+            showToast("Item updated (draft autosaved).", "success");
+        }
+
+        quickEditMode = false;
+        quickEditOriginal = null;
+        document.getElementById('quick-edit-bar').classList.add('hidden');
+        openItem(btk, navigationContext);
+    }
+
+    // Unlinks an image from the item (the file itself is left in assets/ — this only edits the
+    // item's `images` field). Persists immediately, same as image add, rather than deferring to
+    // the quick-edit Save button.
+    async function removeItemImage(filename) {
+        if (!confirm("Remove this image from the item? (The file stays in assets/ — this only unlinks it.)")) return;
+        const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+        if (!item) return;
+        const images = (item.images || '').split(';').map(s => s.trim()).filter(f => f && f !== filename).join(';');
+        item.images = images;
+        try {
+            if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') await supabasePersistImages(currentItemBTK, images);
+            else saveDraft(currentWarehouseId);
+            showToast("Image removed.", "success");
+        } catch (e) {
+            console.error("Image removal persist failed:", e);
+            showToast("Could not save removal: " + e.message, "error");
+        }
+        const filenames = renderItemGallery(item);
+        renderImageAddControls(filenames.length > 0);
     }
 
     function backFromItem() {
+        if (!confirmDiscardIfDirty()) return;
         if (navigationContext && navigationContext.type === 'kit') {
             showKitDetail(navigationContext.kitnumber, navigationContext.kitName);
         } else {
@@ -1844,6 +2423,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function nextInKit() {
+        if (!confirmDiscardIfDirty()) return;
         if (!navigationContext || navigationContext.type !== 'kit' || !navigationContext.items) return;
         const arr = navigationContext.items;
         const idx = arr.indexOf(currentItemBTK);
@@ -1852,6 +2432,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function prevInKit() {
+        if (!confirmDiscardIfDirty()) return;
         if (!navigationContext || navigationContext.type !== 'kit' || !navigationContext.items) return;
         const arr = navigationContext.items;
         const idx = arr.indexOf(currentItemBTK);
