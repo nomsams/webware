@@ -378,6 +378,9 @@
         <label class="modal-label" for="ai-location">Inventory Location</label>
         <input type="text" id="ai-location" placeholder="e.g. Best">
 
+        <label class="modal-label" for="ai-mapposition">Map Position (locator grid, A1–F6)</label>
+        <input type="text" id="ai-mapposition" placeholder="e.g. A3" maxlength="2" style="text-transform:uppercase;">
+
         <label class="modal-label" for="ai-comments">Comments</label>
         <textarea id="ai-comments" placeholder="Optional notes..."></textarea>
 
@@ -532,7 +535,8 @@
 
         <div style="margin-top: 2rem; margin-bottom: 1rem;">
             <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Warehouse Locator Map</strong>
-            <div class="warehouse-map" id="mock-map"></div>
+            <div class="warehouse-map" id="locator-map"></div>
+            <p id="locator-map-caption" style="color:var(--text-muted); font-size:0.82rem; margin-top:0.5rem;"></p>
         </div>
     </section>
 
@@ -908,7 +912,7 @@
     // ════════════════════════════════════════════════════════════════════════
     const COLUMNS_B = [
         'Manufacturer', 'BTKnumber', 'itemnumber', 'itemname(english)', 'itemname(swedish)',
-        'itemnumber2', 'itemnumber3', 'Numberofitems', 'Inventorylocation', 'Comments', 'images'
+        'itemnumber2', 'itemnumber3', 'Numberofitems', 'Inventorylocation', 'MapPosition', 'Comments', 'images'
     ];
 
     // CSV C — Warehouse lookup metadata (non-secret, embedded for offline UX)
@@ -971,6 +975,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             itemnumber3: row.itemnumber3 || 'None',
             Numberofitems: String(row.numberofitems ?? '0'),
             Inventorylocation: row.inventorylocation || 'None',
+            MapPosition: row.map_position || 'None',
             Comments: row.comments || 'None',
             images: row.images || '', // legacy static-mode field, unused for Supabase-mode items now
             imageFullUrl: row.image_full_url || '',
@@ -2256,7 +2261,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('btn-single-label').onclick = () => {
             selectedItems.clear(); selectedItems.add(id); generateLabelsPreview();
         };
-        renderMockMap(id);
+        renderLocatorMap(item);
     }
 
     // Read-only image gallery. In quick-edit mode each thumbnail gets a remove (✕) button.
@@ -2354,6 +2359,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             ${field('System ID (BTK)', id)}
             ${field('Stock (Number of items)', item.Numberofitems)}
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Inventory Location:</span><span>${getStr(item.Inventorylocation)}</span></div>
+            ${field('Map Position', item.MapPosition)}
             <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;"><span style="font-weight:600;color:var(--text-muted);">Comments:</span><div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div></div>
             ${field('Images', item.images)}`;
 
@@ -2406,6 +2412,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             <input type="text" id="qe-qty" value="${escapeHtml(val(item.Numberofitems))}">
             <label class="modal-label" for="qe-location">Inventory Location</label>
             <input type="text" id="qe-location" value="${escapeHtml(val(item.Inventorylocation))}">
+            <label class="modal-label" for="qe-mapposition">Map Position (locator grid, A1–F6)</label>
+            <input type="text" id="qe-mapposition" value="${escapeHtml(val(item.MapPosition))}" placeholder="e.g. A3" maxlength="2" style="text-transform:uppercase;">
             <label class="modal-label" for="qe-comments">Comments</label>
             <textarea id="qe-comments">${escapeHtml(val(item.Comments))}</textarea>`;
     }
@@ -2420,6 +2428,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             itemnumber3: document.getElementById('qe-itemnumber3').value.trim(),
             Numberofitems: document.getElementById('qe-qty').value.trim(),
             Inventorylocation: document.getElementById('qe-location').value.trim(),
+            MapPosition: document.getElementById('qe-mapposition').value.trim().toUpperCase(),
             Comments: document.getElementById('qe-comments').value.trim(),
         };
     }
@@ -2474,6 +2483,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             itemnumber3: fields.itemnumber3 || 'None',
             Numberofitems: fields.Numberofitems || '0',
             Inventorylocation: fields.Inventorylocation || 'None',
+            MapPosition: fields.MapPosition || 'None',
             Comments: fields.Comments || 'None',
             images: existingImages
         };
@@ -2484,7 +2494,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 itemname_en: updated['itemname(english)'], itemname_sv: updated['itemname(swedish)'],
                 itemnumber2: updated.itemnumber2, itemnumber3: updated.itemnumber3,
                 numberofitems: parseInt(updated.Numberofitems) || 0,
-                inventorylocation: updated.Inventorylocation, comments: updated.Comments
+                inventorylocation: updated.Inventorylocation, map_position: updated.MapPosition === 'None' ? null : updated.MapPosition, comments: updated.Comments
             };
             const { error } = await sb.from('items').update(row).eq('btk', btk);
             if (error) return showToast("Save blocked: " + error.message, "error");
@@ -2572,13 +2582,23 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function openLightbox(src) { document.getElementById('lightbox-img').src = src; document.getElementById('lightbox').classList.add('open'); }
     function closeLightbox(e) { if (!e || e.target !== document.getElementById('lightbox-img')) document.getElementById('lightbox').classList.remove('open'); }
 
-    // ─── WAREHOUSE MAP ───────────────────────────────────────────────────
-    function renderMockMap(id) {
-        const map = document.getElementById('mock-map');
+    // ─── WAREHOUSE LOCATOR MAP ─────────────────────────────────────────────
+    // 6x6 grid, columns A-F left-to-right, rows 1-6 top-to-bottom — parses the item's real
+    // MapPosition field (e.g. "A3", set via quick-edit or the Add/Edit modal), not a hash.
+    function parseMapPosition(pos) {
+        const m = String(pos || '').trim().match(/^([A-Fa-f])([1-6])$/);
+        if (!m) return null;
+        const col = m[1].toUpperCase().charCodeAt(0) - 65;
+        const row = parseInt(m[2], 10) - 1;
+        return row * 6 + col;
+    }
+
+    function renderLocatorMap(item) {
+        const map = document.getElementById('locator-map');
+        const caption = document.getElementById('locator-map-caption');
         map.innerHTML = '';
-        let hash = 0;
-        for (let i = 0; i < id.length; i++) hash = ((hash << 5) - hash) + id.charCodeAt(i);
-        const activeIndex = Math.abs(hash) % 36;
+        const raw = (item.MapPosition && item.MapPosition !== 'None') ? item.MapPosition.trim() : '';
+        const activeIndex = parseMapPosition(raw);
         for (let i = 0; i < 36; i++) {
             const cell = document.createElement('div');
             cell.className = 'map-cell' + (i === activeIndex ? ' active' : '');
@@ -2587,6 +2607,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             cell.innerText = i === activeIndex ? `${col}${row}` : '';
             map.appendChild(cell);
         }
+        if (!raw) caption.textContent = "No position set — add one via ✏️ Edit or double-click to quick-edit.";
+        else if (activeIndex === null) caption.textContent = `"${raw}" isn't a valid grid position (use A1–F6).`;
+        else caption.textContent = '';
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -2598,7 +2621,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         editTargetBTK = null;
         document.getElementById('modal-title').innerText = '➕ Add New Item';
         document.getElementById('modal-notice').style.display = 'block';
-        ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-location','ai-comments']
+        ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-location','ai-mapposition','ai-comments']
             .forEach(id => { document.getElementById(id).value = ''; });
         document.getElementById('add-item-modal').classList.add('open');
     }
@@ -2621,6 +2644,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('ai-num3').value = item.itemnumber3 === 'None' ? '' : item.itemnumber3;
         document.getElementById('ai-qty').value = item.Numberofitems === 'None' ? '' : item.Numberofitems;
         document.getElementById('ai-location').value = item.Inventorylocation === 'None' ? '' : item.Inventorylocation;
+        document.getElementById('ai-mapposition').value = item.MapPosition === 'None' ? '' : item.MapPosition;
         document.getElementById('ai-comments').value = item.Comments === 'None' ? '' : item.Comments;
         document.getElementById('add-item-modal').classList.add('open');
     }
@@ -2647,6 +2671,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             'itemnumber3':       document.getElementById('ai-num3').value.trim() || 'None',
             'Numberofitems':     document.getElementById('ai-qty').value.trim() || '0',
             'Inventorylocation': document.getElementById('ai-location').value.trim() || 'None',
+            'MapPosition':       document.getElementById('ai-mapposition').value.trim().toUpperCase() || 'None',
             'Comments':          document.getElementById('ai-comments').value.trim() || 'None',
             'images':            existingImages
         };
@@ -2657,7 +2682,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 itemname_en: newItem['itemname(english)'], itemname_sv: newItem['itemname(swedish)'],
                 itemnumber2: newItem.itemnumber2, itemnumber3: newItem.itemnumber3,
                 numberofitems: parseInt(newItem.Numberofitems) || 0,
-                inventorylocation: newItem.Inventorylocation, comments: newItem.Comments
+                inventorylocation: newItem.Inventorylocation, map_position: newItem.MapPosition === 'None' ? null : newItem.MapPosition, comments: newItem.Comments
             };
             const req = (modalMode === 'edit')
                 ? sb.from('items').update(row).eq('btk', editTargetBTK)

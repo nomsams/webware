@@ -51,6 +51,7 @@ A self-contained, single-file inventory management web app with encrypted storag
 | `itemnumber3` | No | Internal/third item number |
 | `Numberofitems` | No | Stock quantity |
 | `Inventorylocation` | No | Location within warehouse |
+| `MapPosition` | No | Warehouse locator grid cell, `A1`–`F6` (column letter + row number) |
 | `Comments` | No | Free text notes |
 | `images` | No | Semicolon-separated filenames in `assets/` |
 
