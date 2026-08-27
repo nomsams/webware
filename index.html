@@ -56,6 +56,7 @@
         .logo-container img { height: 36px; max-width: 130px; object-fit: contain; border-radius: 6px; }
         .header-actions { display: flex; gap: 4px; }
         .icon-btn { background: none; border: none; font-size: 1.25rem; cursor: pointer; color: var(--text-main); padding: 6px; border-radius: 50%; transition: background 0.2s; min-width: 38px; min-height: 38px; display: flex; align-items: center; justify-content: center; }
+        .badge-count { position: absolute; top: 2px; right: 2px; background: var(--danger); color: white; font-size: 0.62rem; font-weight: 700; border-radius: 50%; min-width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; padding: 0 3px; line-height: 1; }
         .icon-btn:hover, .icon-btn:active { background: var(--border); }
 
         .container { max-width: 800px; margin: 1rem auto; padding: 0 1rem; }
@@ -168,6 +169,8 @@
         .fab-wrapper { background: var(--card-bg); padding: 6px; border-radius: 50px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2); display: flex; gap: 6px; pointer-events: auto; border: 1px solid var(--border); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); transform: translateY(calc(100% + 50px + 24px)); }
         .fab-wrapper.visible { transform: translateY(0); }
         .fab-btn { border-radius: 50px; padding: 0.75rem 1.5rem; margin: 0; }
+        .fab-btn-pack { background: var(--success); }
+        .fab-btn-pack:hover { background: #0d9c6f; }
         .fab-clear { background: var(--border); color: var(--text-main); border-radius: 50px; padding: 0 1rem; font-weight: bold; }
 
         /* --- MAP MODULE --- */
@@ -443,6 +446,9 @@
         <img src="logo.png" alt="Company Logo" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzI1NjNlYiIgcng9IjIwIi8+PHRleHQgeD0iNTAiIHk9IjU4IiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjQ0IiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSIjZmZmZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5XVzwvdGV4dD48L3N2Zz4='" />
     </div>
     <div class="header-actions">
+        <button class="icon-btn hidden" id="btn-pack-order" onclick="openPackOrderView()" aria-label="View Pack Order" title="Pack Order" style="position:relative;">
+            📦<span id="pack-order-badge" class="badge-count">0</span>
+        </button>
         <button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle Dark Mode" title="Toggle Theme">
             <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
         </button>
@@ -540,15 +546,6 @@
         <input type="file" id="warehouse-csv-upload" accept=".csv" class="hidden" onchange="handleWarehouseCSVUpload(event)" aria-label="Upload Warehouses CSV">
         <input type="file" id="batch-image-upload" accept="image/jpeg,image/png,image/webp" multiple class="hidden" onchange="handleBatchImageUpload(event)" aria-label="Batch Upload Images">
 
-        <!-- Floating Action Bar -->
-        <div class="fab-container">
-            <div class="fab-wrapper" id="fab-bar">
-                <button class="fab-clear" onclick="clearSelection()" aria-label="Clear Selection">✕</button>
-                <button class="fab-btn" onclick="generateLabelsPreview()">
-                    🏷️ Create Labels (<span id="selected-count">0</span>)
-                </button>
-            </div>
-        </div>
     </section>
 
     <!-- View 3: Single Item Detail -->
@@ -621,6 +618,18 @@
 
         <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Items from this manufacturer</strong>
         <div id="manufacturer-detail-items" style="margin-top:0.75rem;"></div>
+    </section>
+
+    <!-- View 3d: Pack Order — a session-local pick list built by selecting items from anywhere
+         (item list, kit detail, manufacturer detail) and tapping the green Pack button -->
+    <section id="pack-order-view" class="card hidden">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
+            <button class="secondary" onclick="closePackOrderView()">← Back</button>
+            <button class="secondary" onclick="clearPackOrder()" style="color:var(--danger); flex-shrink:0;">🗑️ Clear Order</button>
+        </div>
+        <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">📦 Pack Order</h1>
+        <p id="pack-order-progress" style="color:var(--text-muted); margin-bottom:1rem;"></p>
+        <div id="pack-order-items"></div>
     </section>
 
     <!-- View 4: Label Preview & Generation -->
@@ -729,6 +738,20 @@
         <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
     </section>
 
+    <!-- Floating Action Bar — global, not tied to any one view, since items can now be selected
+         for a label print or a pack order from the item list, a kit's items, or a manufacturer's items -->
+    <div class="fab-container">
+        <div class="fab-wrapper" id="fab-bar">
+            <button class="fab-clear" onclick="clearSelection()" aria-label="Clear Selection">✕</button>
+            <button class="fab-btn" onclick="generateLabelsPreview()">
+                🏷️ Create Labels (<span id="selected-count">0</span>)
+            </button>
+            <button class="fab-btn fab-btn-pack" onclick="addSelectionToPackOrder()">
+                📦 Pack (<span id="selected-count-pack">0</span>)
+            </button>
+        </div>
+    </div>
+
 </main>
 
 <!-- Developer Console Modal -->
@@ -780,6 +803,9 @@
     var manufacturerFilter = ''; // list-view filter — derived options, not a separate table
     var globalManufacturers = []; // Supabase-mode only — global (not warehouse-scoped) entity list
     var currentManufacturerId = null;
+    var selectedItemsQty = {}; // btk -> requested qty (set when selected from a kit's item list)
+    var packOrder = []; // [{btk, qty, packed}] — session-local pick list, never persisted
+    var packOrderPreviousView = 'list-view';
 
     // Quick-edit (inline, double-click) state
     var quickEditMode = false;
@@ -1825,7 +1851,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function switchView(viewId) {
-        ['auth-view','list-view','item-view','kit-view','manufacturer-view','preview-view','settings-view'].forEach(v => {
+        ['auth-view','list-view','item-view','kit-view','manufacturer-view','pack-order-view','preview-view','settings-view'].forEach(v => {
             document.getElementById(v).classList.add('hidden');
         });
         document.getElementById(viewId).classList.remove('hidden');
@@ -2444,6 +2470,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const kName = item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed';
             const kMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
             div.innerHTML = `
+                <div class="select-circle" role="checkbox" aria-checked="${selectedItems.has(btk)}" data-id="${btk}" aria-label="Select for pack order" tabindex="0"></div>
                 <div class="kit-info">
                     <div class="item-title" style="font-size:1.05rem;font-weight:800;">${kName}</div>
                     ${kNums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${kNums}</div>` : ''}
@@ -2452,6 +2479,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 <span class="kit-qty-badge">×${qty}</span>`;
             div.onclick = () => openItem(btk, { type: 'kit', kitnumber: kit.kitnumber, kitName: kit.name, items: btks });
             div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); div.click(); } };
+            const circle = div.querySelector('.select-circle');
+            circle.onclick = (e) => { e.stopPropagation(); toggleSelectionWithQty(btk, !selectedItems.has(btk), qty); };
+            circle.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSelectionWithQty(btk, !selectedItems.has(btk), qty); } };
             frag.appendChild(div);
         });
         container.appendChild(frag);
@@ -2545,6 +2575,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             div.className = 'kit-row';
             div.setAttribute('role', 'button'); div.tabIndex = 0;
             div.innerHTML = `
+                <div class="select-circle" role="checkbox" aria-checked="${selectedItems.has(btk)}" data-id="${btk}" aria-label="Select for pack order" tabindex="0"></div>
                 <div class="kit-info">
                     <div class="item-title" style="font-size:1.05rem;font-weight:800;">${item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed'}</div>
                     <div class="item-sub" style="font-weight:700;color:var(--text-main);">${nums}</div>
@@ -2552,6 +2583,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 </div>`;
             div.onclick = () => openItem(btk, { type: 'global' });
             div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); div.click(); } };
+            const circle = div.querySelector('.select-circle');
+            circle.onclick = (e) => { e.stopPropagation(); toggleSelection(btk, !selectedItems.has(btk)); };
+            circle.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSelection(btk, !selectedItems.has(btk)); } };
             frag.appendChild(div);
         });
         itemsContainer.appendChild(frag);
@@ -2636,6 +2670,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (isSelected) selectedItems.add(id); else selectedItems.delete(id);
         updateCircleStates(); updateFab(); syncSelectAllCheckbox();
     }
+    // Same as toggleSelection, but also records the requested quantity (e.g. a kit's per-item
+    // quantity) so addSelectionToPackOrder() can carry it over instead of defaulting to 1.
+    function toggleSelectionWithQty(id, isSelected, qty) {
+        if (isSelected && qty) selectedItemsQty[id] = qty; else delete selectedItemsQty[id];
+        toggleSelection(id, isSelected);
+    }
     function toggleSelectAllBanner() {
         const cb = document.getElementById('select-all-cb');
         const targetState = !(cb.checked && !cb.indeterminate);
@@ -2654,13 +2694,102 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
     function clearSelection() {
         selectedItems.clear();
+        selectedItemsQty = {};
         updateCircleStates();
         syncSelectAllCheckbox(); updateFab();
     }
+    // Global now (not list-view-scoped) — selection can come from the item list, a kit's items,
+    // or a manufacturer's items, and the bar should float above whichever of those you're on.
     function updateFab() {
         const fab = document.getElementById('fab-bar');
         document.getElementById('selected-count').innerText = selectedItems.size;
-        fab.classList.toggle('visible', selectedItems.size > 0 && listMode === 'items');
+        document.getElementById('selected-count-pack').innerText = selectedItems.size;
+        fab.classList.toggle('visible', selectedItems.size > 0);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PACK ORDER — a "grocery cart" pick list built from selections made anywhere
+    //  (item list, a kit's items, a manufacturer's items). Session-local only, never
+    //  persisted — refreshing the page clears it, same as the "temporary" ask.
+    // ════════════════════════════════════════════════════════════════════════
+    function addSelectionToPackOrder() {
+        if (selectedItems.size === 0) { showToast("Select at least one item.", "warning"); return; }
+        selectedItems.forEach(btk => {
+            const qty = selectedItemsQty[btk] || 1;
+            const existing = packOrder.find(o => o.btk === btk);
+            if (existing) existing.qty = qty; // re-selecting updates the qty but keeps packed progress
+            else packOrder.push({ btk, qty, packed: false });
+        });
+        clearSelection();
+        updatePackOrderBadge();
+        openPackOrderView();
+    }
+
+    function updatePackOrderBadge() {
+        document.getElementById('pack-order-badge').innerText = packOrder.length;
+        document.getElementById('btn-pack-order').classList.toggle('hidden', packOrder.length === 0);
+    }
+
+    function openPackOrderView() {
+        if (activeView !== 'pack-order-view') packOrderPreviousView = activeView;
+        switchView('pack-order-view');
+        renderPackOrderItems();
+    }
+
+    function closePackOrderView() { switchView(packOrderPreviousView || 'list-view'); }
+
+    function clearPackOrder() {
+        if (!packOrder.length) return;
+        if (!confirm("Clear the entire pack order? This can't be undone.")) return;
+        packOrder = [];
+        updatePackOrderBadge();
+        renderPackOrderItems();
+    }
+
+    function togglePacked(btk) {
+        const line = packOrder.find(o => o.btk === btk);
+        if (!line) return;
+        line.packed = !line.packed;
+        renderPackOrderItems();
+    }
+
+    function removeFromPackOrder(btk) {
+        packOrder = packOrder.filter(o => o.btk !== btk);
+        updatePackOrderBadge();
+        renderPackOrderItems();
+    }
+
+    function renderPackOrderItems() {
+        const container = document.getElementById('pack-order-items');
+        const progressEl = document.getElementById('pack-order-progress');
+        container.innerHTML = '';
+        if (!packOrder.length) {
+            progressEl.textContent = '';
+            container.innerHTML = `<div class="empty-state"><h3>No items in this order yet</h3><p>Select items anywhere — the item list, a kit's items, or a manufacturer's items — then tap the green Pack button.</p></div>`;
+            return;
+        }
+        const packedCount = packOrder.filter(o => o.packed).length;
+        progressEl.textContent = `${packedCount} of ${packOrder.length} packed`;
+        const frag = document.createDocumentFragment();
+        packOrder.forEach(line => {
+            const item = globalInventory.find(i => i.BTKnumber === line.btk);
+            const name = item ? (item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed') : 'Unknown item (not in the currently loaded warehouse)';
+            const num1 = (item && item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
+            const div = document.createElement('div');
+            div.className = 'kit-row';
+            div.style.cursor = 'default';
+            div.innerHTML = `
+                <div class="kit-info">
+                    <div class="item-title" style="font-size:1.05rem;font-weight:800;${line.packed ? 'text-decoration:line-through;opacity:0.6;' : ''}">${escapeHtml(name)}</div>
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${escapeHtml(line.btk)}${num1 ? ' · ' + escapeHtml(num1) : ''}${line.qty > 1 ? ' · Qty ' + line.qty : ''}</div>
+                </div>
+                <button class="${line.packed ? 'success-btn' : 'secondary'}" style="flex-shrink:0; min-width:130px;" data-role="toggle">${line.packed ? '✅ Packed' : '⬜ Not Packed'}</button>
+                <button class="img-remove-btn" style="position:static; margin-left:8px;" data-role="remove" aria-label="Remove from order">✕</button>`;
+            div.querySelector('[data-role="toggle"]').onclick = () => togglePacked(line.btk);
+            div.querySelector('[data-role="remove"]').onclick = () => removeFromPackOrder(line.btk);
+            frag.appendChild(div);
+        });
+        container.appendChild(frag);
     }
 
     // ════════════════════════════════════════════════════════════════════════

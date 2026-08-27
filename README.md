@@ -80,6 +80,7 @@ A self-contained, single-file inventory management web app with encrypted storag
 - **End-to-end encryption** — AES-256-GCM envelope encryption with PBKDF2-wrapped keys
 - **Multi-warehouse** — Separate encrypted vaults per warehouse, single passphrase unlocks all
 - **Kit system** — Define kits with quantities, navigate items sequentially within a kit
+- **Pack Order** — A session-local pick list ("grocery cart"): select items from the item list, a kit's items, or a manufacturer's items, tap the green 📦 Pack button, then check items off as "Packed" while fulfilling an order. Items selected from a kit carry over that kit's quantity. Never persisted — it's a working list for the current session, not an order-tracking system; refreshing the page clears it. Reachable anytime via the 📦 icon in the header once it has items.
 - **Draft autosave** — Edits saved locally until encrypted export
 - **Dark mode** — Persisted theme preference
 - **Offline-first** — Runs entirely in browser, no backend required
