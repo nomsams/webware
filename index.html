@@ -51,11 +51,11 @@
         :focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
 
         /* --- LAYOUT & HEADER --- */
-        header { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--card-bg); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        header { display: flex; justify-content: space-between; align-items: center; padding: 0.65rem 1rem; background: var(--card-bg); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
         .logo-container { display: flex; align-items: center; gap: 10px; }
-        .logo-container img { height: 51px; max-width: 180px; object-fit: contain; border-radius: 6px; }
+        .logo-container img { height: 36px; max-width: 130px; object-fit: contain; border-radius: 6px; }
         .header-actions { display: flex; gap: 4px; }
-        .icon-btn { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--text-main); padding: 8px; border-radius: 50%; transition: background 0.2s; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+        .icon-btn { background: none; border: none; font-size: 1.25rem; cursor: pointer; color: var(--text-main); padding: 6px; border-radius: 50%; transition: background 0.2s; min-width: 38px; min-height: 38px; display: flex; align-items: center; justify-content: center; }
         .icon-btn:hover, .icon-btn:active { background: var(--border); }
 
         .container { max-width: 800px; margin: 1rem auto; padding: 0 1rem; }
@@ -155,6 +155,10 @@
         /* Clickable identifier fields on item detail — find other items sharing the same value */
         .field-link { color: var(--primary); cursor: pointer; font-weight: 600; border-radius: 4px; }
         .field-link:hover { text-decoration: underline; }
+
+        /* Low-stock indicator (opt-in via Settings) */
+        .low-stock-badge { display: inline-block; background: #fef3c7; color: #92400e; font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; vertical-align: middle; white-space: nowrap; }
+        [data-theme="dark"] .low-stock-badge { background: #451a03; color: #fbbf24; }
 
         /* Floating Action Bar */
         .fab-container { position: fixed; bottom: 50px; left: 0; right: 0; display: flex; justify-content: center; z-index: 90; pointer-events: none; padding: 0 1rem; }
@@ -289,6 +293,7 @@
 <body>
 
 <div id="toast-container" aria-live="polite"></div>
+<datalist id="manufacturer-datalist"></datalist>
 
 <!-- Lightbox -->
 <div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
@@ -341,6 +346,48 @@
     </div>
 </div>
 
+<!-- Manage Users Modal (admin only) -->
+<div class="modal-overlay" id="manage-users-modal" onclick="handleUsersModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:520px;">
+        <h3>👥 Manage Users</h3>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">Roles apply per warehouse account. Changes take effect on that person's next action.</p>
+        <div id="users-list-container">Loading…</div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeManageUsersModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Manufacturer Edit Modal -->
+<div class="modal-overlay" id="manufacturer-edit-modal" onclick="handleManufacturerModalOverlayClick(event)">
+    <div class="modal-box">
+        <h3>🏭 Edit Manufacturer</h3>
+
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:1rem;">
+            <img id="mfr-edit-logo-preview" class="hidden" alt="Logo preview" style="width:64px; height:64px; object-fit:contain; background:var(--border); border-radius:10px; padding:6px;">
+            <button class="secondary" onclick="document.getElementById('mfr-logo-input').click()">🖼️ Upload Logo</button>
+            <input type="file" id="mfr-logo-input" accept="image/jpeg,image/png,image/webp" class="hidden" onchange="handleManufacturerLogoUpload(event)" aria-label="Upload Logo">
+        </div>
+
+        <label class="modal-label" for="mfr-name">Name</label>
+        <input type="text" id="mfr-name" placeholder="e.g. HÄNY">
+
+        <label class="modal-label" for="mfr-description">Description</label>
+        <textarea id="mfr-description" placeholder="Optional notes about this manufacturer..."></textarea>
+
+        <label class="modal-label" for="mfr-contact">Contact Name</label>
+        <input type="text" id="mfr-contact" placeholder="Optional">
+
+        <label class="modal-label" for="mfr-email">Email</label>
+        <input type="email" id="mfr-email" placeholder="Optional">
+
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeManufacturerEditModal()">Cancel</button>
+            <button class="success-btn full-width" onclick="saveManufacturerEdit()">✔ Save</button>
+        </div>
+    </div>
+</div>
+
 <!-- Add/Edit Item Modal -->
 <div class="modal-overlay" id="add-item-modal" onclick="handleModalOverlayClick(event)">
     <div class="modal-box">
@@ -352,7 +399,7 @@
         </div>
 
         <label class="modal-label" for="ai-manufacturer">Manufacturer</label>
-        <input type="text" id="ai-manufacturer" placeholder="e.g. HÄNY">
+        <input type="text" id="ai-manufacturer" placeholder="e.g. HÄNY" list="manufacturer-datalist">
 
         <label class="modal-label" for="ai-btknumber">BTK Number <span style="color:var(--danger)">*</span></label>
         <input type="text" id="ai-btknumber" placeholder="e.g. BTK000024">
@@ -443,6 +490,7 @@
                 <button class="secondary" id="btn-kits-csv" onclick="triggerKitsCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Kits CSV</button>
                 <button class="secondary" id="btn-warehouse-csv" onclick="triggerWarehouseCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Warehouses CSV</button>
                 <button class="secondary" id="btn-export-db" onclick="exportEncryptedDatabase()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">💾 Export</button>
+                <button class="secondary hidden" id="btn-export-csv" onclick="exportItemsCSV()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📤 Export CSV</button>
                 <button class="secondary hidden" id="btn-batch-images" onclick="triggerBatchImageUpload()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">🖼️ Batch Images</button>
             </div>
         </div>
@@ -450,6 +498,7 @@
         <div class="segmented" id="mode-toggle">
             <button id="seg-items" class="active" onclick="switchListMode('items')">📦 Items</button>
             <button id="seg-kits" onclick="switchListMode('kits')">🧰 Kits</button>
+            <button id="seg-manufacturers" class="hidden" onclick="switchListMode('manufacturers')">🏭 Manufacturers</button>
         </div>
 
         <div id="wh-meta-container"></div>
@@ -465,6 +514,9 @@
                     <option value="name">Sort: Name (A–Z)</option>
                     <option value="manufacturer">Sort: Manufacturer</option>
                     <option value="btk">Sort: BTK Number</option>
+                </select>
+                <select id="manufacturer-filter" onchange="onManufacturerFilterChange()" style="margin: 0; width: auto;">
+                    <option value="">All Manufacturers</option>
                 </select>
                 <div class="select-all-banner" style="margin-left: auto; margin-bottom: 0; padding: 8px 16px;" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
                     <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 12px; pointer-events: none;" aria-hidden="true">
@@ -550,6 +602,27 @@
         <div id="kit-detail-items"></div>
     </section>
 
+    <!-- View 3c: Manufacturer Detail (Supabase mode only) -->
+    <section id="manufacturer-view" class="card hidden">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
+            <button class="secondary" onclick="showListView('manufacturers')" style="flex-shrink:0;">← Back to Manufacturers</button>
+            <button class="secondary hidden" id="btn-edit-manufacturer" onclick="openManufacturerEditModal()" style="flex-shrink:0;">✏️ Edit</button>
+        </div>
+
+        <div style="display:flex; gap:1.25rem; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
+            <img id="manufacturer-detail-logo" class="hidden" alt="Manufacturer logo" style="width:96px; height:96px; object-fit:contain; background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:8px; cursor:pointer;">
+            <div>
+                <h1 id="manufacturer-detail-name" style="font-size:1.6rem; color:var(--primary);">Manufacturer Name</h1>
+                <p id="manufacturer-detail-counts" style="color:var(--text-muted); font-size:0.9rem;"></p>
+            </div>
+        </div>
+
+        <div id="manufacturer-detail-info" style="margin-bottom:1.5rem;"></div>
+
+        <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Items from this manufacturer</strong>
+        <div id="manufacturer-detail-items" style="margin-top:0.75rem;"></div>
+    </section>
+
     <!-- View 4: Label Preview & Generation -->
     <section id="preview-view" class="card hidden">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px;" class="no-print">
@@ -624,6 +697,18 @@
         </div>
 
         <div class="setting-row">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="lowstock-enabled" onchange="onLowStockSettingChange()" style="width:auto; min-height:unset; margin:0;">
+                Low-Stock Indicator
+            </label>
+            <div id="lowstock-threshold-row" class="hidden" style="display:flex; align-items:center; gap:8px; margin-top:0.5rem;">
+                <span style="font-size:0.9rem;">Flag items with stock below</span>
+                <input type="number" id="lowstock-threshold" min="1" value="5" style="width:80px; margin:0;">
+            </div>
+            <p class="setting-desc">Off by default. When on, items below the threshold get a ⚠️ badge in the list and item view.</p>
+        </div>
+
+        <div class="setting-row">
             <label>Image Storage (Supabase)</label>
             <div style="background:var(--border); border-radius:8px; height:10px; overflow:hidden; margin-bottom:6px;">
                 <div id="storage-usage-bar" style="height:100%; background:var(--primary); width:0%; transition:width 0.3s;"></div>
@@ -631,6 +716,8 @@
             <p class="setting-desc" id="storage-usage-text">Checking…</p>
             <button class="secondary" onclick="refreshStorageUsage()" style="margin-top:0.5rem;">🔄 Refresh</button>
         </div>
+
+        <button class="secondary full-width hidden" id="btn-manage-users" onclick="openManageUsersModal()" style="margin-bottom:1rem;">👥 Manage Users</button>
 
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>
         <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
@@ -682,6 +769,11 @@
     var labelMode = 'items';
     var labelPaperType = 'default'; // 'default' (29x90 Brother QL) | 'wide68' (68mm wide, custom length)
     var labelWide68Height = 28; // mm — the adjustable dimension for the wide68 paper type
+    var lowStockEnabled = false; // off by default — opt-in via Settings
+    var lowStockThreshold = 5;
+    var manufacturerFilter = ''; // list-view filter — derived options, not a separate table
+    var globalManufacturers = []; // Supabase-mode only — global (not warehouse-scoped) entity list
+    var currentManufacturerId = null;
 
     // Quick-edit (inline, double-click) state
     var quickEditMode = false;
@@ -717,6 +809,7 @@
     // Item photos live in Supabase Storage now (one full + one thumbnail per item, flat filenames
     // keyed by BTK so re-uploading just overwrites in place). Free plan is 1GB — keep a 10% margin.
     const SUPABASE_STORAGE_BUCKET = 'item-images';
+    const SUPABASE_LOGO_BUCKET = 'manufacturer-logos';
     const SUPABASE_STORAGE_QUOTA_BYTES = 1 * 1024 * 1024 * 1024;
     const SUPABASE_STORAGE_BUDGET_BYTES = Math.floor(SUPABASE_STORAGE_QUOTA_BYTES * 0.9);
 
@@ -967,6 +1060,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function supabaseRowToItem(row) {
         return {
             Manufacturer: row.manufacturer || 'None',
+            manufacturerId: row.manufacturer_id || null,
+            updatedAt: row.updated_at || null,
             BTKnumber: row.btk,
             itemnumber: row.itemnumber || 'None',
             'itemname(english)': row.itemname_en || 'Unnamed',
@@ -984,10 +1079,17 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     // ── Storage usage / budget (Free plan quota, kept at 90%) ──
+    // Sums both buckets — the 1GB free-tier quota is account-wide, not per-bucket, and
+    // manufacturer logos share it with item photos even though they're small individually.
     async function getStorageUsageBytes() {
-        const { data, error } = await sb.storage.from(SUPABASE_STORAGE_BUCKET).list('', { limit: 1000 });
-        if (error) { console.error("Storage list failed:", error); return null; }
-        return (data || []).reduce((sum, f) => sum + (f.metadata?.size || 0), 0);
+        let total = 0, anyOk = false;
+        for (const bucket of [SUPABASE_STORAGE_BUCKET, SUPABASE_LOGO_BUCKET]) {
+            const { data, error } = await sb.storage.from(bucket).list('', { limit: 1000 });
+            if (error) { console.error(`Storage list failed for ${bucket}:`, error); continue; }
+            anyOk = true;
+            total += (data || []).reduce((sum, f) => sum + (f.metadata?.size || 0), 0);
+        }
+        return anyOk ? total : null;
     }
 
     async function checkStorageBudget(additionalBytes) {
@@ -1015,6 +1117,47 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         barEl.style.background = pctOfBudget > 90 ? 'var(--danger)' : pctOfBudget > 70 ? '#f59e0b' : 'var(--primary)';
         textEl.textContent = `${usedMb} MB used of ${budgetMb} MB budget (${pctOfBudget.toFixed(1)}%) — kept at 90% of Supabase's ${quotaMb} MB free-tier limit as a safety margin.`;
     }
+
+    // ── Manage Users (admin only) — role changes go through RPCs (schema_user_management.sql)
+    // since resolving other users' emails needs a security-definer join against auth.users. ──
+    async function openManageUsersModal() {
+        if (currentUserRole !== 'admin') { showToast("Admin only.", "warning"); return; }
+        document.getElementById('manage-users-modal').classList.add('open');
+        const container = document.getElementById('users-list-container');
+        container.innerHTML = 'Loading…';
+        const { data, error } = await sb.rpc('list_profiles_with_email');
+        if (error) {
+            container.innerHTML = `<p style="color:var(--danger);">Could not load users: ${escapeHtml(error.message)}</p>`;
+            return;
+        }
+        renderUsersList(data || []);
+    }
+
+    function renderUsersList(users) {
+        const container = document.getElementById('users-list-container');
+        if (!users.length) { container.innerHTML = '<p>No users found.</p>'; return; }
+        container.innerHTML = users.map(u => `
+            <div style="display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border);">
+                <div style="flex:1; min-width:0;">
+                    <div style="font-weight:600; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(u.email || u.id)}</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Warehouse: ${escapeHtml(u.warehouse_id || '—')}</div>
+                </div>
+                <select onchange="changeUserRole('${u.id}', this.value)" style="width:auto; margin:0;">
+                    <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>Viewer</option>
+                    <option value="editor" ${u.role === 'editor' ? 'selected' : ''}>Editor</option>
+                    <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
+                </select>
+            </div>`).join('');
+    }
+
+    async function changeUserRole(userId, role) {
+        const { error } = await sb.rpc('update_user_role', { p_user_id: userId, p_role: role });
+        if (error) { showToast("Could not update role: " + error.message, "error"); return; }
+        showToast("Role updated.", "success");
+    }
+
+    function closeManageUsersModal() { document.getElementById('manage-users-modal').classList.remove('open'); }
+    function handleUsersModalOverlayClick(e) { if (e.target === document.getElementById('manage-users-modal')) closeManageUsersModal(); }
 
     async function loadSupabaseSession(wid) {
         const { data: { user } } = await sb.auth.getUser();
@@ -1046,11 +1189,49 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // switching views — shared by supabaseLoadList (list view) and supabaseItemRoute (QR scan),
     // so both leave the app in the same full-data state static mode already provides (needed for
     // Back navigation, kit prev/next, and search to work after opening a single scanned item).
+    // Manufacturers are global, not warehouse-scoped (the same supplier can ship to several
+    // warehouses) — loaded once per session refresh rather than per-warehouse.
+    async function supabaseLoadManufacturers() {
+        const { data, error } = await sb.from('manufacturers').select('*').order('name');
+        if (error) { console.error("Manufacturer load failed:", error); globalManufacturers = []; return; }
+        globalManufacturers = data || [];
+        populateManufacturerDatalist();
+    }
+
+    function populateManufacturerDatalist() {
+        const dl = document.getElementById('manufacturer-datalist');
+        if (dl) dl.innerHTML = globalManufacturers.map(m => `<option value="${escapeHtml(m.name)}">`).join('');
+    }
+
+    // Folds known Nordic-character ASCII transliterations (ä->ae, ö->oe, ü->ue, å->aa) plus
+    // case/whitespace/punctuation, so e.g. "HÄNY" and "haeny" resolve to the same manufacturer
+    // instead of silently creating a duplicate entry.
+    function normalizeManufacturerKey(name) {
+        return String(name || '').trim().toLowerCase()
+            .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/å/g, 'aa')
+            .replace(/[^a-z0-9]/g, '');
+    }
+
+    // Resolves a typed manufacturer name to an existing manufacturer (matched leniently, see
+    // normalizeManufacturerKey) or creates a new one. Returns the canonical {id, name} to use.
+    async function resolveManufacturer(name) {
+        if (!name || name === 'None') return { id: null, name: 'None' };
+        const key = normalizeManufacturerKey(name);
+        const existing = globalManufacturers.find(m => normalizeManufacturerKey(m.name) === key);
+        if (existing) return { id: existing.id, name: existing.name };
+        const { data, error } = await sb.from('manufacturers').insert({ name: name.trim() }).select().single();
+        if (error) { console.error("Manufacturer create failed:", error); return { id: null, name: name.trim() }; }
+        globalManufacturers.push(data);
+        populateManufacturerDatalist();
+        return { id: data.id, name: data.name };
+    }
+
     async function supabaseFetchData(wid) {
         const { data, error } = await sb.from('items').select('*').eq('warehouse_id', wid);
         if (error) { showToast("Could not load items: " + error.message, "error"); throw error; }
         globalInventory = (data || []).map(supabaseRowToItem);
         globalKits = await supabaseLoadKits(wid);
+        await supabaseLoadManufacturers();
     }
 
     async function supabaseLoadList(wid) {
@@ -1608,7 +1789,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function switchView(viewId) {
-        ['auth-view','list-view','item-view','kit-view','preview-view','settings-view'].forEach(v => {
+        ['auth-view','list-view','item-view','kit-view','manufacturer-view','preview-view','settings-view'].forEach(v => {
             document.getElementById(v).classList.add('hidden');
         });
         document.getElementById(viewId).classList.remove('hidden');
@@ -1812,6 +1993,19 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function triggerKitsCSVImport() { if (!requireAuth()) return; document.getElementById('kits-csv-upload').click(); }
     function triggerWarehouseCSVImport() { if (!requireAuth()) return; document.getElementById('warehouse-csv-upload').click(); }
 
+    // Collapses same-BTK rows to the last occurrence (consistent with how the app treats BTK as
+    // the only safe lookup key elsewhere) and reports which ones collided, rather than silently
+    // leaving invisible duplicate rows that .find()-based lookups would never surface.
+    function dedupeByBTK(items) {
+        const seen = new Map();
+        const dupeSet = new Set();
+        items.forEach(item => {
+            if (seen.has(item.BTKnumber)) dupeSet.add(item.BTKnumber);
+            seen.set(item.BTKnumber, item);
+        });
+        return { deduped: Array.from(seen.values()), dupes: Array.from(dupeSet) };
+    }
+
     function handleCSVUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
@@ -1819,12 +2013,18 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         reader.onload = function(e) {
             const items = parseCSVString(e.target.result);
             if (!items.length) { showToast("No valid rows (need BTKnumber column).", "error"); return; }
-            globalInventory = items;
+            const { deduped, dupes } = dedupeByBTK(items);
+            globalInventory = deduped;
             saveDraft(currentWarehouseId);
             clearSelection();
             document.getElementById('search-box').value = '';
             filterList(true);
-            showToast(`Imported ${items.length} items (draft autosaved).`, "success");
+            if (dupes.length) {
+                const preview = dupes.slice(0, 5).join(', ') + (dupes.length > 5 ? '…' : '');
+                showToast(`Imported ${deduped.length} items — ${dupes.length} duplicate BTK number(s) collapsed to their last row: ${preview} (draft autosaved).`, "warning", 9000);
+            } else {
+                showToast(`Imported ${deduped.length} items (draft autosaved).`, "success");
+            }
         };
         reader.readAsText(file);
         event.target.value = '';
@@ -1896,6 +2096,29 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         }
     }
 
+    // Plain-text CSV snapshot for Supabase-mode warehouses (the DB is the source of truth there,
+    // so this is for reporting/offline reference — not a backup mechanism, so no encryption).
+    function itemsToCSV(items) {
+        const esc = v => {
+            const s = (v == null ? '' : String(v));
+            return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        };
+        const rows = [COLUMNS_B.join(',')].concat(items.map(item => COLUMNS_B.map(c => esc(item[c])).join(',')));
+        return rows.join('\r\n');
+    }
+
+    function exportItemsCSV() {
+        if (!globalInventory.length) return showToast("Nothing to export.", "warning");
+        const csv = itemsToCSV(globalInventory);
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `warehouse-${currentWarehouseId}-items-${Date.now()}.csv`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(`Exported ${globalInventory.length} items to CSV.`, "success");
+    }
+
     // ════════════════════════════════════════════════════════════════════════
     //  LIST MODE (ITEMS / KITS)
     // ════════════════════════════════════════════════════════════════════════
@@ -1911,12 +2134,32 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         listMode = mode;
         document.getElementById('seg-items').classList.toggle('active', mode === 'items');
         document.getElementById('seg-kits').classList.toggle('active', mode === 'kits');
+        document.getElementById('seg-manufacturers').classList.toggle('active', mode === 'manufacturers');
         document.getElementById('btn-add-item').classList.toggle('hidden', mode !== 'items');
         document.getElementById('items-only-controls').classList.toggle('hidden', mode !== 'items');
         document.getElementById('kits-only-controls').classList.toggle('hidden', mode !== 'kits');
         const fab = document.getElementById('fab-bar');
         if (mode === 'items') { filterList(true); fab.classList.toggle('visible', selectedItems.size > 0); }
+        else if (mode === 'manufacturers') { renderManufacturersList(); fab.classList.remove('visible'); }
         else { renderKitsList(); fab.classList.remove('visible'); }
+    }
+
+    // Options are whatever manufacturers are actually present in the currently loaded inventory —
+    // works the same for static and Supabase warehouses, no separate manufacturers table needed.
+    function populateManufacturerFilter() {
+        const sel = document.getElementById('manufacturer-filter');
+        const names = Array.from(new Set(
+            globalInventory.map(i => i.Manufacturer).filter(m => m && m !== 'None')
+        )).sort((a, b) => a.localeCompare(b));
+        const current = sel.value;
+        sel.innerHTML = '<option value="">All Manufacturers</option>' + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+        if (names.includes(current)) sel.value = current;
+        else manufacturerFilter = '';
+    }
+
+    function onManufacturerFilterChange() {
+        manufacturerFilter = document.getElementById('manufacturer-filter').value;
+        filterList(false);
     }
 
     function renderWarehouseMeta() {
@@ -1935,6 +2178,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             document.getElementById(id).classList.toggle('hidden', isSupa);
         });
         document.getElementById('btn-batch-images').classList.toggle('hidden', !isSupa || currentUserRole === 'viewer');
+        document.getElementById('btn-export-csv').classList.toggle('hidden', !isSupa);
+        document.getElementById('seg-manufacturers').classList.toggle('hidden', !isSupa);
     }
 
     async function switchWarehouse(wid) {
@@ -1996,10 +2241,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function onSortChange() { sortBy = document.getElementById('sort-by').value; filterList(true); }
 
     function filterList(forceAll = false) {
+        populateManufacturerFilter();
         const query = forceAll ? "" : document.getElementById('search-box').value.toLowerCase().trim();
         let filtered = globalInventory;
+        if (manufacturerFilter) filtered = filtered.filter(item => item.Manufacturer === manufacturerFilter);
         if (query !== "") {
-            filtered = globalInventory.filter(item => {
+            filtered = filtered.filter(item => {
                 const fields = [
                     item['itemname(english)'], item['itemname(swedish)'], item.BTKnumber,
                     item.itemnumber, item.itemnumber2, item.itemnumber3,
@@ -2054,10 +2301,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const rNum2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
             const rNums = [rNum1, rNum2].filter(Boolean).join(' · ') || id;
             const rMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
+            const lowStockBadge = isLowStock(item) ? `<span class="low-stock-badge" title="Below your Settings threshold of ${lowStockThreshold}">⚠️ Low stock</span>` : '';
             div.innerHTML = `
                 <div class="select-circle" role="checkbox" aria-checked="${isChecked}" data-id="${id}" aria-label="Select for label" tabindex="0"></div>
                 <div class="item-info">
-                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed'}</div>
+                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed'} ${lowStockBadge}</div>
                     ${rNums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${rNums}</div>` : ''}
                     <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${rMfr ? rMfr + ' ' : ''}${id}</div>
                 </div>`;
@@ -2171,6 +2419,175 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             frag.appendChild(div);
         });
         container.appendChild(frag);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  MANUFACTURERS (Supabase mode only) — list, detail page, edit modal, logo upload
+    // ════════════════════════════════════════════════════════════════════════
+    function renderManufacturersList() {
+        const container = document.getElementById('item-list-container');
+        container.innerHTML = '';
+        const frag = document.createDocumentFragment();
+
+        if (canEditItems()) {
+            const addDiv = document.createElement('div');
+            addDiv.className = 'kit-row';
+            addDiv.setAttribute('role', 'button'); addDiv.tabIndex = 0;
+            addDiv.innerHTML = `<div class="kit-info"><div class="kit-name">➕ Add Manufacturer</div></div>`;
+            addDiv.onclick = () => openManufacturerEditModal(null);
+            addDiv.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); addDiv.click(); } };
+            frag.appendChild(addDiv);
+        }
+
+        if (!globalManufacturers.length) {
+            container.appendChild(frag);
+            if (!canEditItems()) container.innerHTML += `<div class="empty-state"><h3>No manufacturers yet</h3></div>`;
+            return;
+        }
+
+        globalManufacturers.forEach(m => {
+            const count = globalInventory.filter(i => i.manufacturerId === m.id).length;
+            const div = document.createElement('div');
+            div.className = 'kit-row';
+            div.setAttribute('role', 'button'); div.tabIndex = 0;
+            const logoHtml = m.logo_url
+                ? `<img src="${escapeHtml(m.logo_url)}" alt="" style="width:40px;height:40px;object-fit:contain;border-radius:8px;background:var(--card-bg);border:1px solid var(--border);flex-shrink:0;">`
+                : `<div style="width:40px;height:40px;border-radius:8px;background:var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:1.1rem;">🏭</div>`;
+            div.innerHTML = `
+                ${logoHtml}
+                <div class="kit-info">
+                    <div class="kit-name">${escapeHtml(m.name)}</div>
+                    <div class="kit-sub">${count} item(s) in this warehouse</div>
+                </div>`;
+            div.onclick = () => openManufacturer(m.id);
+            div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); div.click(); } };
+            frag.appendChild(div);
+        });
+        container.appendChild(frag);
+    }
+
+    function openManufacturer(id) {
+        const m = globalManufacturers.find(x => x.id === id);
+        if (!m) return showToast("Manufacturer not found", "error");
+        currentManufacturerId = id;
+        switchView('manufacturer-view');
+        document.getElementById('manufacturer-detail-name').innerText = m.name;
+
+        const logo = document.getElementById('manufacturer-detail-logo');
+        if (m.logo_url) {
+            logo.src = m.logo_url;
+            logo.classList.remove('hidden');
+            logo.onclick = () => openLightbox(m.logo_url);
+        } else {
+            logo.classList.add('hidden');
+        }
+
+        const items = globalInventory.filter(i => i.manufacturerId === id);
+        document.getElementById('manufacturer-detail-counts').innerText = `${items.length} item(s) in ${getWarehouseMeta(currentWarehouseId).name}`;
+
+        const infoParts = [];
+        if (m.description) infoParts.push(`<div style="margin-bottom:10px;">${escapeHtml(m.description)}</div>`);
+        if (m.contact_name) infoParts.push(`<div style="margin-bottom:6px;"><strong>Contact:</strong> ${escapeHtml(m.contact_name)}</div>`);
+        if (m.email) infoParts.push(`<div><strong>Email:</strong> <a href="mailto:${escapeHtml(m.email)}">${escapeHtml(m.email)}</a></div>`);
+        document.getElementById('manufacturer-detail-info').innerHTML = infoParts.join('') || `<p style="color:var(--text-muted);">No description or contact info yet.</p>`;
+
+        document.getElementById('btn-edit-manufacturer').classList.toggle('hidden', !canEditItems());
+
+        const itemsContainer = document.getElementById('manufacturer-detail-items');
+        itemsContainer.innerHTML = '';
+        if (!items.length) {
+            itemsContainer.innerHTML = `<div class="empty-state"><p>No items from this manufacturer in this warehouse.</p></div>`;
+            return;
+        }
+        const frag = document.createDocumentFragment();
+        items.forEach(item => {
+            const btk = item.BTKnumber;
+            const num1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
+            const num2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
+            const nums = [num1, num2].filter(Boolean).join(' · ') || btk;
+            const div = document.createElement('div');
+            div.className = 'kit-row';
+            div.setAttribute('role', 'button'); div.tabIndex = 0;
+            div.innerHTML = `
+                <div class="kit-info">
+                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed'}</div>
+                    <div class="item-sub" style="font-weight:700;color:var(--text-main);">${nums}</div>
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${btk}</div>
+                </div>`;
+            div.onclick = () => openItem(btk, { type: 'global' });
+            div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); div.click(); } };
+            frag.appendChild(div);
+        });
+        itemsContainer.appendChild(frag);
+    }
+
+    // id === null means "create new" (explicit reset); id === undefined (the Edit button calls
+    // with no argument) means "keep editing whichever manufacturer openManufacturer() already set".
+    function openManufacturerEditModal(id) {
+        if (!canEditItems()) { showToast("You don't have permission to edit manufacturers.", "warning"); return; }
+        if (id === null) currentManufacturerId = null;
+        else if (id !== undefined) currentManufacturerId = id;
+        const m = currentManufacturerId ? globalManufacturers.find(x => x.id === currentManufacturerId) : null;
+        document.getElementById('mfr-name').value = m ? m.name : '';
+        document.getElementById('mfr-description').value = m ? (m.description || '') : '';
+        document.getElementById('mfr-contact').value = m ? (m.contact_name || '') : '';
+        document.getElementById('mfr-email').value = m ? (m.email || '') : '';
+        const preview = document.getElementById('mfr-edit-logo-preview');
+        if (m && m.logo_url) { preview.src = m.logo_url; preview.classList.remove('hidden'); }
+        else preview.classList.add('hidden');
+        document.getElementById('manufacturer-edit-modal').classList.add('open');
+    }
+    function closeManufacturerEditModal() { document.getElementById('manufacturer-edit-modal').classList.remove('open'); }
+    function handleManufacturerModalOverlayClick(e) { if (e.target === document.getElementById('manufacturer-edit-modal')) closeManufacturerEditModal(); }
+
+    async function saveManufacturerEdit() {
+        const name = document.getElementById('mfr-name').value.trim();
+        if (!name) { showToast("Name is required.", "error"); return; }
+        const row = {
+            name,
+            description: document.getElementById('mfr-description').value.trim() || null,
+            contact_name: document.getElementById('mfr-contact').value.trim() || null,
+            email: document.getElementById('mfr-email').value.trim() || null
+        };
+        const result = currentManufacturerId
+            ? await sb.from('manufacturers').update(row).eq('id', currentManufacturerId).select().single()
+            : await sb.from('manufacturers').insert(row).select().single();
+        if (result.error) { showToast("Save blocked: " + result.error.message, "error"); return; }
+
+        const idx = globalManufacturers.findIndex(m => m.id === result.data.id);
+        if (idx >= 0) globalManufacturers[idx] = result.data; else globalManufacturers.push(result.data);
+        globalManufacturers.sort((a, b) => a.name.localeCompare(b.name));
+        populateManufacturerDatalist();
+        currentManufacturerId = result.data.id;
+        closeManufacturerEditModal();
+        showToast("Manufacturer saved.", "success");
+        if (activeView === 'manufacturer-view') openManufacturer(currentManufacturerId);
+        else if (listMode === 'manufacturers') renderManufacturersList();
+    }
+
+    async function handleManufacturerLogoUpload(event) {
+        const file = event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        if (!currentManufacturerId) { showToast("Save the manufacturer first, then upload a logo.", "warning"); return; }
+        try {
+            const bmp = await createImageBitmap(file);
+            const blob = await drawToBlob(bmp, 500, 0.9);
+            const path = `${currentManufacturerId}.jpg`;
+            const up = await sb.storage.from(SUPABASE_LOGO_BUCKET).upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+            if (up.error) throw up.error;
+            const logoUrl = sb.storage.from(SUPABASE_LOGO_BUCKET).getPublicUrl(path).data.publicUrl + '?v=' + Date.now();
+            const { error } = await sb.from('manufacturers').update({ logo_url: logoUrl }).eq('id', currentManufacturerId);
+            if (error) throw error;
+            const m = globalManufacturers.find(x => x.id === currentManufacturerId);
+            if (m) m.logo_url = logoUrl;
+            const preview = document.getElementById('mfr-edit-logo-preview');
+            preview.src = logoUrl; preview.classList.remove('hidden');
+            showToast("Logo uploaded.", "success");
+        } catch (e) {
+            console.error("Logo upload failed:", e);
+            showToast("Logo upload failed: " + e.message, "error");
+        }
     }
 
     // ── SELECTION (items) ──
@@ -2336,6 +2753,21 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         target.classList.remove('hidden');
     }
 
+    // Manufacturer field row: the 🔍 link searches other items with the same value (existing
+    // behavior); the 🏭 link (Supabase mode, when linked) navigates to that manufacturer's page.
+    // Two separate clickable spans rather than one, so each keeps its own single responsibility.
+    function manufacturerField(item) {
+        const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
+        if (!item.Manufacturer || item.Manufacturer === 'None') {
+            return `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Manufacturer:</span><span>${getStr(item.Manufacturer)}</span></div>`;
+        }
+        const searchLink = `<span class="field-link" role="button" tabindex="0" data-field-key="Manufacturer" title="Find other items with this value">${getStr(item.Manufacturer)} 🔍</span>`;
+        const navLink = item.manufacturerId
+            ? ` <span class="field-link" role="button" tabindex="0" data-manufacturer-nav title="View manufacturer page">🏭</span>`
+            : '';
+        return `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Manufacturer:</span><span>${searchLink}${navLink}</span></div>`;
+    }
+
     // Read-only field display — the default view, and what quick-edit reverts to on save/cancel.
     function renderItemFields(item, id) {
         const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
@@ -2355,24 +2787,55 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             ${fieldLink('Item #1', 'itemnumber', item.itemnumber)}
             ${fieldLink('Item #2', 'itemnumber2', item.itemnumber2)}
             ${fieldLink('Item #3 (Internal)', 'itemnumber3', item.itemnumber3)}
-            ${fieldLink('Manufacturer', 'Manufacturer', item.Manufacturer)}
+            ${manufacturerField(item)}
             ${field('System ID (BTK)', id)}
-            ${field('Stock (Number of items)', item.Numberofitems)}
+            <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Stock (Number of items):</span>
+                <span>${getStr(item.Numberofitems)}</span>
+                ${isLowStock(item) ? `<span class="low-stock-badge" title="Below your Settings threshold of ${lowStockThreshold}">⚠️ Low stock</span>` : ''}
+                ${canEditItems() ? `<span style="display:flex;gap:6px;margin-left:auto;">
+                    <button class="secondary" style="min-width:34px;min-height:34px;padding:0;" onclick="adjustStock(-1)" aria-label="Decrease stock">−</button>
+                    <button class="secondary" style="min-width:34px;min-height:34px;padding:0;" onclick="adjustStock(1)" aria-label="Increase stock">+</button>
+                </span>` : ''}
+            </div>
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Inventory Location:</span><span>${getStr(item.Inventorylocation)}</span></div>
             ${field('Map Position', item.MapPosition)}
             <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;"><span style="font-weight:600;color:var(--text-muted);">Comments:</span><div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div></div>
-            ${field('Images', item.images)}`;
+            ${field('Images', item.images)}
+            ${item.updatedAt ? `<p style="color:var(--text-muted);font-size:0.8rem;margin-top:0.5rem;">Last updated: ${new Date(item.updatedAt).toLocaleString()}</p>` : ''}`;
 
         // Bind click/keyboard handlers as DOM properties keyed off data-field-key (not inline HTML
         // attributes with interpolated values) so field values with quotes can't break the markup,
         // and so hidden ('None') fields don't desync a positional index -> value mapping.
-        document.getElementById('detail-content').querySelectorAll('.field-link').forEach(el => {
+        document.getElementById('detail-content').querySelectorAll('.field-link[data-field-key]').forEach(el => {
             const val = item[el.dataset.fieldKey];
             el.onclick = () => searchForValue(val);
             el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } };
         });
+        document.getElementById('detail-content').querySelectorAll('[data-manufacturer-nav]').forEach(el => {
+            el.onclick = () => openManufacturer(item.manufacturerId);
+            el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } };
+        });
 
         document.getElementById('quick-edit-hint').classList.toggle('hidden', !canEditItems());
+    }
+
+    // Quick +/- stock stepper on the read-only item view — saves immediately (no quick-edit
+    // needed), for fast stock-take walks rather than a full field-by-field edit each time.
+    async function adjustStock(delta) {
+        const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+        if (!item || !canEditItems()) return;
+        const current = parseInt(item.Numberofitems, 10) || 0;
+        const next = Math.max(0, current + delta);
+        item.Numberofitems = String(next);
+
+        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const { error } = await sb.from('items').update({ numberofitems: next }).eq('btk', currentItemBTK);
+            if (error) { item.Numberofitems = String(current); showToast("Could not update stock: " + error.message, "error"); return; }
+        } else {
+            saveDraft(currentWarehouseId);
+        }
+        renderItemFields(item, currentItemBTK);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -2397,7 +2860,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('detail-content').innerHTML = `
             <div style="margin-bottom:14px;font-size:0.9rem;color:var(--text-muted);">System ID (BTK): <span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;">${escapeHtml(item.BTKnumber)}</span> <span style="opacity:0.7;">(not editable here)</span></div>
             <label class="modal-label" for="qe-manufacturer">Manufacturer</label>
-            <input type="text" id="qe-manufacturer" value="${escapeHtml(val(item.Manufacturer))}">
+            <input type="text" id="qe-manufacturer" value="${escapeHtml(val(item.Manufacturer))}" list="manufacturer-datalist">
             <label class="modal-label" for="qe-name-en">Item Name (English) *</label>
             <input type="text" id="qe-name-en" value="${escapeHtml(val(item['itemname(english)']))}">
             <label class="modal-label" for="qe-name-sv">Item Name (Swedish)</label>
@@ -2489,8 +2952,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         };
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const mfr = await resolveManufacturer(updated.Manufacturer);
+            updated.Manufacturer = mfr.name;
+            updated.manufacturerId = mfr.id;
             const row = {
-                manufacturer: updated.Manufacturer, itemnumber: updated.itemnumber,
+                manufacturer: mfr.name, manufacturer_id: mfr.id, itemnumber: updated.itemnumber,
                 itemname_en: updated['itemname(english)'], itemname_sv: updated['itemname(swedish)'],
                 itemnumber2: updated.itemnumber2, itemnumber3: updated.itemnumber3,
                 numberofitems: parseInt(updated.Numberofitems) || 0,
@@ -2652,7 +3118,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function closeAddItemModal() { document.getElementById('add-item-modal').classList.remove('open'); }
     function handleModalOverlayClick(e) { if (e.target === document.getElementById('add-item-modal')) closeAddItemModal(); }
 
-    function submitItemForm() {
+    async function submitItemForm() {
         const btk = document.getElementById('ai-btknumber').value.trim();
         const nameEn = document.getElementById('ai-name-en').value.trim();
         if (!btk || !nameEn) { showToast("BTK Number and English Name are required.", "error"); return; }
@@ -2677,8 +3143,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         };
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const mfr = await resolveManufacturer(newItem.Manufacturer);
             const row = {
-                manufacturer: newItem.Manufacturer, itemnumber: newItem.itemnumber,
+                manufacturer: mfr.name, manufacturer_id: mfr.id, itemnumber: newItem.itemnumber,
                 itemname_en: newItem['itemname(english)'], itemname_sv: newItem['itemname(swedish)'],
                 itemnumber2: newItem.itemnumber2, itemnumber3: newItem.itemnumber3,
                 numberofitems: parseInt(newItem.Numberofitems) || 0,
@@ -2990,17 +3457,42 @@ ${css}
     function initSettings() {
         const savedEcc = localStorage.getItem('qr-ecc');
         if (savedEcc) { document.getElementById('qr-ecc').value = savedEcc; updateQREccVar(savedEcc); }
+
+        lowStockEnabled = localStorage.getItem('lowstock-enabled') === '1';
+        lowStockThreshold = Math.max(1, parseInt(localStorage.getItem('lowstock-threshold'), 10) || 5);
+        document.getElementById('lowstock-enabled').checked = lowStockEnabled;
+        document.getElementById('lowstock-threshold').value = lowStockThreshold;
+        document.getElementById('lowstock-threshold-row').classList.toggle('hidden', !lowStockEnabled);
+    }
+    function onLowStockSettingChange() {
+        document.getElementById('lowstock-threshold-row').classList.toggle('hidden', !document.getElementById('lowstock-enabled').checked);
+    }
+    function isLowStock(item) {
+        if (!lowStockEnabled) return false;
+        const qty = parseInt(item.Numberofitems, 10);
+        return !isNaN(qty) && qty < lowStockThreshold;
+    }
+    function syncSettingsVisibility() {
+        refreshStorageUsage();
+        const isSupaAdmin = getWarehouseMeta(currentWarehouseId).mode === 'supabase' && currentUserRole === 'admin';
+        document.getElementById('btn-manage-users').classList.toggle('hidden', !isSupaAdmin);
     }
     function toggleSettings() {
         if (activeView === 'settings-view') { switchView(previousView); }
-        else { previousView = activeView; switchView('settings-view'); refreshStorageUsage(); }
+        else { previousView = activeView; switchView('settings-view'); syncSettingsVisibility(); }
     }
-    function showSettings() { if (!requireAuth()) return; previousView = activeView; switchView('settings-view'); refreshStorageUsage(); }
+    function showSettings() { if (!requireAuth()) return; previousView = activeView; switchView('settings-view'); syncSettingsVisibility(); }
 
     function saveSettings() {
         const eccVal = document.getElementById('qr-ecc').value;
         localStorage.setItem('qr-ecc', eccVal);
         updateQREccVar(eccVal);
+
+        lowStockEnabled = document.getElementById('lowstock-enabled').checked;
+        lowStockThreshold = Math.max(1, parseInt(document.getElementById('lowstock-threshold').value, 10) || 5);
+        localStorage.setItem('lowstock-enabled', lowStockEnabled ? '1' : '0');
+        localStorage.setItem('lowstock-threshold', String(lowStockThreshold));
+
         showToast("Settings saved", "success");
         if (selectedItems.size > 0 && activeView === 'preview-view') generateLabelsPreview();
         else if (globalInventory.length > 0 || globalKits.length > 0) showListView();
