@@ -96,8 +96,10 @@ A self-contained, single-file inventory management web app with encrypted storag
 ```
 webware/
 ├── index.html          # Complete application (HTML + CSS + JS)
-├── assets/             # Place item images here (referenced by CSV B `images` column)
-└── README.md           # This file
+├── assets/              # Place item images here (referenced by CSV B `images` column)
+├── supabase/            # SQL migrations (run once each, see Database Schema below) + edge functions
+├── modules/             # Standalone JS for future functionality — not wired into index.html yet, see modules/README.md
+└── README.md            # This file
 ```
 
 ## Supabase Mode (Warehouse 1)
