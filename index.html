@@ -218,6 +218,8 @@
 
         /* --- PACK ORDER --- */
         .pack-order-qty { font-size: 1.7rem; font-weight: 900; color: var(--primary); min-width: 40px; text-align: center; flex-shrink: 0; }
+        .pack-order-qty[role="button"] { cursor: pointer; border-radius: 8px; }
+        .pack-order-qty[role="button"]:hover { background: var(--primary-light); }
         .pack-order-qty input { width: 56px; min-height: unset; padding: 4px; text-align: center; font-size: 1.1rem; font-weight: 700; margin: 0; }
         .pack-toggle-btn { min-height: 34px; padding: 6px 12px; font-size: 0.82rem; min-width: 108px; flex-shrink: 0; }
         /* grid+place-items centers a single glyph regardless of its own font metrics — flex
@@ -647,6 +649,34 @@
         <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">📦 Pack Order</h1>
         <p id="pack-order-progress" style="color:var(--text-muted); margin-bottom:1rem;"></p>
         <div id="pack-order-items"></div>
+
+        <div style="text-align:center; margin:1.5rem 0 0.5rem; color:var(--text-muted); font-size:1.8rem;" aria-hidden="true">⬇️</div>
+
+        <div class="setting-row">
+            <label for="pack-box-preset">Package Dimensions</label>
+            <select id="pack-box-preset" onchange="onPackBoxPresetChange()">
+                <option value="">Custom</option>
+                <option value="small">Small (200 × 150 × 100 mm)</option>
+                <option value="medium">Medium (300 × 200 × 150 mm)</option>
+                <option value="large">Large (400 × 300 × 200 mm)</option>
+            </select>
+            <div style="display:flex; gap:8px; align-items:center; margin-top:0.5rem; flex-wrap:wrap;">
+                <input type="number" min="0" id="pack-box-length" placeholder="L" oninput="onPackBoxDimInput()" style="width:80px; margin:0;">
+                <span style="color:var(--text-muted);">×</span>
+                <input type="number" min="0" id="pack-box-width" placeholder="W" oninput="onPackBoxDimInput()" style="width:80px; margin:0;">
+                <span style="color:var(--text-muted);">×</span>
+                <input type="number" min="0" id="pack-box-height" placeholder="H" oninput="onPackBoxDimInput()" style="width:80px; margin:0;">
+                <span style="color:var(--text-muted);">mm</span>
+            </div>
+        </div>
+
+        <div class="setting-row">
+            <label for="pack-box-weight">Package Weight</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <input type="number" min="0" step="0.01" id="pack-box-weight" placeholder="e.g. 2.5" oninput="onPackBoxWeightInput()" style="width:100px; margin:0;">
+                <span style="color:var(--text-muted);">kg</span>
+            </div>
+        </div>
     </section>
 
     <!-- View 4: Label Preview & Generation -->
@@ -824,6 +854,12 @@
     var packOrder = []; // [{btk, qty, packed}] — session-local pick list, never persisted
     var packOrderPreviousView = 'list-view';
     var packOrderEditMode = false;
+    var packOrderBox = { preset: '', length: '', width: '', height: '', weight: '' };
+    const PACK_BOX_PRESETS = {
+        small:  { length: 200, width: 150, height: 100 },
+        medium: { length: 300, width: 200, height: 150 },
+        large:  { length: 400, width: 300, height: 200 }
+    };
 
     // Quick-edit (inline, double-click) state
     var quickEditMode = false;
@@ -2771,6 +2807,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         packOrderEditMode = false;
         switchView('pack-order-view');
         renderPackOrderItems();
+        syncPackOrderBoxInputs();
     }
 
     function closePackOrderView() { switchView(packOrderPreviousView || 'list-view'); }
@@ -2779,8 +2816,43 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!packOrder.length) return;
         if (!confirm("Clear the entire pack order? This can't be undone.")) return;
         packOrder = [];
+        packOrderBox = { preset: '', length: '', width: '', height: '', weight: '' };
         updatePackOrderBadge();
         renderPackOrderItems();
+        syncPackOrderBoxInputs();
+    }
+
+    // ── Package dimensions/weight — plain session state alongside the pick list itself ──
+    function syncPackOrderBoxInputs() {
+        document.getElementById('pack-box-preset').value = packOrderBox.preset || '';
+        document.getElementById('pack-box-length').value = packOrderBox.length || '';
+        document.getElementById('pack-box-width').value = packOrderBox.width || '';
+        document.getElementById('pack-box-height').value = packOrderBox.height || '';
+        document.getElementById('pack-box-weight').value = packOrderBox.weight || '';
+    }
+
+    function onPackBoxPresetChange() {
+        const preset = document.getElementById('pack-box-preset').value;
+        packOrderBox.preset = preset;
+        const dims = PACK_BOX_PRESETS[preset];
+        if (dims) {
+            packOrderBox.length = dims.length; packOrderBox.width = dims.width; packOrderBox.height = dims.height;
+            document.getElementById('pack-box-length').value = dims.length;
+            document.getElementById('pack-box-width').value = dims.width;
+            document.getElementById('pack-box-height').value = dims.height;
+        }
+    }
+
+    function onPackBoxDimInput() {
+        packOrderBox.preset = ''; // a manual edit detaches it from whichever preset was selected
+        document.getElementById('pack-box-preset').value = '';
+        packOrderBox.length = document.getElementById('pack-box-length').value;
+        packOrderBox.width = document.getElementById('pack-box-width').value;
+        packOrderBox.height = document.getElementById('pack-box-height').value;
+    }
+
+    function onPackBoxWeightInput() {
+        packOrderBox.weight = document.getElementById('pack-box-weight').value;
     }
 
     function togglePacked(btk) {
@@ -2824,30 +2896,69 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             div.className = 'kit-row';
             div.style.cursor = packOrderEditMode ? 'default' : 'pointer';
 
+            // View mode: the number itself is clickable (editPackOrderQty prompts for a new value,
+            // with the restock/backorder question if it's lower than before). Edit mode: a plain
+            // input, changes go through the same updatePackOrderQty so the restock question still
+            // applies regardless of which entry point was used to lower the quantity.
             const qtyHtml = packOrderEditMode
-                ? `<div class="pack-order-qty"><input type="number" min="1" value="${line.qty}" data-role="qty-input"></div>`
-                : `<div class="pack-order-qty">${line.qty}</div>`;
+                ? `<div class="pack-order-qty"><input type="number" min="0" value="${line.qty}" data-role="qty-input"></div>`
+                : `<div class="pack-order-qty" role="button" tabindex="0" title="Click to change quantity" data-role="qty-display">${line.qty}</div>`;
+            const backorderBadge = line.backorder > 0
+                ? `<div class="item-sub" style="font-size:0.75rem;color:var(--danger);font-weight:700;">⚠ ${line.backorder} backordered</div>` : '';
 
             div.innerHTML = `
                 ${qtyHtml}
                 <div class="kit-info">
                     <div class="item-title" style="font-size:1.05rem;font-weight:800;${line.packed ? 'text-decoration:line-through;opacity:0.6;' : ''}">${escapeHtml(name)}</div>
                     <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${escapeHtml(line.btk)}${num1 ? ' · ' + escapeHtml(num1) : ''}${loc ? ' · 📍 ' + escapeHtml(loc) : ''}</div>
+                    ${backorderBadge}
                 </div>
                 <button class="${line.packed ? 'success-btn' : 'secondary'} pack-toggle-btn" data-role="toggle">${line.packed ? '✅ Packed' : '⬜ Not Packed'}</button>
                 <button class="pack-remove-btn" data-role="remove" aria-label="Remove from order">✕</button>`;
 
-            if (!packOrderEditMode) div.onclick = () => openItem(line.btk, { type: 'pack-order' });
+            if (!packOrderEditMode) {
+                div.onclick = () => openItem(line.btk, { type: 'pack-order' });
+                const qtyDisplay = div.querySelector('[data-role="qty-display"]');
+                qtyDisplay.onclick = (e) => { e.stopPropagation(); editPackOrderQty(line.btk); };
+                qtyDisplay.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); editPackOrderQty(line.btk); } };
+            }
             div.querySelector('[data-role="toggle"]').onclick = (e) => { e.stopPropagation(); togglePacked(line.btk); };
             div.querySelector('[data-role="remove"]').onclick = (e) => { e.stopPropagation(); removeFromPackOrder(line.btk); };
             if (packOrderEditMode) {
                 const input = div.querySelector('[data-role="qty-input"]');
                 input.onclick = (e) => e.stopPropagation();
-                input.onchange = () => { line.qty = Math.max(1, parseInt(input.value, 10) || 1); renderPackOrderItems(); };
+                input.onchange = () => updatePackOrderQty(line.btk, parseInt(input.value, 10));
             }
             frag.appendChild(div);
         });
         container.appendChild(frag);
+    }
+
+    // Shared by both quantity-edit entry points (clicking the big number, or the Edit Order mode
+    // input) so the restock question applies consistently regardless of which one was used.
+    // Reducing the quantity asks whether the difference should be recorded as a backorder —
+    // "yes" tracks it (shown as a badge, included on the printed sheet); "no" just treats the new,
+    // lower number as the real total with nothing owed.
+    function updatePackOrderQty(btk, newQty) {
+        const line = packOrder.find(o => o.btk === btk);
+        if (!line) return;
+        if (isNaN(newQty) || newQty < 0) { showToast("Enter a valid number.", "error"); renderPackOrderItems(); return; }
+        if (newQty < line.qty) {
+            const short = line.qty - newQty;
+            if (confirm(`You had ${line.qty} before and now wrote ${newQty}. Should we record ${short} as a backorder (restock needed)?`)) {
+                line.backorder = (line.backorder || 0) + short;
+            }
+        }
+        line.qty = newQty;
+        renderPackOrderItems();
+    }
+
+    function editPackOrderQty(btk) {
+        const line = packOrder.find(o => o.btk === btk);
+        if (!line) return;
+        const input = prompt(`Set quantity for this item (was ${line.qty}):`, String(line.qty));
+        if (input === null) return; // cancelled
+        updatePackOrderQty(btk, parseInt(input, 10));
     }
 
     function togglePackOrderEditMode() {
@@ -2872,23 +2983,31 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 <td>${escapeHtml(line.btk)}${num1 ? ' / ' + escapeHtml(num1) : ''}</td>
                 <td style="text-align:center;">${escapeHtml(loc)}</td>
                 <td style="text-align:center;">${line.packed ? '☑' : '☐'}</td>
+                <td style="text-align:center;color:#b91c1c;">${line.backorder > 0 ? escapeHtml(String(line.backorder)) : ''}</td>
             </tr>`;
         }).join('');
+        const boxParts = [];
+        if (packOrderBox.length && packOrderBox.width && packOrderBox.height) {
+            boxParts.push(`Box: ${packOrderBox.length} × ${packOrderBox.width} × ${packOrderBox.height} mm`);
+        }
+        if (packOrderBox.weight) boxParts.push(`Weight: ${packOrderBox.weight} kg`);
+        const boxLine = boxParts.length ? `<p class="meta">${boxParts.map(escapeHtml).join(' &nbsp;·&nbsp; ')}</p>` : '';
         const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Pack Order</title>
 <style>
 @page { size: A4; margin: 18mm; }
 body { font-family: Arial, Helvetica, sans-serif; color: #000; margin: 0; }
 h1 { font-size: 1.4rem; margin: 0 0 4px; }
-p.meta { color: #555; font-size: 0.85rem; margin: 0 0 16px; }
-table { width: 100%; border-collapse: collapse; }
+p.meta { color: #555; font-size: 0.85rem; margin: 0 0 4px; }
+table { width: 100%; border-collapse: collapse; margin-top: 12px; }
 th, td { border: 1px solid #999; padding: 6px 8px; font-size: 0.9rem; text-align: left; }
 th { background: #eee; }
 </style></head>
 <body onload="window.print()">
     <h1>📦 Pack Order</h1>
     <p class="meta">Warehouse: ${escapeHtml(getWarehouseMeta(currentWarehouseId).name)} &nbsp;·&nbsp; Generated: ${escapeHtml(new Date().toLocaleString())} &nbsp;·&nbsp; ${packOrder.length} item(s)</p>
+    ${boxLine}
     <table>
-        <thead><tr><th>Qty</th><th>Item</th><th>BTK / Item #</th><th>Location</th><th>Packed</th></tr></thead>
+        <thead><tr><th>Qty</th><th>Item</th><th>BTK / Item #</th><th>Location</th><th>Packed</th><th>Backorder</th></tr></thead>
         <tbody>${rows}</tbody>
     </table>
 </body></html>`;
