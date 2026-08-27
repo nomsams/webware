@@ -834,11 +834,35 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         currentActiveKey = 'supabase-session'; // sentinel so requireAuth() passes
     }
 
-    async function supabaseLoadList(wid) {
+    // Kits are a normalized edge-list in Supabase (kits + kit_items), unlike static mode's
+    // wide CSV-A matrix — reshape into the same {name, kitnumber, items:{btk:qty}} globalKits
+    // expects, so the existing kit UI (renderKitsList, showKitDetail, kit tags/nav) needs no changes.
+    async function supabaseLoadKits(wid) {
+        const { data: kits, error: kErr } = await sb.from('kits').select('id, kitnumber, name').eq('warehouse_id', wid);
+        if (kErr) { console.error("Kit load failed:", kErr); return []; }
+        if (!kits.length) return [];
+        const { data: kitItems, error: iErr } = await sb.from('kit_items').select('kit_id, btk, quantity').in('kit_id', kits.map(k => k.id));
+        if (iErr) { console.error("Kit items load failed:", iErr); return []; }
+        return kits.map(k => ({
+            name: k.name,
+            kitnumber: k.kitnumber || 'None',
+            items: Object.fromEntries(kitItems.filter(ki => ki.kit_id === k.id).map(ki => [ki.btk, ki.quantity]))
+        }));
+    }
+
+    // Fetches the full warehouse dataset (items + kits) into globalInventory/globalKits without
+    // switching views — shared by supabaseLoadList (list view) and supabaseItemRoute (QR scan),
+    // so both leave the app in the same full-data state static mode already provides (needed for
+    // Back navigation, kit prev/next, and search to work after opening a single scanned item).
+    async function supabaseFetchData(wid) {
         const { data, error } = await sb.from('items').select('*').eq('warehouse_id', wid);
-        if (error) { showToast("Could not load items: " + error.message, "error"); return; }
+        if (error) { showToast("Could not load items: " + error.message, "error"); throw error; }
         globalInventory = (data || []).map(supabaseRowToItem);
-        globalKits = [];
+        globalKits = await supabaseLoadKits(wid);
+    }
+
+    async function supabaseLoadList(wid) {
+        try { await supabaseFetchData(wid); } catch (e) { return; }
         showListView();
     }
 
@@ -847,13 +871,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!session) { pendingItemId = btk; currentWarehouseId = wid; showAuth(); return; }
         try {
             await loadSupabaseSession(wid);
+            await supabaseFetchData(wid);
         } catch (e) {
-            console.error("Supabase session load failed:", e);
+            console.error("Supabase item route failed:", e);
             pendingItemId = btk; showAuth(); return;
         }
-        const { data, error } = await sb.from('items').select('*').eq('btk', btk).single();
-        if (error) { showToast("Item not found or access denied.", "error"); return; }
-        globalInventory = [supabaseRowToItem(data)];
+        if (!globalInventory.find(i => i.BTKnumber === btk)) return showToast("Item not found or access denied.", "error");
         openItem(btk, { type: 'global' });
     }
 
@@ -1585,7 +1608,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function showKitDetail(kitnumber, kitName) {
-        const kit = globalKits.find(k => k.kitnumber === kitnumber);
+        // kitnumber alone isn't a safe key — several kits share kitnumber 'None'; match name too.
+        const kit = globalKits.find(k => k.kitnumber === kitnumber && k.name === kitName);
         if (!kit) return showToast("Kit not found", "error");
         switchView('kit-view');
         document.getElementById('kit-detail-name').innerText = kit.name || 'Unnamed Kit';
