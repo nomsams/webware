@@ -27,7 +27,6 @@
             --console-text: var(--text-main);
             --console-border: var(--border);
             --focus-ring: rgba(37, 99, 235, 0.4);
-            --label-font-cap: 16pt;
         }
 
         [data-theme="dark"] {
@@ -165,17 +164,21 @@
         [data-theme="dark"] .preview-grid { background: #0f172a; border: 1px inset #334155; }
         
         .label-card {
+            --pad-l: 2mm; --pad-r: 2mm; --fs: 1;
             width: 90mm; height: 29mm; background: white !important; color: black !important;
-            display: flex; align-items: stretch; box-sizing: border-box; padding: 1.5mm;
+            display: flex; align-items: stretch; box-sizing: border-box;
+            padding: 1.5mm var(--pad-r) 1.5mm var(--pad-l);
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative; overflow: hidden; margin: 0 auto; border-radius: 2px;
         }
         .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; margin-right: 4mm; }
         .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
-        .label-text { flex-grow: 1; padding-left: 2mm; display: flex; flex-direction: column; justify-content: flex-start; align-items: flex-end; overflow: hidden; height: 100%; text-align: right; min-width: 0; }
+        .label-text { flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-start; align-items: flex-end; overflow: hidden; height: 100%; text-align: right; min-width: 0; }
         .label-text div { line-height: 1.2; font-family: Arial, Helvetica, sans-serif !important; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .l-nums { font-size: clamp(11pt, 4.5vw, var(--label-font-cap)); font-weight: 900; color: #000; letter-spacing: -0.3px; margin-top: 0.5mm; }
-        .l-name { font-size: clamp(8pt, 2.8vw, 12pt); font-weight: 700; color: #000; margin-top: 1.5mm; }
-        .l-btk  { font-size: 6pt; color: #555; font-weight: 600; letter-spacing: 0.3px; margin-top: auto; }
+        .l-nums { font-size: calc(14pt * var(--fs)); font-weight: 900; color: #000; letter-spacing: -0.3px; margin-top: 0.5mm; }
+        .l-name { font-size: calc(11pt * var(--fs)); font-weight: 700; color: #000; margin-top: 1.5mm; }
+        .l-btk  { font-size: calc(6pt * var(--fs)); color: #555; font-weight: 600; letter-spacing: 0.3px; margin-top: auto; }
+        .label-url { font-size: 0.65rem; color: var(--text-muted); text-align: center; margin-top: 4px; font-family: monospace; word-break: break-all; }
+        .label-cell { display: flex; flex-direction: column; align-items: center; }
 
         .kit-detail-count { font-size: 1.8rem; font-weight: 900; color: var(--primary); letter-spacing: -0.5px; }
 
@@ -447,15 +450,38 @@
             <h2 style="margin:0;">Label Preview</h2>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button class="secondary" onclick="showListView()">Cancel</button>
+                <button id="btn-label-back" class="secondary hidden" onclick="backFromWarehouseLabels()">← Back to item labels</button>
                 <button onclick="generateWarehouseLabelsPreview()">🏬 Warehouse QRs</button>
                 <button onclick="printLabels()">🖨️ Print</button>
                 <button onclick="exportLabelsAsHTML()">💾 HTML Export</button>
             </div>
         </div>
+
+        <div class="no-print label-controls" style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;background:var(--border);padding:10px 14px;border-radius:10px;margin-bottom:1rem;">
+            <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-weight:600;font-size:0.85rem;">Left margin</span>
+                <button class="secondary" style="min-width:28px;padding:2px 8px;" onclick="stepPad('l',-1)">−</button>
+                <span id="label-pad-left-val" class="range-value">2mm</span>
+                <button class="secondary" style="min-width:28px;padding:2px 8px;" onclick="stepPad('l',1)">+</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-weight:600;font-size:0.85rem;">Right margin</span>
+                <button class="secondary" style="min-width:28px;padding:2px 8px;" onclick="stepPad('r',-1)">−</button>
+                <span id="label-pad-right-val" class="range-value">2mm</span>
+                <button class="secondary" style="min-width:28px;padding:2px 8px;" onclick="stepPad('r',1)">+</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-weight:600;font-size:0.85rem;">Text size</span>
+                <input type="range" id="label-font-scale" min="0.7" max="1.4" step="0.05" value="1" style="width:120px;" oninput="applyLabelSettings()">
+                <span id="label-font-scale-val" class="range-value">1.00×</span>
+            </div>
+            <button class="secondary" onclick="copyLabelURLs()">📋 Copy URLs</button>
+        </div>
+
         <p class="no-print" style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem; background: var(--border); padding: 8px 12px; border-radius: 8px;">
-            ℹ️ Format: <strong>Brother QL 29mm × 90mm</strong>. Set printer margins to <strong>None</strong>. QR encodes an ID-only fragment link (no key).
+            ℹ️ Format: <strong>Brother QL 29mm × 90mm</strong>. Set printer margins to <strong>None</strong>. QR encodes an ID-only fragment link (no key). Adjust margins/text size above — preview matches print exactly. URLs shown below are preview-only and never printed.
         </p>
-        
+
         <div id="label-preview-container" class="preview-grid"></div>
     </section>
 
@@ -473,16 +499,6 @@
             <p class="setting-desc">Lower ECC makes QR modules larger — critical for thermal micro-labels so scanners can read them reliably. (Level H removed.)</p>
         </div>
 
-        <div class="setting-row">
-            <label for="label-font-cap-range">
-                Label Primary Number Font Cap:
-                <span class="range-value" id="font-cap-display">16pt</span>
-            </label>
-            <input type="range" id="label-font-cap-range" min="10" max="24" step="1" value="16"
-                   oninput="previewFontCap(this.value)">
-            <p class="setting-desc">Max font size for the main item number (BTKnumber) on printed labels. Range: 10 – 24pt.</p>
-        </div>
-        
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>
         <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
     </section>
@@ -529,6 +545,8 @@
     var editTargetBTK = null;
     var DEMO_PASSPHRASE = 'varuhuset';
     var DEMO_VERSION = 3;
+    var labelPadLeft = 2, labelPadRight = 2, labelFontScale = 1;
+    var labelMode = 'items';
     var WAREHOUSES = [
         { l: '1', name: 'Main Warehouse — Best', address: 'Best, Sweden' },
         { l: '2', name: 'North Depot', address: 'Stockholm, Sweden' },
@@ -1585,12 +1603,36 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  LABEL GENERATION (optimized QR — ID-only fragment, uppercase, no key)
+    //  LABEL GENERATION (optimized QR — ID-only fragment, no key)
     // ════════════════════════════════════════════════════════════════════════
-    function generateLabelsPreview() {
+    function applyLabelVars(el) {
+        el.style.setProperty('--pad-l', labelPadLeft + 'mm');
+        el.style.setProperty('--pad-r', labelPadRight + 'mm');
+        el.style.setProperty('--fs', labelFontScale);
+    }
+
+    function syncLabelControls() {
+        const pl = document.getElementById('label-pad-left-val');
+        const pr = document.getElementById('label-pad-right-val');
+        const fsv = document.getElementById('label-font-scale-val');
+        const fs = document.getElementById('label-font-scale');
+        if (pl) pl.textContent = labelPadLeft + 'mm';
+        if (pr) pr.textContent = labelPadRight + 'mm';
+        if (fs) fs.value = labelFontScale;
+        if (fsv) fsv.textContent = Number(labelFontScale).toFixed(2) + '×';
+    }
+
+    function generateLabelsPreview(silent) {
         if (!requireAuth()) return;
-        if (selectedItems.size === 0) return showToast("Select at least one item.", "warning");
+        if (selectedItems.size === 0) {
+            if (!silent) showToast("Select at least one item.", "warning");
+            return;
+        }
         console.log(`Generating labels for ${selectedItems.size} items...`);
+        labelMode = 'items';
+        syncLabelControls();
+        const backBtn = document.getElementById('btn-label-back');
+        if (backBtn) backBtn.classList.add('hidden');
         switchView('preview-view');
         const container = document.getElementById('label-preview-container');
         container.innerHTML = '';
@@ -1602,6 +1644,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
             const labelEl = document.createElement('div');
             labelEl.className = 'label-card';
+            applyLabelVars(labelEl);
             const qrDiv = document.createElement('div');
             qrDiv.className = 'label-qr';
             const textDiv = document.createElement('div');
@@ -1619,10 +1662,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
             labelEl.appendChild(qrDiv);
             labelEl.appendChild(textDiv);
-            container.appendChild(labelEl);
 
             // True alphanumeric QR: #<COMPRESSED>/<WAREHOUSE> — no =, no &
-            const targetUrl = `${BASE_URL}#${compressId(id)}/${currentWarehouseId}`;
+            const targetUrl = `${BASE_URL}#${compressId(id)}/${currentWarehouseId}`.toLowerCase();
             try {
                 new QRCode(qrDiv, { text: targetUrl, width: 110, height: 110, colorDark: "#000000", colorLight: "#ffffff", correctLevel: qrEccLevel });
             } catch(err) {
@@ -1631,20 +1673,28 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 qrDiv.innerHTML = '<span style="font-size:8px;color:red;text-align:center;">QR failed</span>';
             }
 
-            // Show URL under label in preview (not printed)
+            // Show URL under label in preview ONLY (hidden on print via .no-print)
             const urlDiv = document.createElement('div');
-            urlDiv.className = 'no-print';
-            urlDiv.style.cssText = 'font-size:0.65rem;color:var(--text-muted);text-align:center;margin-top:4px;font-family:monospace;word-break:break-all;';
+            urlDiv.className = 'label-url no-print';
             urlDiv.textContent = targetUrl;
-            container.appendChild(urlDiv);
+
+            const cell = document.createElement('div');
+            cell.className = 'label-cell';
+            cell.appendChild(labelEl);
+            cell.appendChild(urlDiv);
+            container.appendChild(cell);
         });
-if (errorCount > 0) showToast(`${errorCount} QR code(s) failed.`, "error");
+        if (errorCount > 0 && !silent) showToast(`${errorCount} QR code(s) failed.`, "error");
     }
 
     // Warehouse QR label generation (with password)
-    function generateWarehouseLabelsPreview() {
+    function generateWarehouseLabelsPreview(silent) {
         if (!requireAuth()) return;
         console.log(`Generating warehouse labels...`);
+        labelMode = 'warehouse';
+        syncLabelControls();
+        const backBtn = document.getElementById('btn-label-back');
+        if (backBtn) backBtn.classList.remove('hidden');
         switchView('preview-view');
         const container = document.getElementById('label-preview-container');
         container.innerHTML = '';
@@ -1653,6 +1703,7 @@ if (errorCount > 0) showToast(`${errorCount} QR code(s) failed.`, "error");
         WAREHOUSES.forEach(w => {
             const labelEl = document.createElement('div');
             labelEl.className = 'label-card';
+            applyLabelVars(labelEl);
             const qrDiv = document.createElement('div');
             qrDiv.className = 'label-qr';
             const textDiv = document.createElement('div');
@@ -1661,7 +1712,7 @@ if (errorCount > 0) showToast(`${errorCount} QR code(s) failed.`, "error");
             // Warehouse key setup URL: #<WAREHOUSE_ID>/KEY/<PASSPHRASE>
             const keys = getKeyVault();
             const pass = keys[w.l] || DEMO_PASSPHRASE;
-            const targetUrl = `${BASE_URL}#${w.l}/KEY/${pass}`;
+            const targetUrl = `${BASE_URL}#${w.l}/KEY/${pass}`.toLowerCase();
 
             textDiv.innerHTML = `
                 <div class="l-nums">${w.name}</div>
@@ -1670,7 +1721,6 @@ if (errorCount > 0) showToast(`${errorCount} QR code(s) failed.`, "error");
 
             labelEl.appendChild(qrDiv);
             labelEl.appendChild(textDiv);
-            container.appendChild(labelEl);
 
             try {
                 new QRCode(qrDiv, { text: targetUrl, width: 110, height: 110, colorDark: "#000000", colorLight: "#ffffff", correctLevel: qrEccLevel });
@@ -1679,24 +1729,69 @@ if (errorCount > 0) showToast(`${errorCount} QR code(s) failed.`, "error");
                 errorCount++;
                 qrDiv.innerHTML = '<span style="font-size:8px;color:red;text-align:center;">QR failed</span>';
             }
+
+            const urlDiv = document.createElement('div');
+            urlDiv.className = 'label-url no-print';
+            urlDiv.textContent = targetUrl;
+
+            const cell = document.createElement('div');
+            cell.className = 'label-cell';
+            cell.appendChild(labelEl);
+            cell.appendChild(urlDiv);
+            container.appendChild(cell);
         });
 
-        if (errorCount > 0) showToast(`${errorCount} warehouse QR code(s) failed.`, "error");
+        if (errorCount > 0 && !silent) showToast(`${errorCount} warehouse QR code(s) failed.`, "error");
+    }
+
+    // Adjust label margins/text and re-render preview
+    function stepPad(side, delta) {
+        if (side === 'l') labelPadLeft = Math.max(0, Math.min(10, labelPadLeft + delta));
+        else labelPadRight = Math.max(0, Math.min(10, labelPadRight + delta));
+        applyLabelSettings();
+    }
+
+    function applyLabelSettings() {
+        const fs = parseFloat(document.getElementById('label-font-scale').value);
+        labelFontScale = fs;
+        const pl = document.getElementById('label-pad-left-val');
+        const pr = document.getElementById('label-pad-right-val');
+        const fsv = document.getElementById('label-font-scale-val');
+        if (pl) pl.textContent = labelPadLeft + 'mm';
+        if (pr) pr.textContent = labelPadRight + 'mm';
+        if (fsv) fsv.textContent = fs.toFixed(2) + '×';
+        if (labelMode === 'warehouse') generateWarehouseLabelsPreview(true);
+        else generateLabelsPreview(true);
+    }
+
+    function backFromWarehouseLabels() {
+        generateLabelsPreview(true);
+    }
+
+    function copyLabelURLs() {
+        const urls = Array.from(document.querySelectorAll('#label-preview-container .label-url')).map(d => d.textContent);
+        if (!urls.length) return showToast("No URLs to copy.", "warning");
+        navigator.clipboard.writeText(urls.join('\n')).then(
+            () => showToast(`Copied ${urls.length} URL(s) to clipboard.`, "success"),
+            () => showToast("Clipboard access denied.", "error")
+        );
     }
 
     // Shared label print HTML builder
     function buildLabelPrintHTML(cloneContainer, options = {}) {
         const { forExport = false, onloadPrint = true } = options;
-        const css = `.label-card{width:90mm;height:29mm;background:white;color:black;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm;overflow:hidden;position:relative}
+        const css = `.label-card{--pad-l:2mm;--pad-r:2mm;--fs:1;width:90mm;height:29mm;background:#fff!important;color:#000;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm var(--pad-r) 1.5mm var(--pad-l);overflow:hidden;position:relative}
 .label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-right:4mm}
-.label-qr img{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
-.label-text{flex-grow:1;padding-left:2mm;display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-end;overflow:hidden;height:100%;text-align:right;min-width:0}
+.label-qr img,.label-qr canvas{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
+.label-text{flex-grow:1;display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-end;overflow:hidden;height:100%;text-align:right;min-width:0}
 .label-text div{line-height:1.2;font-family:Arial,Helvetica,sans-serif!important;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.l-nums{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.3px;margin-top:0.5mm}
-.l-name{font-size:11pt;font-weight:700;color:#000;margin-top:1.5mm}
-.l-btk{font-size:6pt;color:#555;font-weight:600;letter-spacing:0.3px;margin-top:auto}
+.l-nums{font-size:calc(14pt * var(--fs));font-weight:900;color:#000;letter-spacing:-0.3px;margin-top:0.5mm}
+.l-name{font-size:calc(11pt * var(--fs));font-weight:700;color:#000;margin-top:1.5mm}
+.l-btk{font-size:calc(6pt * var(--fs));color:#555;font-weight:600;letter-spacing:0.3px;margin-top:auto}
+.preview-grid{background:none!important;display:block;padding:0;gap:0;margin:0;max-height:none;overflow:visible}
+.no-print{display:none!important}
 body{margin:0;padding:0;background:#fff;font-family:Arial,sans-serif}
-@media print{body{padding:0;gap:0}@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none}}`;
+@media print{@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none;border-radius:0}}`;
         const onload = onloadPrint ? ' onload="window.print()"' : '';
         if (forExport) {
             return `<!DOCTYPE html>
@@ -1755,14 +1850,6 @@ ${css}
     function initSettings() {
         const savedEcc = localStorage.getItem('qr-ecc');
         if (savedEcc) { document.getElementById('qr-ecc').value = savedEcc; updateQREccVar(savedEcc); }
-        const savedCap = localStorage.getItem('label-font-cap') || '16';
-        document.getElementById('label-font-cap-range').value = savedCap;
-        document.getElementById('font-cap-display').innerText = savedCap + 'pt';
-        document.documentElement.style.setProperty('--label-font-cap', savedCap + 'pt');
-    }
-    function previewFontCap(val) {
-        document.getElementById('font-cap-display').innerText = val + 'pt';
-        document.documentElement.style.setProperty('--label-font-cap', val + 'pt');
     }
     function toggleSettings() {
         if (activeView === 'settings-view') { switchView(previousView); }
@@ -1772,11 +1859,8 @@ ${css}
 
     function saveSettings() {
         const eccVal = document.getElementById('qr-ecc').value;
-        const fontCapVal = document.getElementById('label-font-cap-range').value;
         localStorage.setItem('qr-ecc', eccVal);
         updateQREccVar(eccVal);
-        localStorage.setItem('label-font-cap', fontCapVal);
-        document.documentElement.style.setProperty('--label-font-cap', fontCapVal + 'pt');
         showToast("Settings saved", "success");
         if (selectedItems.size > 0 && activeView === 'preview-view') generateLabelsPreview();
         else if (globalInventory.length > 0 || globalKits.length > 0) showListView();
