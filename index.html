@@ -61,6 +61,11 @@
         .card { background: var(--card-bg); border-radius: 16px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); margin-bottom: 1rem; border: 1px solid var(--border); }
         .hidden { display: none !important; }
 
+        /* --- SEGMENTED CONTROL --- */
+        .segmented { display: inline-flex; background: var(--border); border-radius: 12px; padding: 4px; gap: 4px; margin-bottom: 1rem; width: 100%; }
+        .segmented button { background: transparent; color: var(--text-main); border: none; padding: 0.6rem 1rem; border-radius: 8px; font-weight: 600; min-height: unset; flex: 1; }
+        .segmented button.active { background: var(--card-bg); color: var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
         /* --- FORMS & BUTTONS --- */
         input[type="password"], input[type="text"], textarea, select {
             width: 100%; padding: 0.85rem 1rem; border: 1.5px solid var(--border); border-radius: 12px;
@@ -100,7 +105,6 @@
         .custom-checkbox { width: 24px; height: 24px; accent-color: var(--primary); pointer-events: none; flex-shrink: 0; }
         
         .item-info { flex-grow: 1; overflow: hidden; min-width: 0; }
-        /* Item number — prominent, fills available width */
         .item-id {
             font-size: clamp(1rem, 3vw, 1.3rem);
             font-weight: 800;
@@ -122,7 +126,21 @@
             line-height: 1.3;
         }
         .item-sub { font-size: 0.8rem; color: var(--text-muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
-        
+
+        /* Kit list rows */
+        .kit-row { padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1rem; cursor: pointer; transition: background 0.2s; }
+        .kit-row:hover { background-color: var(--primary-light); }
+        .kit-row:last-child { border-bottom: none; }
+        .kit-info { flex-grow: 1; overflow: hidden; min-width: 0; }
+        .kit-name { font-size: 1.05rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .kit-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
+        .kit-qty-badge { background: var(--primary); color: white; border-radius: 8px; padding: 4px 10px; font-weight: 700; font-size: 0.8rem; flex-shrink: 0; }
+
+        /* Kit tags on item detail */
+        .kit-tags { display: flex; gap: 8px; flex-wrap: wrap; margin: 1rem 0; }
+        .kit-tag { background: var(--primary-light); color: var(--primary); border: 1px solid var(--primary); border-radius: 20px; padding: 6px 14px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .kit-tag:hover { background: var(--primary); color: white; }
+
         /* Floating Action Bar */
         .fab-container { position: fixed; bottom: 50px; left: 0; right: 0; display: flex; justify-content: center; z-index: 90; pointer-events: none; padding: 0 1rem; }
         .fab-wrapper { background: var(--card-bg); padding: 6px; border-radius: 50px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2); display: flex; gap: 6px; pointer-events: auto; border: 1px solid var(--border); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); transform: translateY(150%); }
@@ -139,55 +157,21 @@
         .preview-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); margin-top: 1rem; background: #94a3b8; padding: 1.5rem; border-radius: 12px; overflow-x: auto; max-height: 60vh; overflow-y: auto; }
         [data-theme="dark"] .preview-grid { background: #0f172a; border: 1px inset #334155; }
         
-        /* Strict Brother QL 29x90 format */
         .label-card {
-            width: 90mm;
-            height: 29mm;
-            background: white !important;
-            color: black !important;
-            display: flex;
-            align-items: stretch;
-            box-sizing: border-box;
-            padding: 1.5mm;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            position: relative;
-            overflow: hidden;
-            margin: 0 auto;
-            border-radius: 2px;
+            width: 90mm; height: 29mm; background: white !important; color: black !important;
+            display: flex; align-items: stretch; box-sizing: border-box; padding: 1.5mm;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative; overflow: hidden; margin: 0 auto; border-radius: 2px;
         }
         .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; }
         .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
-        .label-text {
-            flex-grow: 1;
-            padding-left: 3mm;
-            display: flex;
-            flex-direction: column;
-            justify-content: flex-start;
-            overflow: hidden;
-            height: 100%;
-            text-align: left;
-        }
-        .label-text div {
-            line-height: 1.15;
-            font-family: Arial, Helvetica, sans-serif !important;
-            text-align: left;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        /* Primary number: large, adaptive up to user-set cap */
-        .l-num1 {
-            font-size: clamp(9pt, 3.5vw, var(--label-font-cap));
-            font-weight: 900;
-            color: #000;
-            letter-spacing: -0.5px;
-            margin-top: 1.5mm;
-        }
+        .label-text { flex-grow: 1; padding-left: 3mm; display: flex; flex-direction: column; justify-content: flex-start; overflow: hidden; height: 100%; text-align: left; }
+        .label-text div { line-height: 1.15; font-family: Arial, Helvetica, sans-serif !important; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .l-num1 { font-size: clamp(9pt, 3.5vw, var(--label-font-cap)); font-weight: 900; color: #000; letter-spacing: -0.5px; margin-top: 1.5mm; }
         .l-num2 { font-size: clamp(7.5pt, 2.5vw, 11pt); color: #111; font-weight: 700; }
         .l-num3 { font-size: clamp(7pt, 2vw, 10pt); color: #333; font-weight: 600; }
         .l-name { font-size: 7pt; margin-top: auto; padding-top: 1mm; font-style: italic; border-top: 0.5px solid #bbb; color: #000; }
 
-        /* --- IMAGE GALLERY (item detail) --- */
+        /* --- IMAGE GALLERY --- */
         .item-image-gallery { display: flex; gap: 10px; overflow-x: auto; padding: 0.5rem 0 1rem; scrollbar-width: thin; }
         .item-image-gallery img { height: 130px; width: auto; object-fit: cover; border-radius: 10px; border: 2px solid var(--border); cursor: pointer; transition: transform 0.2s, border-color 0.2s; flex-shrink: 0; }
         .item-image-gallery img:hover { transform: scale(1.04); border-color: var(--primary); }
@@ -199,17 +183,12 @@
         .lightbox-close { position: absolute; top: 1rem; right: 1.5rem; color: white; font-size: 2.2rem; cursor: pointer; background: none; border: none; min-height: unset; padding: 4px 8px; line-height: 1; }
         .lightbox-close:hover { background: rgba(255,255,255,0.15); border-radius: 8px; transform: none; }
 
-        /* --- MODAL (Add Item) --- */
+        /* --- MODAL (Add/Edit Item) --- */
         .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 5000; align-items: flex-start; justify-content: center; padding: 1rem; overflow-y: auto; }
         .modal-overlay.open { display: flex; }
         .modal-box { background: var(--card-bg); border-radius: 20px; padding: 1.5rem; width: 100%; max-width: 480px; margin: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.4); border: 1px solid var(--border); }
         .modal-box h3 { font-size: 1.3rem; margin-bottom: 0.25rem; }
-        .modal-notice {
-            background: #fef9c3; color: #78350f;
-            border: 1px solid #fde047; border-radius: 10px;
-            padding: 10px 14px; font-size: 0.85rem; line-height: 1.6;
-            margin-bottom: 1.25rem;
-        }
+        .modal-notice { background: #fef9c3; color: #78350f; border: 1px solid #fde047; border-radius: 10px; padding: 10px 14px; font-size: 0.85rem; line-height: 1.6; margin-bottom: 1.25rem; }
         [data-theme="dark"] .modal-notice { background: #422006; color: #fde68a; border-color: #92400e; }
         .modal-label { font-size: 0.82rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; display: block; }
         .modal-actions { display: flex; gap: 10px; margin-top: 0.5rem; }
@@ -275,13 +254,13 @@
     <img id="lightbox-img" src="" alt="Item image enlarged">
 </div>
 
-<!-- Add Item Modal -->
+<!-- Add/Edit Item Modal -->
 <div class="modal-overlay" id="add-item-modal" onclick="handleModalOverlayClick(event)">
     <div class="modal-box">
-        <h3>➕ Add New Item</h3>
+        <h3 id="modal-title">➕ Add New Item</h3>
         <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">Fill in the item details below.</p>
 
-        <div class="modal-notice">
+        <div class="modal-notice" id="modal-notice">
             ⚠️ <strong>Session only.</strong> This item exists only while the browser tab is open and is kept in an autosaved local draft. It is <strong>not</strong> written to the encrypted database. To permanently save items, export the encrypted database (or contact the admin).
         </div>
 
@@ -317,14 +296,13 @@
 
         <div class="modal-actions">
             <button class="secondary full-width" onclick="closeAddItemModal()">Cancel</button>
-            <button class="success-btn full-width" onclick="submitAddItem()">✔ Add Item</button>
+            <button class="success-btn full-width" onclick="submitItemForm()">✔ Save Item</button>
         </div>
     </div>
 </div>
 
 <header>
     <div class="logo-container">
-        <!-- Logo only — no text next to it -->
         <img src="logo.png" alt="Company Logo" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzI1NjNlYiIgcng9IjIwIi8+PHRleHQgeD0iNTAiIHk9IjU4IiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjQ0IiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSIjZmZmZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5XVzwvdGV4dD48L3N2Zz4='" />
     </div>
     <div class="header-actions">
@@ -334,7 +312,7 @@
         <button class="icon-btn" onclick="toggleConsole()" aria-label="Toggle Console" title="Console">
             <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
         </button>
-        <button class="icon-btn" onclick="showSettings()" aria-label="Open Settings" title="Settings">
+        <button class="icon-btn" onclick="toggleSettings()" aria-label="Open Settings" title="Settings">
             <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
         </button>
     </div>
@@ -354,42 +332,57 @@
             Unlock Inventory
         </button>
         <p id="auth-error" style="color: var(--danger); margin-top: 1rem; display: none; font-weight: 600; text-align: center;">Invalid key or corrupted data.</p>
-        <p style="color: var(--text-muted); margin-top: 1rem; font-size: 0.85rem; text-align:center;">Tip: a link like <code>#L=1&amp;K=pass</code> can unlock &amp; save the key automatically.</p>
+        <p style="color: var(--text-muted); margin-top: 1rem; font-size: 0.85rem; text-align:center;">Tip: a link like <code>#1/KEY/PASS</code> can unlock &amp; save the key automatically.</p>
     </section>
 
     <!-- View 2: List / Multi-select -->
     <section id="list-view" class="card hidden">
         <div class="list-header">
             <h2 style="margin: 0;">Inventory</h2>
-            <div class="list-header-actions">
-                <button onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">
-                    ➕ Add Item
-                </button>
-                <button class="secondary" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">
-                    📥 Import CSV
-                </button>
-                <button class="secondary" onclick="exportEncryptedDatabase()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">
-                    💾 Export
-                </button>
+            <div class="list-header-actions" id="list-actions">
+                <button id="btn-add-item" onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">➕ Add Item</button>
+                <button class="secondary" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Items CSV</button>
+                <button class="secondary" onclick="triggerKitsCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Kits CSV</button>
+                <button class="secondary" onclick="exportEncryptedDatabase()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">💾 Export</button>
             </div>
-            <input type="file" id="csv-upload" accept=".csv" class="hidden" onchange="handleCSVUpload(event)" aria-label="Upload CSV">
+        </div>
+
+        <div class="segmented" id="mode-toggle">
+            <button id="seg-items" class="active" onclick="switchListMode('items')">📦 Items</button>
+            <button id="seg-kits" onclick="switchListMode('kits')">🧰 Kits</button>
         </div>
 
         <div id="wh-meta-container"></div>
-        
-        <div class="search-wrapper" id="search-container">
-            <input type="text" id="search-box" aria-label="Search Inventory" placeholder="Search name, number, BTK, manufacturer, location..." oninput="debounceSearch()">
-            <button class="search-clear" onclick="clearSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
-        </div>
-        
-        <div class="list-stats" id="list-stats">Loading inventory...</div>
 
-        <div class="select-all-banner" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
-            <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 12px; pointer-events: none;" aria-hidden="true">
-            <span style="font-weight: 600; flex-grow: 1;">Select All Visible Items</span>
+        <div id="items-only-controls">
+            <div class="search-wrapper" id="search-container">
+                <input type="text" id="search-box" aria-label="Search Inventory" placeholder="Search name, number, BTK, manufacturer, location..." oninput="debounceSearch()">
+                <button class="search-clear" onclick="clearSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
+            </div>
+            <select id="sort-by" onchange="onSortChange()" style="margin-bottom: 1rem;">
+                <option value="name">Sort: Name (A–Z)</option>
+                <option value="manufacturer">Sort: Manufacturer</option>
+                <option value="btk">Sort: BTK Number</option>
+            </select>
+            <div class="list-stats" id="list-stats">Loading inventory...</div>
+            <div class="select-all-banner" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
+                <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 12px; pointer-events: none;" aria-hidden="true">
+                <span style="font-weight: 600; flex-grow: 1;">Select All Visible Items</span>
+            </div>
+        </div>
+
+        <div id="kits-only-controls" class="hidden">
+            <div class="search-wrapper" id="kit-search-container">
+                <input type="text" id="kit-search-box" aria-label="Search Kits" placeholder="Search kit name or kit number..." oninput="debounceKitSearch()">
+                <button class="search-clear" onclick="clearKitSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
+            </div>
+            <div class="list-stats" id="kit-list-stats"></div>
         </div>
 
         <div id="item-list-container"></div>
+
+        <input type="file" id="csv-upload" accept=".csv" class="hidden" onchange="handleCSVUpload(event)" aria-label="Upload Items CSV">
+        <input type="file" id="kits-csv-upload" accept=".csv" class="hidden" onchange="handleKitsCSVUpload(event)" aria-label="Upload Kits CSV">
 
         <!-- Floating Action Bar -->
         <div class="fab-container">
@@ -404,15 +397,17 @@
 
     <!-- View 3: Single Item Detail -->
     <section id="item-view" class="card hidden">
-        <!-- Action row at the very top -->
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
-            <button class="secondary" onclick="showListView()" style="flex-shrink:0;">← Back to List</button>
+            <button class="secondary" onclick="backFromItem()" style="flex-shrink:0;">← Back</button>
+            <button class="secondary" id="btn-edit-item" onclick="openEditItemModal()" style="flex-shrink:0;">✏️ Edit</button>
+            <button id="btn-next-item" class="hidden secondary" onclick="nextInKit()" style="flex-shrink:0;">➡️ Next</button>
             <button id="btn-single-label" style="flex:1; min-width:160px;">🏷️ Create Label</button>
         </div>
 
         <h1 id="detail-name" style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.5rem;">Item Name</h1>
 
-        <!-- Image gallery (shown only if images exist) -->
+        <div id="detail-kit-tags" class="kit-tags"></div>
+
         <div id="detail-images"></div>
 
         <div id="detail-content" style="margin-top: 1rem; line-height: 1.8; font-size: 1.05rem;"></div>
@@ -421,6 +416,16 @@
             <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Warehouse Locator Map</strong>
             <div class="warehouse-map" id="mock-map"></div>
         </div>
+    </section>
+
+    <!-- View 3b: Kit Detail -->
+    <section id="kit-view" class="card hidden">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
+            <button class="secondary" onclick="showListView('kits')" style="flex-shrink:0;">← Back to Kits</button>
+        </div>
+        <h1 id="kit-detail-name" style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.5rem;">Kit Name</h1>
+        <div id="kit-detail-sub" class="wh-meta" style="margin-bottom:1rem;"></div>
+        <div id="kit-detail-items"></div>
     </section>
 
     <!-- View 4: Label Preview & Generation -->
@@ -451,7 +456,7 @@
                 <option value="M" selected>Level M — Medium (default)</option>
                 <option value="Q">Level Q — Quartile</option>
             </select>
-            <p class="setting-desc">Lower ECC makes QR modules larger — critical for thermal micro-labels so scanners can read them reliably. (Level H removed: too many dots smudge on thermal print.)</p>
+            <p class="setting-desc">Lower ECC makes QR modules larger — critical for thermal micro-labels so scanners can read them reliably. (Level H removed.)</p>
         </div>
 
         <div class="setting-row">
@@ -606,7 +611,6 @@
         };
     }
 
-    // Decrypt an envelope with a single passphrase.
     async function decryptEnvelope(env, passphrase) {
         if (!env || env.version !== 1) throw new Error("Unsupported envelope version");
         const keyId = await sha256Hex(passphrase);
@@ -632,7 +636,7 @@
     // ════════════════════════════════════════════════════════════════════════
     const LS_KEYS   = 'webware_keys';     // { warehouseId: passphrase }
     const LS_VAULT  = 'webware_vault';    // { warehouseId: envelopeJSON }
-    const LS_DRAFT  = 'webware_draft';    // { warehouseId: itemsJSON }
+    const LS_DRAFT  = 'webware_draft';    // { warehouseId: {items, kits} }
 
     function getKeyVault() {
         try { return JSON.parse(localStorage.getItem(LS_KEYS) || '{}'); }
@@ -646,9 +650,10 @@
     }
     function setEnvelopeVault(obj) { localStorage.setItem(LS_VAULT, JSON.stringify(obj)); }
 
-    function saveDraft(wid, items) {
+    function saveDraft(wid) {
+        if (!wid) return;
         const all = JSON.parse(localStorage.getItem(LS_DRAFT) || '{}');
-        all[wid] = items;
+        all[wid] = { items: globalInventory, kits: globalKits };
         localStorage.setItem(LS_DRAFT, JSON.stringify(all));
     }
     function loadDraft(wid) {
@@ -691,6 +696,11 @@ HÄNY,BTK000007,359.061,LOCK WASHER M8,None,None,5,Best,None,
 HÄNY,BTK000008,613.034,IMPELLER DISC,2261-ED-11,None,3,Best,None,
 HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
 
+    // Demo seed data (CSV A format — Kit Matrix). Columns = BTKnumber.
+    const DEMO_CSV_A = `Spare-part-kit name,kitnumber,BTK000001,BTK000002,BTK000003,BTK000004,BTK000005,BTK000006,BTK000007,BTK000008,BTK000009
+SPARE PART KIT IC 310,None,None,None,None,None,None,None,1,1,1
+SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
+
     const DEMO_PASSPHRASE = 'varuhuset'; // bootstrap key for warehouse 1 demo
 
     // ════════════════════════════════════════════════════════════════════════
@@ -715,21 +725,38 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
     // ════════════════════════════════════════════════════════════════════════
     const BASE_URL = (window.location.origin + window.location.pathname).toUpperCase();
 
-    let globalInventory = [];
+    let globalInventory = [];     // CSV B items
+    let globalKits = [];          // CSV A kits
     let currentWarehouseId = '1';
-    let currentActiveKey = '';           // passphrase for active warehouse (session only)
+    let currentActiveKey = '';
     let selectedItems = new Set();
     let qrEccLevel = QRCode.CorrectLevel.M;
     let searchTimeout = null;
+    let kitSearchTimeout = null;
     let currentlyVisibleIds = [];
     let activeView = 'auth-view';
-    let pendingItemId = null;            // item to open after auth (from #I= route)
+    let previousView = 'list-view';
+    let pendingItemId = null;
+    let listMode = 'items';        // 'items' | 'kits'
+    let sortBy = 'name';
+    let navigationContext = null;  // { type:'kit', kitnumber, kitName, items:[btk...] } | { type:'global' }
+    let currentItemBTK = null;
+    let modalMode = 'add';         // 'add' | 'edit'
+    let editTargetBTK = null;
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  AUTH GATE
+    // ════════════════════════════════════════════════════════════════════════
+    function requireAuth() {
+        if (!currentActiveKey) { showAuth(); return false; }
+        return true;
+    }
 
     // ════════════════════════════════════════════════════════════════════════
     //  INIT
     // ════════════════════════════════════════════════════════════════════════
     window.onload = async () => {
-        console.log("Initializing App (WebCrypto envelope mode)...");
+        console.log("Initializing App (WebCrypto envelope + Kit System)...");
         if (!window.crypto || !window.crypto.subtle) {
             showToast("WebCrypto unavailable. Serve over https:// or localhost.", "error", 8000);
         }
@@ -740,22 +767,22 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
         await handleRoute();
     };
 
-    // Bootstrap envelope for warehouse 1 if none exists.
     async function ensureDemoVault() {
         const vault = getEnvelopeVault();
         if (!vault['1']) {
             try {
                 const items = parseCSVString(DEMO_CSV_B);
-                const env = await encryptEnvelope(items, [DEMO_PASSPHRASE]);
+                const kits = parseKitsCSVString(DEMO_CSV_A);
+                const env = await encryptEnvelope({ items, kits }, [DEMO_PASSPHRASE]);
                 vault['1'] = env;
                 setEnvelopeVault(vault);
-                console.log("Demo vault created for warehouse 1.");
+                console.log("Demo vault created for warehouse 1 (items + kits).");
             } catch (e) { console.error("Demo vault bootstrap failed:", e); }
         }
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  CSV (B) PARSING -> JSON RUNTIME
+    //  CSV PARSING -> JSON RUNTIME
     // ════════════════════════════════════════════════════════════════════════
     function parseCSVString(csvText) {
         const res = Papa.parse(csvText, { header: true, skipEmptyLines: true });
@@ -771,6 +798,33 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
                 if (item['Numberofitems'] === '') item['Numberofitems'] = '0';
                 return item;
             });
+    }
+
+    // CSV A: wide kit matrix. Returns [{ name, kitnumber, items:{BTK:qty} }]
+    function parseKitsCSVString(csvText) {
+        const res = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+        return res.data
+            .filter(r => r && (r['Spare-part-kit name'] || '').trim() !== '')
+            .map(r => {
+                const name = (r['Spare-part-kit name'] || '').trim();
+                const kitnumber = (r['kitnumber'] || 'None').trim() || 'None';
+                const items = {};
+                Object.keys(r).forEach(k => {
+                    if (k === 'Spare-part-kit name' || k === 'kitnumber') return;
+                    const v = (r[k] || '').trim();
+                    if (v !== '' && v !== 'None') {
+                        const qty = parseInt(v, 10);
+                        if (!isNaN(qty) && qty > 0) items[k] = qty;
+                    }
+                });
+                return { name, kitnumber, items };
+            });
+    }
+
+    function mergeByKey(base, overrides, key) {
+        const map = new Map(base.map(i => [i[key], i]));
+        overrides.forEach(o => map.set(o[key], o));
+        return Array.from(map.values());
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -794,7 +848,7 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
     }
 
     function switchView(viewId) {
-        ['auth-view','list-view','item-view','preview-view','settings-view'].forEach(v => {
+        ['auth-view','list-view','item-view','kit-view','preview-view','settings-view'].forEach(v => {
             document.getElementById(v).classList.add('hidden');
         });
         document.getElementById(viewId).classList.remove('hidden');
@@ -803,43 +857,43 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  ROUTING (URL FRAGMENTS ONLY)
+    //  ROUTING (URL FRAGMENTS — true alphanumeric, no = or &)
+    //    Item Scan:  #<COMPRESSED_ID>/<WAREHOUSE_ID>     e.g. #24/1
+    //    Key Setup:  #<WAREHOUSE_ID>/KEY/<PASSPHRASE>     e.g. #1/KEY/varuhuset
     // ════════════════════════════════════════════════════════════════════════
     async function handleRoute() {
         const hash = window.location.hash;
-        if (hash.startsWith('#L=') && hash.includes('&K=')) {
-            await setupRoute(hash.slice(1));
+        const inner = hash.startsWith('#') ? hash.slice(1) : hash;
+        if (!inner) { await startupRoute(); return; }
+
+        const parts = inner.split('/');
+        if (parts.length === 3 && parts[1].toUpperCase() === 'KEY') {
+            await setupRoute(parts[0], parts[2]);
             return;
         }
-        if (hash.startsWith('#I=')) {
-            await itemRoute(hash.slice(1));
+        if (parts.length === 2) {
+            await itemRoute(parts[0], parts[1]);
             return;
         }
         await startupRoute();
     }
 
-    async function setupRoute(query) {
-        const params = new URLSearchParams(query);
-        const wid = params.get('L');
-        const pass = params.get('K');
+    async function setupRoute(wid, pass) {
         if (!wid || !pass) { showToast("Invalid setup link.", "error"); return; }
-
         const keys = getKeyVault();
         keys[wid] = pass;
         setKeyVault(keys);
 
-        // Scrub fragment from URL to prevent shoulder-surfing / server logs.
-        history.replaceState(null, null, ' ');
-
+        history.replaceState(null, null, ' '); // scrub fragment
         showToast(`Warehouse ${wid} unlocked on this device.`, "success");
+
         currentWarehouseId = wid;
         currentActiveKey = pass;
-
         const vault = getEnvelopeVault();
         if (vault[wid]) {
             try {
-                globalInventory = await decryptEnvelope(vault[wid], pass);
-                saveDraft(wid, globalInventory);
+                const data = await decryptEnvelope(vault[wid], pass);
+                applyDecrypted(data, wid);
                 showListView();
             } catch (e) {
                 console.error("Setup decrypt failed:", e);
@@ -852,28 +906,18 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
         }
     }
 
-    async function itemRoute(query) {
-        const params = new URLSearchParams(query);
-        const compressed = params.get('I');
-        const wid = params.get('L') || '1';
+    async function itemRoute(compressed, wid) {
         const btk = decompressId(compressed);
         const keys = getKeyVault();
-
         if (keys[wid]) {
             currentWarehouseId = wid;
             currentActiveKey = keys[wid];
             const vault = getEnvelopeVault();
             if (!vault[wid]) { pendingItemId = btk; showAuth(); return; }
             try {
-                globalInventory = await decryptEnvelope(vault[wid], keys[wid]);
-                saveDraft(wid, globalInventory);
-                // Restore draft edits on top if present
-                const draft = loadDraft(wid);
-                if (draft) {
-                    globalInventory = mergeById(globalInventory, draft);
-                    console.log("Draft merged over decrypted database.");
-                }
-                openItem(btk);
+                const data = await decryptEnvelope(vault[wid], keys[wid]);
+                applyDecrypted(data, wid);
+                openItem(btk, { type: 'global' });
             } catch (e) {
                 console.error("Item route decrypt failed:", e);
                 pendingItemId = btk;
@@ -892,25 +936,24 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
             try {
                 currentActiveKey = keys[currentWarehouseId];
                 const env = getEnvelopeVault()[currentWarehouseId];
-                globalInventory = await decryptEnvelope(env, currentActiveKey);
-                const draft = loadDraft(currentWarehouseId);
-                if (draft && draft.length) {
-                    globalInventory = mergeById(globalInventory, draft);
-                    showToast("Restored your unsaved local draft.", "info");
-                }
+                const data = await decryptEnvelope(env, currentActiveKey);
+                applyDecrypted(data, currentWarehouseId);
                 showListView();
                 return;
-            } catch (e) {
-                console.error("Startup decrypt failed:", e);
-            }
+            } catch (e) { console.error("Startup decrypt failed:", e); }
         }
         showAuth();
     }
 
-    function mergeById(base, overrides) {
-        const map = new Map(base.map(i => [i.BTKnumber, i]));
-        overrides.forEach(o => map.set(o.BTKnumber, o));
-        return Array.from(map.values());
+    function applyDecrypted(data, wid) {
+        globalInventory = data.items || [];
+        globalKits = data.kits || [];
+        const draft = loadDraft(wid);
+        if (draft) {
+            if (draft.items) globalInventory = mergeByKey(globalInventory, draft.items, 'BTKnumber');
+            if (draft.kits)  globalKits = mergeByKey(globalKits, draft.kits, 'kitnumber');
+            showToast("Restored your unsaved local draft.", "info");
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -933,22 +976,17 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
             return showToast("No database found for this warehouse ID.", "error");
         }
 
-        decryptEnvelope(env, key).then(items => {
+        decryptEnvelope(env, key).then(data => {
             currentWarehouseId = wid;
             currentActiveKey = key;
             const keys = getKeyVault();
             keys[wid] = key;
             setKeyVault(keys);
 
-            globalInventory = items;
-            const draft = loadDraft(wid);
-            if (draft && draft.length) {
-                globalInventory = mergeById(globalInventory, draft);
-                showToast("Restored your unsaved local draft.", "info");
-            }
+            applyDecrypted(data, wid);
             document.getElementById('auth-error').style.display = 'none';
             showToast("Database unlocked", "success");
-            if (pendingItemId) { const id = pendingItemId; pendingItemId = null; openItem(id); }
+            if (pendingItemId) { const id = pendingItemId; pendingItemId = null; openItem(id, { type: 'global' }); }
             else showListView();
         }).catch(e => {
             console.error("Decryption Failed:", e.message);
@@ -958,20 +996,20 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  CSV IMPORT
+    //  CSV IMPORT (ITEMS & KITS)
     // ════════════════════════════════════════════════════════════════════════
-    function triggerCSVImport() { document.getElementById('csv-upload').click(); }
+    function triggerCSVImport() { if (!requireAuth()) return; document.getElementById('csv-upload').click(); }
+    function triggerKitsCSVImport() { if (!requireAuth()) return; document.getElementById('kits-csv-upload').click(); }
 
     function handleCSVUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
-        console.log(`Importing: ${file.name}`);
         const reader = new FileReader();
         reader.onload = function(e) {
             const items = parseCSVString(e.target.result);
             if (!items.length) { showToast("No valid rows (need BTKnumber column).", "error"); return; }
             globalInventory = items;
-            saveDraft(currentWarehouseId, globalInventory);
+            saveDraft(currentWarehouseId);
             clearSelection();
             document.getElementById('search-box').value = '';
             filterList(true);
@@ -981,16 +1019,31 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
         event.target.value = '';
     }
 
+    function handleKitsCSVUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const kits = parseKitsCSVString(e.target.result);
+            if (!kits.length) { showToast("No valid kit rows (need 'Spare-part-kit name').", "error"); return; }
+            globalKits = kits;
+            saveDraft(currentWarehouseId);
+            renderKitsList();
+            showToast(`Imported ${kits.length} kits (draft autosaved).`, "success");
+        };
+        reader.readAsText(file);
+        event.target.value = '';
+    }
+
     // ════════════════════════════════════════════════════════════════════════
     //  EXPORT (ENCRYPTED ENVELOPE)
     // ════════════════════════════════════════════════════════════════════════
     async function exportEncryptedDatabase() {
-        if (!globalInventory.length) return showToast("Nothing to export.", "warning");
-        if (!currentActiveKey) return showToast("Unlock a warehouse first.", "error");
+        if (!requireAuth()) return;
+        if (!globalInventory.length && !globalKits.length) return showToast("Nothing to export.", "warning");
 
         try {
-            // Re-wrap with the current passphrase (structure supports multiple keys).
-            const env = await encryptEnvelope(globalInventory, [currentActiveKey]);
+            const env = await encryptEnvelope({ items: globalInventory, kits: globalKits }, [currentActiveKey]);
             const vault = getEnvelopeVault();
             vault[currentWarehouseId] = env;
             setEnvelopeVault(vault);
@@ -1010,61 +1063,26 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  ADD ITEM (session-only, autosaved draft)
+    //  LIST MODE (ITEMS / KITS)
     // ════════════════════════════════════════════════════════════════════════
-    function openAddItemModal() {
-        ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-location','ai-comments']
-            .forEach(id => { document.getElementById(id).value = ''; });
-        document.getElementById('add-item-modal').classList.add('open');
-    }
-    function closeAddItemModal() {
-        document.getElementById('add-item-modal').classList.remove('open');
-    }
-    function handleModalOverlayClick(e) {
-        if (e.target === document.getElementById('add-item-modal')) closeAddItemModal();
-    }
-
-    function submitAddItem() {
-        const btk = document.getElementById('ai-btknumber').value.trim();
-        const nameEn = document.getElementById('ai-name-en').value.trim();
-        if (!btk || !nameEn) { showToast("BTK Number and English Name are required.", "error"); return; }
-
-        const newItem = {
-            'Manufacturer':      document.getElementById('ai-manufacturer').value.trim() || 'None',
-            'BTKnumber':         btk,
-            'itemnumber':        document.getElementById('ai-itemnumber').value.trim() || 'None',
-            'itemname(english)': nameEn,
-            'itemname(swedish)': document.getElementById('ai-name-sv').value.trim() || 'None',
-            'itemnumber2':       document.getElementById('ai-num2').value.trim() || 'None',
-            'itemnumber3':       document.getElementById('ai-num3').value.trim() || 'None',
-            'Numberofitems':     document.getElementById('ai-qty').value.trim() || '0',
-            'Inventorylocation': document.getElementById('ai-location').value.trim() || 'None',
-            'Comments':          document.getElementById('ai-comments').value.trim() || 'None',
-            'images':            ''
-        };
-
-        // Avoid duplicate BTKnumber (primary key)
-        const existing = globalInventory.findIndex(i => i.BTKnumber === btk);
-        if (existing >= 0) globalInventory[existing] = newItem;
-        else globalInventory.push(newItem);
-
-        saveDraft(currentWarehouseId, globalInventory);
-        closeAddItemModal();
-        filterList(false);
-        showToast(
-            "Item added — session only (autosaved draft). Export the encrypted database to persist it.",
-            "warning", 7000
-        );
-        console.log(`Session item added: ${btk}`);
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    //  LIST & SELECTION
-    // ════════════════════════════════════════════════════════════════════════
-    function showListView() {
+    function showListView(forceMode) {
+        if (!requireAuth()) return;
+        if (forceMode) listMode = forceMode;
         switchView('list-view');
         renderWarehouseMeta();
-        filterList();
+        switchListMode(listMode, true);
+    }
+
+    function switchListMode(mode, skipSwitch) {
+        listMode = mode;
+        document.getElementById('seg-items').classList.toggle('active', mode === 'items');
+        document.getElementById('seg-kits').classList.toggle('active', mode === 'kits');
+        document.getElementById('btn-add-item').classList.toggle('hidden', mode !== 'items');
+        document.getElementById('items-only-controls').classList.toggle('hidden', mode !== 'items');
+        document.getElementById('kits-only-controls').classList.toggle('hidden', mode !== 'kits');
+        const fab = document.getElementById('fab-bar');
+        if (mode === 'items') { filterList(true); fab.classList.toggle('visible', selectedItems.size > 0); }
+        else { renderKitsList(); fab.classList.remove('visible'); }
     }
 
     function renderWarehouseMeta() {
@@ -1073,6 +1091,7 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
             `<div class="wh-meta">🏬 <strong>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address}</div>`;
     }
 
+    // ── ITEMS ──
     function debounceSearch() {
         const wrapper = document.getElementById('search-container');
         const val = document.getElementById('search-box').value;
@@ -1080,7 +1099,6 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => filterList(false), 200);
     }
-
     function clearSearch() {
         const input = document.getElementById('search-box');
         input.value = '';
@@ -1088,11 +1106,11 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
         input.focus();
         filterList(true);
     }
+    function onSortChange() { sortBy = document.getElementById('sort-by').value; filterList(true); }
 
     function filterList(forceAll = false) {
         const query = forceAll ? "" : document.getElementById('search-box').value.toLowerCase().trim();
         let filtered = globalInventory;
-
         if (query !== "") {
             filtered = globalInventory.filter(item => {
                 const fields = [
@@ -1103,120 +1121,216 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
                 return fields.some(f => f && f.toString().toLowerCase().includes(query));
             });
         }
-
+        filtered = sortItems(filtered);
         currentlyVisibleIds = filtered.map(i => i.BTKnumber);
         document.getElementById('list-stats').innerText = `Showing ${filtered.length} of ${globalInventory.length} items`;
         renderList(filtered);
         syncSelectAllCheckbox();
     }
 
+    function sortItems(arr) {
+        const a = [...arr];
+        if (sortBy === 'name') a.sort((x, y) => (x['itemname(english)'] || '').localeCompare(y['itemname(english)'] || ''));
+        else if (sortBy === 'manufacturer') a.sort((x, y) => (x.Manufacturer || '').localeCompare(y.Manufacturer || '') || (x['itemname(english)'] || '').localeCompare(y['itemname(english)'] || ''));
+        else if (sortBy === 'btk') a.sort((x, y) => (x.BTKnumber || '').localeCompare(y.BTKnumber || ''));
+        return a;
+    }
+
     function renderList(items) {
         const container = document.getElementById('item-list-container');
         container.innerHTML = '';
-
         if (items.length === 0) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                    <h3>No items found</h3>
-                    <p>Try adjusting your search terms.</p>
-                </div>`;
+            container.innerHTML = `<div class="empty-state">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                <h3>No items found</h3><p>Try adjusting your search terms.</p></div>`;
             return;
         }
-
         const frag = document.createDocumentFragment();
         items.forEach(item => {
             const id = item.BTKnumber;
             const div = document.createElement('div');
             div.className = 'item-row';
-            div.setAttribute('role', 'button');
-            div.tabIndex = 0;
-
+            div.setAttribute('role', 'button'); div.tabIndex = 0;
             const isChecked = selectedItems.has(id);
-            const displayNum = id; // BTKnumber is the primary ID on the left
-            const subNum = [item.itemnumber, item.itemnumber2, item.itemnumber3]
-                .find(n => n && n !== 'None') || '';
-
+            const subNum = [item.itemnumber, item.itemnumber2, item.itemnumber3].find(n => n && n !== 'None') || '';
             div.innerHTML = `
                 <input type="checkbox" class="custom-checkbox" ${isChecked ? 'checked' : ''} aria-hidden="true">
                 <div class="item-info">
-                    <div class="item-id">${displayNum}</div>
+                    <div class="item-id">${id}</div>
                     <div class="item-title">${item['itemname(english)'] || 'Unnamed'}</div>
                     <div class="item-sub">
                         <span>${item.Manufacturer && item.Manufacturer !== 'None' ? item.Manufacturer : ''} ${subNum ? '· ' + subNum : ''}</span>
                         <span>Stock: <strong>${item.Numberofitems || 0}</strong></span>
                     </div>
                 </div>
-                <button class="icon-btn" aria-label="View Details" style="min-width:40px;min-height:40px;padding:4px;margin-left:8px;flex-shrink:0;" onclick="handleViewDetails(event,'${id}')">
+                <button class="icon-btn" aria-label="View Details" style="min-width:40px;min-height:40px;padding:4px;margin-left:8px;flex-shrink:0;" onclick="handleViewDetails(event,'${id}','global')">
                     <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
-                </button>
-            `;
-
+                </button>`;
             div.onclick = (e) => {
                 if (e.target.closest('.icon-btn')) return;
                 const cb = div.querySelector('.custom-checkbox');
                 cb.checked = !cb.checked;
                 toggleSelection(id, cb.checked);
             };
-            div.onkeydown = (e) => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); div.click(); } };
+            div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); div.click(); } };
             frag.appendChild(div);
         });
         container.appendChild(frag);
     }
 
-    function handleViewDetails(e, id) { e.stopPropagation(); openItem(id); }
+    function handleViewDetails(e, id, ctx) { e.stopPropagation(); openItem(id, { type: ctx || 'global' }); }
 
+    // ── KITS ──
+    function debounceKitSearch() {
+        const wrapper = document.getElementById('kit-search-container');
+        const val = document.getElementById('kit-search-box').value;
+        val.length > 0 ? wrapper.classList.add('has-text') : wrapper.classList.remove('has-text');
+        clearTimeout(kitSearchTimeout);
+        kitSearchTimeout = setTimeout(() => renderKitsList(), 200);
+    }
+    function clearKitSearch() {
+        document.getElementById('kit-search-box').value = '';
+        document.getElementById('kit-search-container').classList.remove('has-text');
+        renderKitsList();
+    }
+
+    function renderKitsList() {
+        const container = document.getElementById('item-list-container');
+        container.innerHTML = '';
+        const query = document.getElementById('kit-search-box').value.toLowerCase().trim();
+        let kits = globalKits;
+        if (query) kits = kits.filter(k => (k.name || '').toLowerCase().includes(query) || (k.kitnumber || '').toLowerCase().includes(query));
+        document.getElementById('kit-list-stats').innerText = `Showing ${kits.length} of ${globalKits.length} kits`;
+
+        if (kits.length === 0) {
+            container.innerHTML = `<div class="empty-state"><h3>No kits found</h3><p>Import a Kit Matrix CSV (CSV A) to populate.</p></div>`;
+            return;
+        }
+        const frag = document.createDocumentFragment();
+        kits.forEach(kit => {
+            const count = Object.keys(kit.items || {}).length;
+            const div = document.createElement('div');
+            div.className = 'kit-row';
+            div.setAttribute('role', 'button'); div.tabIndex = 0;
+            div.innerHTML = `
+                <div class="kit-info">
+                    <div class="kit-name">${kit.name || 'Unnamed Kit'}</div>
+                    <div class="kit-sub">${kit.kitnumber && kit.kitnumber !== 'None' ? 'Kit #' + kit.kitnumber + ' · ' : ''}${count} item(s)</div>
+                </div>
+                <span class="kit-qty-badge">${count}</span>`;
+            div.onclick = () => showKitDetail(kit.kitnumber, kit.name);
+            div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); div.click(); } };
+            frag.appendChild(div);
+        });
+        container.appendChild(frag);
+    }
+
+    function showKitDetail(kitnumber, kitName) {
+        const kit = globalKits.find(k => k.kitnumber === kitnumber);
+        if (!kit) return showToast("Kit not found", "error");
+        switchView('kit-view');
+        document.getElementById('kit-detail-name').innerText = kit.name || 'Unnamed Kit';
+        const count = Object.keys(kit.items || {}).length;
+        document.getElementById('kit-detail-sub').innerHTML = `🧰 Kit #<strong>${kit.kitnumber}</strong> &nbsp;·&nbsp; ${count} distinct item(s)`;
+
+        const container = document.getElementById('kit-detail-items');
+        container.innerHTML = '';
+        const btks = Object.keys(kit.items).filter(b => kit.items[b] > 0);
+        if (btks.length === 0) {
+            container.innerHTML = `<div class="empty-state"><p>This kit has no item quantities defined.</p></div>`;
+            return;
+        }
+        const frag = document.createDocumentFragment();
+        btks.forEach(btk => {
+            const item = globalInventory.find(i => i.BTKnumber === btk);
+            if (!item) return;
+            const qty = kit.items[btk];
+            const div = document.createElement('div');
+            div.className = 'kit-row';
+            div.setAttribute('role', 'button'); div.tabIndex = 0;
+            div.innerHTML = `
+                <div class="kit-info">
+                    <div class="item-id">${btk}</div>
+                    <div class="item-title">${item['itemname(english)'] || 'Unnamed'}</div>
+                    <div class="item-sub"><span>${item.Manufacturer && item.Manufacturer !== 'None' ? item.Manufacturer : ''}</span></div>
+                </div>
+                <span class="kit-qty-badge">×${qty}</span>`;
+            div.onclick = () => openItem(btk, { type: 'kit', kitnumber: kit.kitnumber, kitName: kit.name, items: btks });
+            div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); div.click(); } };
+            frag.appendChild(div);
+        });
+        container.appendChild(frag);
+    }
+
+    // ── SELECTION (items) ──
     function toggleSelection(id, isSelected) {
         if (isSelected) selectedItems.add(id); else selectedItems.delete(id);
         updateFab(); syncSelectAllCheckbox();
     }
-
     function toggleSelectAllBanner() {
         const cb = document.getElementById('select-all-cb');
         const targetState = !(cb.checked && !cb.indeterminate);
         currentlyVisibleIds.forEach(id => { if (targetState) selectedItems.add(id); else selectedItems.delete(id); });
-        document.querySelectorAll('.item-row .custom-checkbox').forEach((checkbox, i) => {
-            if (currentlyVisibleIds[i]) checkbox.checked = targetState;
-        });
+        document.querySelectorAll('.item-row .custom-checkbox').forEach((checkbox, i) => { if (currentlyVisibleIds[i]) checkbox.checked = targetState; });
         syncSelectAllCheckbox(); updateFab();
     }
-
     function syncSelectAllCheckbox() {
         const cb = document.getElementById('select-all-cb');
         if (currentlyVisibleIds.length === 0) { cb.checked = false; cb.indeterminate = false; return; }
         const visCount = currentlyVisibleIds.filter(id => selectedItems.has(id)).length;
-        if (visCount === 0)                                  { cb.checked = false; cb.indeterminate = false; }
-        else if (visCount === currentlyVisibleIds.length)    { cb.checked = true;  cb.indeterminate = false; }
-        else                                                 { cb.checked = false; cb.indeterminate = true; }
+        if (visCount === 0)                               { cb.checked = false; cb.indeterminate = false; }
+        else if (visCount === currentlyVisibleIds.length) { cb.checked = true;  cb.indeterminate = false; }
+        else                                              { cb.checked = false; cb.indeterminate = true; }
     }
-
     function clearSelection() {
         selectedItems.clear();
         document.querySelectorAll('.item-row .custom-checkbox').forEach(cb => cb.checked = false);
         syncSelectAllCheckbox(); updateFab();
     }
-
     function updateFab() {
         const fab = document.getElementById('fab-bar');
         document.getElementById('selected-count').innerText = selectedItems.size;
-        selectedItems.size > 0 ? fab.classList.add('visible') : fab.classList.remove('visible');
+        fab.classList.toggle('visible', selectedItems.size > 0 && listMode === 'items');
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  ITEM DETAIL
+    //  ITEM DETAIL (with kit tags + sequential Next)
     // ════════════════════════════════════════════════════════════════════════
-    function openItem(id) {
+    function openItem(id, context) {
         const item = globalInventory.find(i => i.BTKnumber === id);
         if (!item) return showToast("Item not found", "error");
+
+        navigationContext = context || { type: 'global' };
+        currentItemBTK = id;
 
         switchView('item-view');
         document.getElementById('detail-name').innerText = item['itemname(english)'] || 'Unnamed Item';
 
-        const getStr = val => (!val || val === 'None')
-            ? '<span style="color:var(--text-muted)">N/A</span>'
-            : val;
+        // Kit tags
+        const tagsEl = document.getElementById('detail-kit-tags');
+        tagsEl.innerHTML = '';
+        const owningKits = globalKits.filter(k => k.items && k.items[id] && k.items[id] > 0);
+        if (owningKits.length > 0) {
+            const label = document.createElement('span');
+            label.style.cssText = 'font-weight:600;width:100%;color:var(--text-muted);font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;';
+            label.innerText = 'Belongs to kits:';
+            tagsEl.appendChild(label);
+            owningKits.forEach(k => {
+                const tag = document.createElement('span');
+                tag.className = 'kit-tag';
+                tag.innerText = '🧰 ' + (k.name || k.kitnumber);
+                tag.onclick = () => showKitDetail(k.kitnumber, k.name);
+                tagsEl.appendChild(tag);
+            });
+        }
 
-        // ── Image gallery ──
+        // Next button visibility (kit context with more than one item)
+        const nextBtn = document.getElementById('btn-next-item');
+        nextBtn.classList.toggle('hidden', !(navigationContext.type === 'kit' && navigationContext.items && navigationContext.items.length > 1));
+
+        const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
+
+        // Image gallery
         const imagesEl = document.getElementById('detail-images');
         imagesEl.innerHTML = '';
         const rawImages = (item.images || '').trim();
@@ -1227,9 +1341,7 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
                 gallery.className = 'item-image-gallery';
                 filenames.forEach(fn => {
                     const img = document.createElement('img');
-                    img.src   = `assets/${fn}`;
-                    img.alt   = fn;
-                    img.title = fn;
+                    img.src = `assets/${fn}`; img.alt = fn; img.title = fn;
                     img.onerror = function() { this.style.display = 'none'; };
                     img.onclick = () => openLightbox(`assets/${fn}`);
                     gallery.appendChild(img);
@@ -1238,48 +1350,42 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
             }
         }
 
-        // ── Detail fields (new schema) ──
         document.getElementById('detail-content').innerHTML = `
-            <div style="margin-bottom:12px;display:flex;gap:10px;">
-                <span style="font-weight:600;width:140px;">System ID:</span>
-                <span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span>
-            </div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">System ID:</span><span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span></div>
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Manufacturer:</span><span>${getStr(item.Manufacturer)}</span></div>
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">English Name:</span><span>${getStr(item['itemname(english)'])}</span></div>
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Swedish Name:</span><span>${getStr(item['itemname(swedish)'])}</span></div>
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Item #:</span><span>${getStr(item.itemnumber)}</span></div>
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Item #2:</span><span>${getStr(item.itemnumber2)}</span></div>
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Item #3:</span><span>${getStr(item.itemnumber3)}</span></div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;">
-                <span style="font-weight:600;width:140px;">Stock:</span>
-                <span style="font-weight:600;color:var(--primary);">${getStr(item.Numberofitems)}</span>
-                &nbsp;units @ ${getStr(item.Inventorylocation)}
-            </div>
-            <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;">
-                <span style="font-weight:600;">Comments:</span>
-                <div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div>
-            </div>
-        `;
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:140px;">Stock:</span><span style="font-weight:600;color:var(--primary);">${getStr(item.Numberofitems)}</span> &nbsp;units @ ${getStr(item.Inventorylocation)}</div>
+            <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;"><span style="font-weight:600;">Comments:</span><div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div></div>`;
 
         document.getElementById('btn-single-label').onclick = () => {
-            selectedItems.clear();
-            selectedItems.add(id);
-            generateLabelsPreview();
+            selectedItems.clear(); selectedItems.add(id); generateLabelsPreview();
         };
-
         renderMockMap(id);
     }
 
-    // ─── LIGHTBOX ────────────────────────────────────────────────────────
-    function openLightbox(src) {
-        document.getElementById('lightbox-img').src = src;
-        document.getElementById('lightbox').classList.add('open');
-    }
-    function closeLightbox(e) {
-        if (!e || e.target !== document.getElementById('lightbox-img')) {
-            document.getElementById('lightbox').classList.remove('open');
+    function backFromItem() {
+        if (navigationContext && navigationContext.type === 'kit') {
+            showKitDetail(navigationContext.kitnumber, navigationContext.kitName);
+        } else {
+            showListView('items');
         }
     }
+
+    function nextInKit() {
+        if (!navigationContext || navigationContext.type !== 'kit' || !navigationContext.items) return;
+        const arr = navigationContext.items;
+        const idx = arr.indexOf(currentItemBTK);
+        const next = arr[(idx + 1) % arr.length];
+        openItem(next, navigationContext);
+    }
+
+    // ─── LIGHTBOX ────────────────────────────────────────────────────────
+    function openLightbox(src) { document.getElementById('lightbox-img').src = src; document.getElementById('lightbox').classList.add('open'); }
+    function closeLightbox(e) { if (!e || e.target !== document.getElementById('lightbox-img')) document.getElementById('lightbox').classList.remove('open'); }
 
     // ─── WAREHOUSE MAP ───────────────────────────────────────────────────
     function renderMockMap(id) {
@@ -1299,9 +1405,84 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
     }
 
     // ════════════════════════════════════════════════════════════════════════
+    //  ADD / EDIT ITEM MODAL
+    // ════════════════════════════════════════════════════════════════════════
+    function openAddItemModal() {
+        if (!requireAuth()) return;
+        modalMode = 'add';
+        editTargetBTK = null;
+        document.getElementById('modal-title').innerText = '➕ Add New Item';
+        document.getElementById('modal-notice').style.display = 'block';
+        ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-location','ai-comments']
+            .forEach(id => { document.getElementById(id).value = ''; });
+        document.getElementById('add-item-modal').classList.add('open');
+    }
+
+    function openEditItemModal() {
+        if (!requireAuth()) return;
+        if (!currentItemBTK) return;
+        const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+        if (!item) return showToast("Item not found", "error");
+        modalMode = 'edit';
+        editTargetBTK = currentItemBTK;
+        document.getElementById('modal-title').innerText = '✏️ Edit Item';
+        document.getElementById('modal-notice').style.display = 'none';
+        document.getElementById('ai-manufacturer').value = item.Manufacturer === 'None' ? '' : item.Manufacturer;
+        document.getElementById('ai-btknumber').value = item.BTKnumber;
+        document.getElementById('ai-itemnumber').value = item.itemnumber === 'None' ? '' : item.itemnumber;
+        document.getElementById('ai-name-en').value = item['itemname(english)'] === 'Unnamed' ? '' : item['itemname(english)'];
+        document.getElementById('ai-name-sv').value = item['itemname(swedish)'] === 'None' ? '' : item['itemname(swedish)'];
+        document.getElementById('ai-num2').value = item.itemnumber2 === 'None' ? '' : item.itemnumber2;
+        document.getElementById('ai-num3').value = item.itemnumber3 === 'None' ? '' : item.itemnumber3;
+        document.getElementById('ai-qty').value = item.Numberofitems === 'None' ? '' : item.Numberofitems;
+        document.getElementById('ai-location').value = item.Inventorylocation === 'None' ? '' : item.Inventorylocation;
+        document.getElementById('ai-comments').value = item.Comments === 'None' ? '' : item.Comments;
+        document.getElementById('add-item-modal').classList.add('open');
+    }
+
+    function closeAddItemModal() { document.getElementById('add-item-modal').classList.remove('open'); }
+    function handleModalOverlayClick(e) { if (e.target === document.getElementById('add-item-modal')) closeAddItemModal(); }
+
+    function submitItemForm() {
+        const btk = document.getElementById('ai-btknumber').value.trim();
+        const nameEn = document.getElementById('ai-name-en').value.trim();
+        if (!btk || !nameEn) { showToast("BTK Number and English Name are required.", "error"); return; }
+
+        const newItem = {
+            'Manufacturer':      document.getElementById('ai-manufacturer').value.trim() || 'None',
+            'BTKnumber':         btk,
+            'itemnumber':        document.getElementById('ai-itemnumber').value.trim() || 'None',
+            'itemname(english)': nameEn,
+            'itemname(swedish)': document.getElementById('ai-name-sv').value.trim() || 'None',
+            'itemnumber2':       document.getElementById('ai-num2').value.trim() || 'None',
+            'itemnumber3':       document.getElementById('ai-num3').value.trim() || 'None',
+            'Numberofitems':     document.getElementById('ai-qty').value.trim() || '0',
+            'Inventorylocation': document.getElementById('ai-location').value.trim() || 'None',
+            'Comments':          document.getElementById('ai-comments').value.trim() || 'None',
+            'images':            ''
+        };
+
+        if (modalMode === 'edit' && editTargetBTK && editTargetBTK !== btk) {
+            // BTKnumber changed — remove old entry
+            globalInventory = globalInventory.filter(i => i.BTKnumber !== editTargetBTK);
+        }
+
+        const existing = globalInventory.findIndex(i => i.BTKnumber === btk);
+        if (existing >= 0) globalInventory[existing] = newItem;
+        else globalInventory.push(newItem);
+
+        saveDraft(currentWarehouseId);
+        closeAddItemModal();
+        if (listMode === 'items') filterList(false);
+        showToast(modalMode === 'edit' ? "Item updated (draft autosaved)." : "Item added (draft autosaved).", "success", 5000);
+        console.log(`Item ${modalMode === 'edit' ? 'edited' : 'added'}: ${btk}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     //  LABEL GENERATION (optimized QR — ID-only fragment, uppercase, no key)
     // ════════════════════════════════════════════════════════════════════════
     function generateLabelsPreview() {
+        if (!requireAuth()) return;
         if (selectedItems.size === 0) return showToast("Select at least one item.", "warning");
         console.log(`Generating labels for ${selectedItems.size} items...`);
         switchView('preview-view');
@@ -1315,10 +1496,8 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
 
             const labelEl = document.createElement('div');
             labelEl.className = 'label-card';
-
-            const qrDiv  = document.createElement('div');
+            const qrDiv = document.createElement('div');
             qrDiv.className = 'label-qr';
-
             const textDiv = document.createElement('div');
             textDiv.className = 'label-text';
 
@@ -1330,49 +1509,37 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
                 <div class="l-num1">${num1}</div>
                 ${num2 ? `<div class="l-num2">${num2}</div>` : ''}
                 ${num3 ? `<div class="l-num3">${num3}</div>` : ''}
-                <div class="l-name">${item['itemname(english)'] || 'Unknown'}</div>
-            `;
+                <div class="l-name">${item['itemname(english)'] || 'Unknown'}</div>`;
 
             labelEl.appendChild(qrDiv);
             labelEl.appendChild(textDiv);
             container.appendChild(labelEl);
 
-            // Optimized QR: uppercase fragment URL, NO key, ID-compressed.
-            const targetUrl = `${BASE_URL}#I=${compressId(id)}&L=${currentWarehouseId}`;
+            // True alphanumeric QR: #<COMPRESSED>/<WAREHOUSE> — no =, no &
+            const targetUrl = `${BASE_URL}#${compressId(id)}/${currentWarehouseId}`;
             try {
-                new QRCode(qrDiv, {
-                    text: targetUrl,
-                    width: 110, height: 110,
-                    colorDark: "#000000", colorLight: "#ffffff",
-                    correctLevel: qrEccLevel
-                });
+                new QRCode(qrDiv, { text: targetUrl, width: 110, height: 110, colorDark: "#000000", colorLight: "#ffffff", correctLevel: qrEccLevel });
             } catch(err) {
                 console.error("QR Generate Error:", err);
                 errorCount++;
                 qrDiv.innerHTML = '<span style="font-size:8px;color:red;text-align:center;">QR failed</span>';
             }
         });
-
         if (errorCount > 0) showToast(`${errorCount} QR code(s) failed.`, "error");
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  PRINT (canvas -> img so thermal/PDF engines render it)
+    //  PRINT
     // ════════════════════════════════════════════════════════════════════════
     function printLabels() {
         const container = document.getElementById('label-preview-container');
-        const canvases  = Array.from(container.querySelectorAll('.label-qr canvas'));
-        const imgs      = Array.from(container.querySelectorAll('.label-qr img'));
-
+        const canvases = Array.from(container.querySelectorAll('.label-qr canvas'));
+        const imgs = Array.from(container.querySelectorAll('.label-qr img'));
         canvases.forEach((canvas, i) => {
             const dataUrl = canvas.toDataURL('image/png');
-            if (imgs[i]) {
-                imgs[i].src = dataUrl;
-                imgs[i].style.cssText = 'display:block !important; max-width:100%; max-height:100%;';
-            }
+            if (imgs[i]) { imgs[i].src = dataUrl; imgs[i].style.cssText = 'display:block !important; max-width:100%; max-height:100%;'; }
             canvas.style.display = 'none';
         });
-
         setTimeout(() => {
             window.print();
             setTimeout(() => {
@@ -1388,17 +1555,15 @@ HÄNY,BTK000009,613.036,GREASE RING,None,None,11,Best,None,`;
     function exportLabelsAsHTML() {
         showToast("Generating HTML print file...", "info");
         const originalContainer = document.getElementById('label-preview-container');
-        const cloneContainer    = originalContainer.cloneNode(true);
-        const originalCanvases  = originalContainer.querySelectorAll('canvas');
-        const clonedCanvases    = cloneContainer.querySelectorAll('canvas');
-        const clonedImages      = cloneContainer.querySelectorAll('img');
-
+        const cloneContainer = originalContainer.cloneNode(true);
+        const originalCanvases = originalContainer.querySelectorAll('canvas');
+        const clonedCanvases = cloneContainer.querySelectorAll('canvas');
+        const clonedImages = cloneContainer.querySelectorAll('img');
         for (let i = 0; i < originalCanvases.length; i++) {
             const dataUrl = originalCanvases[i].toDataURL("image/png");
             if (clonedImages[i]) { clonedImages[i].src = dataUrl; clonedImages[i].style.display = 'block'; }
             if (clonedCanvases[i]?.parentNode) clonedCanvases[i].parentNode.removeChild(clonedCanvases[i]);
         }
-
         const exportDoc = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Brother QL Labels Export</title>
 <style>
@@ -1414,49 +1579,45 @@ body{margin:0;padding:0;background:#e2e8f0;font-family:Arial,sans-serif;display:
 .l-name{font-size:7pt;margin-top:auto;padding-top:1mm;font-style:italic;border-top:0.5px solid #bbb;color:#000}
 @media print{body{background:white!important;padding:0;gap:0;display:block}@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none}}
 </style></head><body onload="window.print()">${cloneContainer.innerHTML}</body></html>`;
-
         const blob = new Blob([exportDoc], { type: 'text/html' });
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
         a.href = url; a.download = `Labels-Export-${Date.now()}.html`;
-        document.body.appendChild(a); a.click();
-        document.body.removeChild(a); URL.revokeObjectURL(url);
+        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
         showToast("Labels exported successfully!", "success");
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  SETTINGS
+    //  SETTINGS (toggle fix with previousView tracking)
     // ════════════════════════════════════════════════════════════════════════
     function initSettings() {
         const savedEcc = localStorage.getItem('qr-ecc');
         if (savedEcc) { document.getElementById('qr-ecc').value = savedEcc; updateQREccVar(savedEcc); }
-
         const savedCap = localStorage.getItem('label-font-cap') || '16';
         document.getElementById('label-font-cap-range').value = savedCap;
         document.getElementById('font-cap-display').innerText = savedCap + 'pt';
         document.documentElement.style.setProperty('--label-font-cap', savedCap + 'pt');
     }
-
     function previewFontCap(val) {
         document.getElementById('font-cap-display').innerText = val + 'pt';
         document.documentElement.style.setProperty('--label-font-cap', val + 'pt');
     }
-
-    function showSettings() { switchView('settings-view'); }
+    function toggleSettings() {
+        if (activeView === 'settings-view') { switchView(previousView); }
+        else { previousView = activeView; switchView('settings-view'); }
+    }
+    function showSettings() { if (!requireAuth()) return; previousView = activeView; switchView('settings-view'); }
 
     function saveSettings() {
-        const eccVal     = document.getElementById('qr-ecc').value;
+        const eccVal = document.getElementById('qr-ecc').value;
         const fontCapVal = document.getElementById('label-font-cap-range').value;
-
         localStorage.setItem('qr-ecc', eccVal);
         updateQREccVar(eccVal);
-
         localStorage.setItem('label-font-cap', fontCapVal);
         document.documentElement.style.setProperty('--label-font-cap', fontCapVal + 'pt');
-
         showToast("Settings saved", "success");
         if (selectedItems.size > 0 && activeView === 'preview-view') generateLabelsPreview();
-        else if (globalInventory.length > 0) switchView('list-view');
+        else if (globalInventory.length > 0 || globalKits.length > 0) showListView();
         else switchView('auth-view');
     }
 
