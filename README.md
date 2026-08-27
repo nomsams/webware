@@ -103,15 +103,58 @@ webware/
 
 Warehouse `1` runs on Supabase instead of the static encrypted-envelope flow (`mode: 'supabase'` in the `WAREHOUSES` array). This trades the "fully static, zero dependency" property for real server-enforced viewer/editor/admin permissions via Postgres Row Level Security.
 
-- **Auth**: Email/password sign-in (Supabase Auth), not the passphrase flow. No public sign-ups — accounts are created manually in the Supabase dashboard, or via Settings → Manage Users (admin only) for role changes on existing accounts.
-- **Roles**: `viewer` (read-only), `editor` (can update existing items/images), `admin` (can also insert/delete and manage roles). Role lives in the `profiles` table and is enforced by RLS, not just hidden in the UI — a viewer's write attempt is rejected server-side even via devtools.
-- **Data**: Items live in the `items` table, keyed by BTK number. Kits (normalized `kits`/`kit_items` tables, not the static-mode CSV-A matrix) give the same kit-browsing UI as static warehouses.
-- **Manufacturers**: A real entity (`manufacturers` table), not just a text field — each has an optional logo, description, contact name, and email, with a dedicated page listing that manufacturer's items in the current warehouse. Typing a manufacturer name on an item resolves it against existing manufacturers (folding known transliterations like `HÄNY`/`haeny`) or creates a new one, rather than free-typing a fresh string every time.
-- **Images**: One photo per item, stored in Supabase Storage (bucket `item-images`, public-read, editor/admin write) — not the local `assets/` convention static warehouses use. Uploaded via the item view (camera or file picker) or batch via filename-BTK matching in the list view, with an in-browser editor (rotate, 1:1-default crop, solid-colour pen) before it's compressed and uploaded. The thumbnail is what's shown in lists/galleries; clicking it loads the full-size original in a lightbox. Re-uploading replaces the existing photo (upsert, same filename) rather than accumulating old versions. Manufacturer logos work the same way in a separate `manufacturer-logos` bucket. Combined storage usage against 90% of the Supabase free-tier 1GB quota is shown in Settings, and checked before every upload.
+- **Auth**: Email/password sign-in (Supabase Auth), not the passphrase flow. No public sign-ups — accounts are created manually in the Supabase dashboard.
+- **Roles**: `viewer` (read-only), `editor` (can update existing items/images), `admin` (can also insert/delete and manage other users' roles). Role lives in `profiles.role` and is enforced by RLS, not just hidden in the UI — a viewer's write attempt is rejected server-side even via devtools. Admins change roles via Settings → Manage Users, never by hand-editing SQL.
+- **Display names**: Each account can set its own display name (Settings → "Your Display Name"). Left blank, "Last updated by" on an item falls back to the part of your email before `@` — nobody has to type a name for attribution to work.
+- **Data**: Items keyed by BTK number. Kits are normalized `kits`/`kit_items` tables (not the static-mode wide CSV-A matrix) but drive the same kit-browsing UI. Manufacturers are a real entity, not a free-text field — logo, description, contact, email, and a dedicated page listing that manufacturer's items in the current warehouse. Typing a manufacturer name on an item resolves against existing manufacturers first (folding known transliterations like `HÄNY`/`haeny` to the same match) before creating a new one, so spelling variants don't fork into duplicates.
+- **Images**: One photo per item + one logo per manufacturer, in Supabase Storage (`item-images` / `manufacturer-logos` buckets, public-read, editor/admin write) — not the local `assets/` convention static warehouses use. Uploaded via an in-browser editor (rotate, 1:1-default crop, solid-colour pen) before being compressed; the thumbnail is what's shown in lists/galleries, full-res on click. Re-uploading replaces the existing image in place (upsert) rather than accumulating old versions. Combined usage against 90% of the Supabase free-tier 1GB quota is shown in Settings and checked before every upload.
 - **Low-stock indicator**: Off by default — opt in via Settings, with a configurable threshold. Flags items in the list and item view.
 - **CSV export**: A plain (unencrypted) snapshot of the current warehouse's items, for reporting — the database is the source of truth in Supabase mode, so this isn't a backup mechanism.
-- **Keep-alive**: `.github/workflows/supabase-keepalive.yml` pings the database twice a week so the free-tier project doesn't pause after 7 days of inactivity. Requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` repo secrets (Settings → Secrets and variables → Actions) — the service role key must **never** be committed or used client-side.
+- **Keep-alive**: `.github/workflows/supabase-keepalive.yml` pings the database twice a week so the free-tier project doesn't pause after 7 days of inactivity.
 - **Other warehouses** (`2`, `3`, ...) are unaffected and keep using the offline-capable passphrase/envelope-encryption flow described above, including the static wide-CSV-A kit matrix and free-text manufacturer field.
+
+### Database Schema
+
+Everything lives in the `public` schema with RLS enabled. Set up a fresh project by running the files in `supabase/` through the SQL Editor **in this order** (each is idempotent-ish — safe to re-run except where a file's own header comment says otherwise):
+
+| # | File | Adds |
+|---|------|------|
+| 1 | *(initial setup — see project history)* | `warehouses`, `profiles`, `items` (base columns), auth/RLS policies |
+| 2 | `schema_kits.sql` | `kits`, `kit_items` |
+| 3 | `schema_image_storage.sql` | `items.image_full_url`, `items.image_thumb_url`, `item-images` bucket |
+| 4 | `schema_map_position.sql` | `items.map_position` |
+| 5 | `schema_manufacturers.sql` | `manufacturers`, `items.manufacturer_id`, `manufacturer-logos` bucket, backfill from existing `items.manufacturer` text |
+| 6 | `schema_user_management.sql` | `list_profiles_with_email()`, `update_user_role()` |
+| 7 | `schema_display_names.sql` | `profiles.display_name`, `get_display_name()`, self-update policy |
+
+`seed_items.sql` / `seed_kits.sql` are one-time data loads for the original Häny catalog, not schema — skip them for a fresh dataset.
+
+**Table reference:**
+
+- **`warehouses`** — `l` (text, PK, matches the app's warehouse ID e.g. `"1"`), `name`, `address`. Public-read to any authenticated user.
+- **`profiles`** — one row per auth account. `id` (uuid, PK = `auth.users.id`), `role` (`viewer`/`editor`/`admin`), `warehouse_id` (FK → `warehouses.l`), `display_name` (text, optional, self-settable only), `created_at`. A user may read their own row and update only its `display_name` (column-scoped grant — they can never touch their own `role`).
+- **`items`** — `btk` (text, PK), `warehouse_id` (FK), `manufacturer` (text, denormalized display copy kept in sync with `manufacturer_id`), `manufacturer_id` (FK → `manufacturers.id`, nullable), `itemnumber`, `itemname_en`, `itemname_sv`, `itemnumber2`, `itemnumber3`, `numberofitems` (int), `inventorylocation`, `map_position` (text, `A1`–`F6`), `comments`, `images` (legacy, unused for Supabase-mode items), `image_full_url`, `image_thumb_url`, `updated_at`/`updated_by` (set by a trigger on every write).
+- **`kits`** — `id` (bigint identity, PK), `kitnumber` (text, nullable — several kits can legitimately share `null`, so the app never treats it alone as a unique key), `name`, `warehouse_id` (FK).
+- **`kit_items`** — `kit_id` (FK → `kits.id`), `btk` (FK → `items.btk`), `quantity` (int); composite PK `(kit_id, btk)`.
+- **`manufacturers`** — `id` (bigint identity, PK), `name` (text, unique), `description`, `contact_name`, `email`, `logo_url`, `created_at`. Global, not warehouse-scoped — the same supplier can ship to multiple warehouses.
+
+### Connecting Your Own Supabase Project (or a Similar Backend)
+
+This app is a single static HTML file with no build step, so it can't read environment variables at runtime. The connection details live in two *different* places, in two different formats — mixing them up either breaks the app or leaks a key that should never be public:
+
+**1. The client itself, in `index.html`** — near the top of the `<script>` block:
+```js
+const SUPABASE_URL = 'https://<your-project-ref>.supabase.co';
+const SUPABASE_ANON_KEY = '<your-anon-key>';
+```
+Find both under **Project Settings → Data API** in your Supabase dashboard. The anon key is *meant* to be public — that's the whole point of Row Level Security — and looks like either a long JWT starting `eyJ...` (older projects) or the newer `sb_publishable_...` format. Either works identically; paste whichever your project shows.
+
+**2. The GitHub Actions keep-alive workflow — repo secrets**, not client-side constants, since that job runs server-side in CI and needs privileged access RLS would otherwise block:
+- **Settings → Secrets and variables → Actions → New repository secret** on the GitHub repo.
+- `SUPABASE_URL` — same value as above.
+- `SUPABASE_SERVICE_ROLE_KEY` — the **service_role** key (same Data API page, *not* the anon key). Also a JWT starting `eyJ...` (older) or the newer `sb_secret_...` format. This key bypasses Row Level Security entirely — it must **only** ever live in this GitHub secret, never in `index.html`, never committed, never logged.
+
+Pointing this at a different Postgres-compatible backend follows the same shape: a public-safe, RLS-scoped key goes in the client; a privileged key that can bypass access control goes only in CI secrets. You'd also need to adapt the `supabase/*.sql` files for whatever SQL dialect differences your provider has.
 
 ## Security Notes
 
