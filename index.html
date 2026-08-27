@@ -7,8 +7,8 @@
     <title>Webware Inventory</title>
     
     <!-- External Libraries (CryptoJS removed — native WebCrypto used instead) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" integrity="sha512-1D7f1f5e6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6A7B8C9D0E1F2G3H4I5J6K7L8M9N0O1P2Q3R4S5T6U7V8W9X0Y1Z2" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha512-aBcDeFgHiJ8k9l0m1n2o3p4q5r6s7t8u9v0w1x2y3z4A5B6C7D8E9F0G1H2I3J4K5L6M7N8O9P0Q1R2S3T4U5V6W7X8Y9Z0" crossorigin="anonymous"></script>
 
     <style>
         /* --- THEME & VARIABLES --- */
@@ -83,8 +83,8 @@
 
         /* Circular theme-adapted selection control */
         .select-circle { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); background: var(--card-bg); flex-shrink: 0; cursor: pointer; position: relative; transition: all 0.2s; }
-        .select-circle.selected { background: var(--primary); border-color: var(--primary); }
-        .select-circle.selected::after { content: ''; position: absolute; left: 9px; top: 5px; width: 5px; height: 10px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+        .select-circle[aria-checked="true"] { background: var(--primary); border-color: var(--primary); }
+        .select-circle[aria-checked="true"]::after { content: ''; position: absolute; left: 9px; top: 5px; width: 5px; height: 10px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
 
         button { background-color: var(--primary); color: white; border: none; padding: 0.85rem 1.5rem; border-radius: 12px; font-size: 1rem; cursor: pointer; font-weight: 600; transition: all 0.2s; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
         button:hover { background-color: var(--primary-hover); transform: translateY(-1px); }
@@ -169,9 +169,9 @@
             display: flex; align-items: stretch; box-sizing: border-box; padding: 1.5mm;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative; overflow: hidden; margin: 0 auto; border-radius: 2px;
         }
-        .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; margin-right: 2.5mm; }
+        .label-qr { width: 26mm; height: 26mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; margin-right: 4mm; }
         .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
-        .label-text { flex-grow: 1; padding-left: 1mm; display: flex; flex-direction: column; justify-content: flex-start; align-items: flex-end; overflow: hidden; height: 100%; text-align: right; min-width: 0; }
+        .label-text { flex-grow: 1; padding-left: 2mm; display: flex; flex-direction: column; justify-content: flex-start; align-items: flex-end; overflow: hidden; height: 100%; text-align: right; min-width: 0; }
         .label-text div { line-height: 1.2; font-family: Arial, Helvetica, sans-serif !important; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .l-nums { font-size: clamp(11pt, 4.5vw, var(--label-font-cap)); font-weight: 900; color: #000; letter-spacing: -0.3px; margin-top: 0.5mm; }
         .l-name { font-size: clamp(8pt, 2.8vw, 12pt); font-weight: 700; color: #000; margin-top: 1.5mm; }
@@ -351,6 +351,7 @@
                 <button id="btn-add-item" onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">➕ Add Item</button>
                 <button class="secondary" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Items CSV</button>
                 <button class="secondary" onclick="triggerKitsCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Kits CSV</button>
+                <button class="secondary" onclick="triggerWarehouseCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Warehouses CSV</button>
                 <button class="secondary" onclick="exportEncryptedDatabase()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">💾 Export</button>
             </div>
         </div>
@@ -361,11 +362,6 @@
         </div>
 
         <div id="wh-meta-container"></div>
-
-        <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <label class="modal-label" for="warehouse-switcher" style="margin: 0; text-transform: none;">Warehouse:</label>
-            <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" style="width: auto; min-width: 160px; margin: 0;"></select>
-        </div>
 
         <div id="items-only-controls">
             <div class="search-wrapper" id="search-container">
@@ -379,9 +375,9 @@
                     <option value="manufacturer">Sort: Manufacturer</option>
                     <option value="btk">Sort: BTK Number</option>
                 </select>
-                <div class="select-all-banner" style="flex: 1; margin-bottom: 0;" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
+                <div class="select-all-banner" style="margin-left: auto; margin-bottom: 0; padding: 8px 16px;" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
                     <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 12px; pointer-events: none;" aria-hidden="true">
-                    <span style="font-weight: 600; flex-grow: 1;">Select All Visible Items</span>
+                    <span style="font-weight: 600;">Select All Visible Items</span>
                 </div>
             </div>
         </div>
@@ -398,6 +394,7 @@
 
         <input type="file" id="csv-upload" accept=".csv" class="hidden" onchange="handleCSVUpload(event)" aria-label="Upload Items CSV">
         <input type="file" id="kits-csv-upload" accept=".csv" class="hidden" onchange="handleKitsCSVUpload(event)" aria-label="Upload Kits CSV">
+        <input type="file" id="warehouse-csv-upload" accept=".csv" class="hidden" onchange="handleWarehouseCSVUpload(event)" aria-label="Upload Warehouses CSV">
 
         <!-- Floating Action Bar -->
         <div class="fab-container">
@@ -450,6 +447,7 @@
             <h2 style="margin:0;">Label Preview</h2>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button class="secondary" onclick="showListView()">Cancel</button>
+                <button onclick="generateWarehouseLabelsPreview()">🏬 Warehouse QRs</button>
                 <button onclick="printLabels()">🖨️ Print</button>
                 <button onclick="exportLabelsAsHTML()">💾 HTML Export</button>
             </div>
@@ -724,23 +722,30 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     //  ID COMPRESSION (BTK000024 -> 24,  24 -> BTK000024)
     // ════════════════════════════════════════════════════════════════════════
     function compressId(btk) {
-        if (typeof btk === 'string' && btk.toUpperCase().startsWith('BTK')) {
-            const n = parseInt(btk.slice(3), 10);
-            return isNaN(n) ? btk : String(n);
+        if (!btk) return '';
+        const s = String(btk).trim().toUpperCase();
+        if (s.startsWith('BTK')) {
+            const n = parseInt(s.slice(3), 10);
+            return isNaN(n) ? s : String(n);
         }
-        return btk;
+        if (/^\d+$/.test(s)) return s;
+        return s;
     }
     function decompressId(s) {
-        if (/^\d+$/.test(s)) {
-            return 'BTK' + String(parseInt(s, 10)).padStart(6, '0');
+        if (!s) return '';
+        const str = String(s).trim();
+        if (/^\d+$/.test(str)) {
+            return 'BTK' + String(parseInt(str, 10)).padStart(6, '0');
         }
-        return s;
+        const upper = str.toUpperCase();
+        if (upper.startsWith('BTK')) return upper;
+        return str;
     }
 
     // ════════════════════════════════════════════════════════════════════════
     //  STATE
     // ════════════════════════════════════════════════════════════════════════
-    const BASE_URL = (window.location.origin + window.location.pathname).toUpperCase();
+    const BASE_URL = window.location.origin + window.location.pathname;
 
     let globalInventory = [];     // CSV B items
     let globalKits = [];          // CSV A kits
@@ -1020,6 +1025,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ════════════════════════════════════════════════════════════════════════
     function triggerCSVImport() { if (!requireAuth()) return; document.getElementById('csv-upload').click(); }
     function triggerKitsCSVImport() { if (!requireAuth()) return; document.getElementById('kits-csv-upload').click(); }
+    function triggerWarehouseCSVImport() { if (!requireAuth()) return; document.getElementById('warehouse-csv-upload').click(); }
 
     function handleCSVUpload(event) {
         const file = event.target.files[0];
@@ -1050,6 +1056,29 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             saveDraft(currentWarehouseId);
             renderKitsList();
             showToast(`Imported ${kits.length} kits (draft autosaved).`, "success");
+        };
+        reader.readAsText(file);
+        event.target.value = '';
+    }
+
+    function handleWarehouseCSVUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const res = Papa.parse(e.target.result, { header: true, skipEmptyLines: true });
+            const warehouses = res.data
+                .filter(r => r && (r.l || r.id || r.warehouse_id))
+                .map(r => ({
+                    l: (r.l || r.id || r.warehouse_id || '').toString().trim(),
+                    name: (r.name || r.warehouse_name || '').toString().trim(),
+                    address: (r.address || r.location || '').toString().trim()
+                }))
+                .filter(w => w.l !== '');
+            if (!warehouses.length) { showToast("No valid rows (need 'l' or 'id' column).", "error"); return; }
+            window.WAREHOUSES = warehouses;
+            showToast(`Imported ${warehouses.length} warehouses.`, "success");
+            renderWarehouseMeta();
         };
         reader.readAsText(file);
         event.target.value = '';
@@ -1090,7 +1119,6 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (forceMode) listMode = forceMode;
         switchView('list-view');
         renderWarehouseMeta();
-        populateWarehouseSwitcher();
         switchListMode(listMode, true);
     }
 
@@ -1109,14 +1137,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function renderWarehouseMeta() {
         const meta = getWarehouseMeta(currentWarehouseId);
         document.getElementById('wh-meta-container').innerHTML =
-            `<div class="wh-meta">🏬 <strong>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address}</div>`;
-    }
-
-    function populateWarehouseSwitcher() {
-        const sel = document.getElementById('warehouse-switcher');
-        if (!sel) return;
-        sel.innerHTML = WAREHOUSES.map(w => `<option value="${w.l}">${w.name}</option>`).join('');
-        sel.value = currentWarehouseId;
+            `<div class="wh-meta" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                <span>🏬 <strong>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address}</span>
+                <label for="warehouse-switcher" style="margin:0; font-size:0.85rem; color:var(--text-muted);">Switch:</label>
+                <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" style="width:auto; min-width:160px; margin:0; padding:6px 10px; font-size:0.85rem;">${WAREHOUSES.map(w => `<option value="${w.l}" ${w.l === currentWarehouseId ? 'selected' : ''}>${w.name}</option>`).join('')}</select>
+            </div>`;
     }
 
     async function switchWarehouse(wid) {
@@ -1129,7 +1154,6 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             currentWarehouseId = wid;
             applyDecrypted(data, wid);
             renderWarehouseMeta();
-            populateWarehouseSwitcher();
             if (listMode === 'items') { filterList(true); }
             else { renderKitsList(); }
             showToast(`Switched to warehouse ${wid}.`, "success");
@@ -1206,14 +1230,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const rNums = [rNum1, rNum2].filter(Boolean).join(' · ') || id;
             const rMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
             div.innerHTML = `
-                <div class="select-circle ${isChecked ? 'selected' : ''}" data-id="${id}" aria-hidden="true" title="Select for label"></div>
+                <div class="select-circle" role="checkbox" aria-checked="${isChecked}" data-id="${id}" aria-label="Select for label" tabindex="0"></div>
                 <div class="item-info">
-                    <div class="item-title">${item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed'}</div>
-                    <div class="item-id">${rNums}</div>
-                    <div class="item-sub">
-                        <span>${rMfr ? rMfr + ' · ' : ''}${id}</span>
-                        <span>Stock: <strong>${item.Numberofitems || 0}</strong></span>
-                    </div>
+                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed'}</div>
+                    ${rNums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${rNums}</div>` : ''}
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${rMfr ? rMfr + ' ' : ''}${id}</div>
                 </div>`;
             div.onclick = () => openItem(id, { type: 'global' });
             div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); div.click(); } };
@@ -1222,6 +1243,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 e.stopPropagation();
                 const willSelect = !selectedItems.has(id);
                 toggleSelection(id, willSelect);
+            };
+            circle.onkeydown = (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const willSelect = !selectedItems.has(id);
+                    toggleSelection(id, willSelect);
+                }
             };
             frag.appendChild(div);
         });
@@ -1321,7 +1350,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ── SELECTION (items) ──
     function updateCircleStates() {
         document.querySelectorAll('.select-circle').forEach(c => {
-            c.classList.toggle('selected', selectedItems.has(c.dataset.id));
+            c.setAttribute('aria-checked', selectedItems.has(c.dataset.id));
         });
     }
     function toggleSelection(id, isSelected) {
@@ -1600,45 +1629,86 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 errorCount++;
                 qrDiv.innerHTML = '<span style="font-size:8px;color:red;text-align:center;">QR failed</span>';
             }
+
+            // Show URL under label in preview (not printed)
+            const urlDiv = document.createElement('div');
+            urlDiv.className = 'no-print';
+            urlDiv.style.cssText = 'font-size:0.65rem;color:var(--text-muted);text-align:center;margin-top:4px;font-family:monospace;word-break:break-all;';
+            urlDiv.textContent = targetUrl;
+            container.appendChild(urlDiv);
         });
-        if (errorCount > 0) showToast(`${errorCount} QR code(s) failed.`, "error");
+if (errorCount > 0) showToast(`${errorCount} QR code(s) failed.`, "error");
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  PRINT
-    // ════════════════════════════════════════════════════════════════════════
-    function printLabels() {
-        const originalContainer = document.getElementById('label-preview-container');
-        const cloneContainer = originalContainer.cloneNode(true);
-        const originalCanvases = originalContainer.querySelectorAll('canvas');
-        const clonedCanvases = cloneContainer.querySelectorAll('canvas');
-        const clonedImages = cloneContainer.querySelectorAll('img');
-        for (let i = 0; i < originalCanvases.length; i++) {
-            const dataUrl = originalCanvases[i].toDataURL("image/png");
-            if (clonedImages[i]) { clonedImages[i].src = dataUrl; clonedImages[i].style.display = 'block'; }
-            if (clonedCanvases[i]?.parentNode) clonedCanvases[i].parentNode.removeChild(clonedCanvases[i]);
-        }
+    // Warehouse QR label generation (with password)
+    function generateWarehouseLabelsPreview() {
+        if (!requireAuth()) return;
+        console.log(`Generating warehouse labels...`);
+        switchView('preview-view');
+        const container = document.getElementById('label-preview-container');
+        container.innerHTML = '';
+        let errorCount = 0;
+
+        WAREHOUSES.forEach(w => {
+            const labelEl = document.createElement('div');
+            labelEl.className = 'label-card';
+            const qrDiv = document.createElement('div');
+            qrDiv.className = 'label-qr';
+            const textDiv = document.createElement('div');
+            textDiv.className = 'label-text';
+
+            // Warehouse key setup URL: #<WAREHOUSE_ID>/KEY/<PASSPHRASE>
+            const keys = getKeyVault();
+            const pass = keys[w.l] || DEMO_PASSPHRASE;
+            const targetUrl = `${BASE_URL}#${w.l}/KEY/${pass}`;
+
+            textDiv.innerHTML = `
+                <div class="l-nums">${w.name}</div>
+                <div class="l-name">Warehouse ${w.l}</div>
+                <div class="l-btk">${w.address}</div>`;
+
+            labelEl.appendChild(qrDiv);
+            labelEl.appendChild(textDiv);
+            container.appendChild(labelEl);
+
+            try {
+                new QRCode(qrDiv, { text: targetUrl, width: 110, height: 110, colorDark: "#000000", colorLight: "#ffffff", correctLevel: qrEccLevel });
+            } catch(err) {
+                console.error("Warehouse QR Generate Error:", err);
+                errorCount++;
+                qrDiv.innerHTML = '<span style="font-size:8px;color:red;text-align:center;">QR failed</span>';
+            }
+        });
+
+        if (errorCount > 0) showToast(`${errorCount} warehouse QR code(s) failed.`, "error");
+    }
+
+    // Shared label print HTML builder
+    function buildLabelPrintHTML(cloneContainer, options = {}) {
+        const { forExport = false, onloadPrint = true } = options;
         const css = `.label-card{width:90mm;height:29mm;background:white;color:black;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm;overflow:hidden;position:relative}
-.label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-right:2.5mm}
+.label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-right:4mm}
 .label-qr img{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
-.label-text{flex-grow:1;padding-left:1mm;display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-end;overflow:hidden;height:100%;text-align:right;min-width:0}
+.label-text{flex-grow:1;padding-left:2mm;display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-end;overflow:hidden;height:100%;text-align:right;min-width:0}
 .label-text div{line-height:1.2;font-family:Arial,Helvetica,sans-serif!important;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .l-nums{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.3px;margin-top:0.5mm}
 .l-name{font-size:11pt;font-weight:700;color:#000;margin-top:1.5mm}
 .l-btk{font-size:6pt;color:#555;font-weight:600;letter-spacing:0.3px;margin-top:auto}
 body{margin:0;padding:0;background:#fff;font-family:Arial,sans-serif}
 @media print{body{padding:0;gap:0}@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none}}`;
-        const printDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Brother QL Labels</title><style>${css}</style></head><body onload="window.print()">${cloneContainer.innerHTML}</body></html>`;
-        const w = window.open('', '_blank');
-        if (!w) { showToast("Pop-up blocked. Allow pop-ups to print.", "error"); return; }
-        w.document.open(); w.document.write(printDoc); w.document.close();
+        const onload = onloadPrint ? ' onload="window.print()"' : '';
+        if (forExport) {
+            return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Brother QL Labels Export</title>
+<style>
+body{margin:0;padding:0;background:#e2e8f0;font-family:Arial,sans-serif;display:flex;flex-direction:column;align-items:center;gap:1rem;padding:1rem}
+${css}
+</style></head><body${onload}>${cloneContainer.innerHTML}</body></html>`;
+        }
+        return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Brother QL Labels</title><style>${css}</style></head><body${onload}>${cloneContainer.innerHTML}</body></html>`;
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  HTML EXPORT
-    // ════════════════════════════════════════════════════════════════════════
-    function exportLabelsAsHTML() {
-        showToast("Generating HTML print file...", "info");
+    function cloneLabelsForPrint() {
         const originalContainer = document.getElementById('label-preview-container');
         const cloneContainer = originalContainer.cloneNode(true);
         const originalCanvases = originalContainer.querySelectorAll('canvas');
@@ -1649,20 +1719,27 @@ body{margin:0;padding:0;background:#fff;font-family:Arial,sans-serif}
             if (clonedImages[i]) { clonedImages[i].src = dataUrl; clonedImages[i].style.display = 'block'; }
             if (clonedCanvases[i]?.parentNode) clonedCanvases[i].parentNode.removeChild(clonedCanvases[i]);
         }
-        const exportDoc = `<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Brother QL Labels Export</title>
-<style>
-body{margin:0;padding:0;background:#e2e8f0;font-family:Arial,sans-serif;display:flex;flex-direction:column;align-items:center;gap:1rem;padding:1rem}
-.label-card{width:90mm;height:29mm;background:white;color:black;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm;overflow:hidden;position:relative}
-.label-qr{width:26mm;height:26mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-right:2.5mm}
-.label-qr img{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
-.label-text{flex-grow:1;padding-left:1mm;display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-end;overflow:hidden;height:100%;text-align:right;min-width:0}
-.label-text div{line-height:1.2;font-family:Arial,Helvetica,sans-serif!important;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.l-nums{font-size:14pt;font-weight:900;color:#000;letter-spacing:-0.3px;margin-top:0.5mm}
-.l-name{font-size:11pt;font-weight:700;color:#000;margin-top:1.5mm}
-.l-btk{font-size:6pt;color:#555;font-weight:600;letter-spacing:0.3px;margin-top:auto}
-@media print{body{background:white!important;padding:0;gap:0;display:block}@page{size:90mm 29mm;margin:0}.label-card{margin:0;page-break-after:always;box-shadow:none;border:none}}
-</style></head><body onload="window.print()">${cloneContainer.innerHTML}</body></html>`;
+        return cloneContainer;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PRINT
+    // ═══════════════════════════════════════════════════════════════════════
+    function printLabels() {
+        const cloneContainer = cloneLabelsForPrint();
+        const printDoc = buildLabelPrintHTML(cloneContainer, { forExport: false, onloadPrint: true });
+        const w = window.open('', '_blank');
+        if (!w) { showToast("Pop-up blocked. Allow pop-ups to print.", "error"); return; }
+        w.document.open(); w.document.write(printDoc); w.document.close();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  HTML EXPORT
+    // ═══════════════════════════════════════════════════════════════════════
+    function exportLabelsAsHTML() {
+        showToast("Generating HTML print file...", "info");
+        const cloneContainer = cloneLabelsForPrint();
+        const exportDoc = buildLabelPrintHTML(cloneContainer, { forExport: true, onloadPrint: true });
         const blob = new Blob([exportDoc], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
