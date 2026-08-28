@@ -173,6 +173,19 @@
         .fab-btn-pack:hover { background: #0d9c6f; }
         .fab-clear { background: var(--border); color: var(--text-main); border-radius: 50px; padding: 0 1rem; font-weight: bold; }
 
+        /* Floating edit bar (quick-edit Save/Cancel) — fixed to the viewport bottom, same
+           slide-in transition as the FAB above, so entering/leaving quick-edit never shifts the
+           rest of the page's content (nothing above or below it moves — the bar just overlays). */
+        .floating-edit-bar {
+            position: fixed; left: 50%; bottom: 24px; z-index: 95; max-width: calc(100% - 2rem);
+            background: var(--card-bg); border: 1px solid var(--primary); border-radius: 50px;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.25); padding: 8px 10px 8px 20px;
+            display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transform: translate(-50%, calc(100% + 24px + 24px));
+        }
+        .floating-edit-bar.visible { transform: translate(-50%, 0); }
+
         /* --- MAP MODULE --- */
         .warehouse-map { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 0.5rem; background: var(--border); padding: 10px; border-radius: 12px; }
         .map-cell { aspect-ratio: 1; background: var(--card-bg); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: var(--text-muted); font-weight: bold; transition: all 0.3s; }
@@ -633,13 +646,6 @@
             <button id="btn-single-label" style="flex:1; min-width:160px;">🏷️ Create Label</button>
         </div>
 
-        <!-- Quick-edit save/cancel bar — shown only while inline-editing (double-click to enter) -->
-        <div id="quick-edit-bar" class="hidden" style="display:flex; gap:10px; margin-bottom:1.25rem; background:var(--primary-light); border:1px solid var(--primary); border-radius:12px; padding:10px 14px; align-items:center; flex-wrap:wrap;">
-            <span style="font-weight:700; color:var(--primary); flex:1;">✏️ Editing this item</span>
-            <button class="secondary" onclick="cancelQuickEdit()">✕ Cancel</button>
-            <button class="success-btn" onclick="saveQuickEdit()">💾 Save Changes</button>
-        </div>
-
         <h1 id="detail-name" style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">Item Name</h1>
 
         <div id="detail-kit-tags" class="kit-tags"></div>
@@ -742,8 +748,10 @@
                 <select id="rack-image-zone" style="width:auto; margin:0;"></select>
                 <input type="number" id="rack-image-aisle" placeholder="Aisle" min="1" style="width:80px; margin:0;">
                 <input type="number" id="rack-image-rack" placeholder="Rack" min="1" style="width:80px; margin:0;">
-                <button class="secondary" onclick="document.getElementById('rack-image-file-input').click()">📷 Upload Photo</button>
+                <button class="secondary" onclick="document.getElementById('rack-image-file-input').click()">➕ Add Photo</button>
+                <button class="secondary" onclick="document.getElementById('rack-image-camera-input').click()">📷 Take Picture</button>
                 <input type="file" id="rack-image-file-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" class="hidden" onchange="handleRackImageUpload(event)" aria-label="Upload rack photo">
+                <input type="file" id="rack-image-camera-input" accept="image/*" capture="environment" class="hidden" onchange="handleRackImageUpload(event)" aria-label="Take rack photo">
             </div>
             <div id="rack-image-gallery" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:10px;"></div>
         </div>
@@ -920,6 +928,14 @@
                 📦 Pack (<span id="selected-count-pack">0</span>)
             </button>
         </div>
+    </div>
+
+    <!-- Quick-edit save/cancel bar — floats above everything else while inline-editing an item
+         (double-click to enter) so entering/leaving edit mode never shifts the page's content. -->
+    <div id="quick-edit-bar" class="floating-edit-bar">
+        <span style="font-weight:700; color:var(--primary);">✏️ Editing this item</span>
+        <button class="secondary" onclick="cancelQuickEdit()">✕ Cancel</button>
+        <button class="success-btn" onclick="saveQuickEdit()">💾 Save Changes</button>
     </div>
 
 </main>
@@ -3602,7 +3618,7 @@ th { background: #eee; }
         currentItemBTK = id;
         quickEditMode = false;
         quickEditOriginal = null;
-        document.getElementById('quick-edit-bar').classList.add('hidden');
+        document.getElementById('quick-edit-bar').classList.remove('visible');
 
         switchView('item-view');
         document.getElementById('detail-name').innerText = item['itemname(english)'] || 'Unnamed Item';
@@ -3824,7 +3840,7 @@ th { background: #eee; }
         if (!item) return;
         quickEditMode = true;
         quickEditOriginal = { ...item };
-        document.getElementById('quick-edit-bar').classList.remove('hidden');
+        document.getElementById('quick-edit-bar').classList.add('visible');
         renderQuickEditFields(item);
         const filenames = renderItemGallery(item);
         renderImageAddControls(filenames.length > 0);
@@ -3896,7 +3912,7 @@ th { background: #eee; }
     function exitQuickEditUI() {
         quickEditMode = false;
         quickEditOriginal = null;
-        document.getElementById('quick-edit-bar').classList.add('hidden');
+        document.getElementById('quick-edit-bar').classList.remove('visible');
         const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
         if (!item) return;
         const filenames = renderItemGallery(item);
@@ -3956,7 +3972,7 @@ th { background: #eee; }
 
         quickEditMode = false;
         quickEditOriginal = null;
-        document.getElementById('quick-edit-bar').classList.add('hidden');
+        document.getElementById('quick-edit-bar').classList.remove('visible');
         openItem(btk, navigationContext);
     }
 
