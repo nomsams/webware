@@ -463,6 +463,38 @@
     </div>
 </div>
 
+<!-- Manage Warehouses Modal (admin only) -->
+<div class="modal-overlay" id="manage-warehouses-modal" onclick="handleManageWarehousesModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:560px;">
+        <h3>🏬 Manage Warehouses</h3>
+        <div class="setting-row" style="margin-bottom:1rem;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:600; font-size:0.9rem;">
+                <input type="checkbox" id="toggle-static-warehouses" onchange="toggleStaticWarehouses(this.checked)" style="width:auto; margin:0;">
+                Show static warehouses (2, 3) in the switcher
+            </label>
+            <p class="setting-desc">They're separate offline encrypted vaults, not connected to this database — hidden by default so the switcher only lists warehouses actually on Supabase. Nothing about them is deleted; this only affects what shows in the dropdown on this device.</p>
+        </div>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.5rem;">Supabase warehouses:</p>
+        <div id="warehouses-list-container">Loading…</div>
+        <div id="add-warehouse-form" class="hidden" style="margin-top:1rem; border-top:1px solid var(--border); padding-top:1rem;">
+            <label class="modal-label" for="new-wh-id">Warehouse ID</label>
+            <input type="text" id="new-wh-id">
+            <label class="modal-label" for="new-wh-name">Name</label>
+            <input type="text" id="new-wh-name" placeholder="e.g. East Depot">
+            <label class="modal-label" for="new-wh-address">Address</label>
+            <input type="text" id="new-wh-address" placeholder="Optional">
+            <div class="modal-actions">
+                <button class="secondary full-width" onclick="closeAddWarehouseForm()">Cancel</button>
+                <button class="success-btn full-width" onclick="submitNewWarehouse()">✔ Create</button>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeManageWarehousesModal()">Close</button>
+            <button class="success-btn full-width" id="btn-open-add-warehouse" onclick="openAddWarehouseForm()">+ Add Warehouse</button>
+        </div>
+    </div>
+</div>
+
 <!-- Manufacturer Edit Modal -->
 <div class="modal-overlay" id="manufacturer-edit-modal" onclick="handleManufacturerModalOverlayClick(event)">
     <div class="modal-box">
@@ -1083,6 +1115,7 @@
         </div>
 
         <button class="secondary full-width hidden" id="btn-manage-users" onclick="openManageUsersModal()" style="margin-bottom:1rem;">👥 Manage Users</button>
+        <button class="secondary full-width hidden" id="btn-manage-warehouses" onclick="openManageWarehousesModal()" style="margin-bottom:1rem;">🏬 Manage Warehouses</button>
 
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>
         <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
@@ -1146,7 +1179,7 @@
     var activeView = 'auth-view';
     var previousView = 'list-view';
     var pendingItemId = null;
-    var listMode = 'items';
+    var listMode = 'manufacturers'; // static warehouses fall back to 'items' in showListView() — Manufacturers isn't a real view there
     var sortBy = 'name';
     var navigationContext = null;
     var currentItemBTK = null;
@@ -1198,6 +1231,19 @@
         { l: '2', name: 'North Depot', address: 'Stockholm, Sweden' },
         { l: '3', name: 'South Depot', address: 'Malmö, Sweden' }
     ];
+    // Static warehouses (2/3, no `mode`) are separate offline encrypted vaults, not on Supabase —
+    // hidden from the switcher by default so it only shows warehouses actually reachable from here,
+    // while still reachable directly (a saved key, a QR link) and still shown if it's the one
+    // currently open. Per-device only (localStorage), not a server-side setting.
+    var staticWarehousesEnabled = localStorage.getItem('staticWarehousesEnabled') === 'true';
+    function visibleWarehouses() {
+        return WAREHOUSES.filter(w => w.mode === 'supabase' || staticWarehousesEnabled || w.l === currentWarehouseId);
+    }
+    function toggleStaticWarehouses(enabled) {
+        staticWarehousesEnabled = enabled;
+        localStorage.setItem('staticWarehousesEnabled', String(enabled));
+        renderWarehouseMeta();
+    }
 
     // ════════════════════════════════════════════════════════════════════════
     //  SUPABASE (warehouse-scoped auth + RLS-gated reads/writes — see WAREHOUSES mode)
@@ -1619,6 +1665,64 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function closeManageUsersModal() { document.getElementById('manage-users-modal').classList.remove('open'); }
     function handleUsersModalOverlayClick(e) { if (e.target === document.getElementById('manage-users-modal')) closeManageUsersModal(); }
 
+    // ── Manage Warehouses (admin only) — the static-warehouse visibility toggle, and self-service
+    // creation of new Supabase-backed warehouses (schema_warehouse_insert.sql's admin-only INSERT
+    // policy is what actually allows the write). Nothing else needs new RLS for a new warehouse to
+    // start working — every existing policy compares against whatever warehouse_id a row has,
+    // rather than hardcoding warehouse '1'.
+    function openManageWarehousesModal() {
+        if (currentUserRole !== 'admin') { showToast("Admin only.", "warning"); return; }
+        document.getElementById('toggle-static-warehouses').checked = staticWarehousesEnabled;
+        closeAddWarehouseForm();
+        document.getElementById('manage-warehouses-modal').classList.add('open');
+        renderManageWarehousesList();
+    }
+    function closeManageWarehousesModal() { document.getElementById('manage-warehouses-modal').classList.remove('open'); }
+    function handleManageWarehousesModalOverlayClick(e) { if (e.target === document.getElementById('manage-warehouses-modal')) closeManageWarehousesModal(); }
+
+    async function renderManageWarehousesList() {
+        const container = document.getElementById('warehouses-list-container');
+        container.innerHTML = 'Loading…';
+        await supabaseLoadAllWarehouses();
+        const supaWarehouses = WAREHOUSES.filter(w => w.mode === 'supabase');
+        container.innerHTML = supaWarehouses.map(w => `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);">
+                <span><strong>${escapeHtml(w.name)}</strong> <span style="color:var(--text-muted); font-size:0.85rem;">— ID ${escapeHtml(w.l)}${w.address ? ' · ' + escapeHtml(w.address) : ''}</span></span>
+            </div>`).join('') || '<p style="color:var(--text-muted); font-size:0.85rem;">No Supabase warehouses yet.</p>';
+    }
+
+    // Suggests the lowest integer not already used by any known warehouse (Supabase or static) —
+    // never reuses '1'/'2'/'3' by accident, which would otherwise silently reassign a static
+    // warehouse's ID to a new Supabase one. Still editable — this is just a starting point.
+    function suggestNextWarehouseId() {
+        const nums = WAREHOUSES.map(w => parseInt(w.l, 10)).filter(n => !isNaN(n));
+        const used = new Set(nums);
+        let n = 1;
+        while (used.has(n)) n++;
+        return String(n);
+    }
+    function openAddWarehouseForm() {
+        document.getElementById('new-wh-id').value = suggestNextWarehouseId();
+        document.getElementById('new-wh-name').value = '';
+        document.getElementById('new-wh-address').value = '';
+        document.getElementById('add-warehouse-form').classList.remove('hidden');
+    }
+    function closeAddWarehouseForm() { document.getElementById('add-warehouse-form').classList.add('hidden'); }
+
+    async function submitNewWarehouse() {
+        const l = document.getElementById('new-wh-id').value.trim();
+        const name = document.getElementById('new-wh-name').value.trim();
+        const address = document.getElementById('new-wh-address').value.trim();
+        if (!l || !name) { showToast("Warehouse ID and name are required.", "error"); return; }
+        if (WAREHOUSES.some(w => w.l === l)) { showToast(`Warehouse ID "${l}" is already in use.`, "error"); return; }
+        const { error } = await sb.from('warehouses').insert({ l, name, address: address || null });
+        if (error) { showToast("Could not create warehouse: " + error.message, "error"); return; }
+        showToast(`Warehouse "${name}" created. It's visible to everyone now — grant yourself or others access via Manage Users if you're not already an admin there.`, "success", 8000);
+        closeAddWarehouseForm();
+        renderManageWarehousesList();
+        renderWarehouseMeta();
+    }
+
     // "Last updated by" — resolves via get_display_name() (their own chosen name, or their
     // email's username if they never set one), cached per session since the same editor's name
     // gets looked up repeatedly as you browse items.
@@ -1657,7 +1761,21 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         currentActiveKey = 'supabase-session'; // sentinel so requireAuth() passes
         currentUserRole = await computeEffectiveRole(profile, wid);
         await supabaseLoadWarehouseMeta(wid);
+        await supabaseLoadAllWarehouses(); // so the switcher offers every Supabase warehouse, not just this one
         await supabaseLoadWarehouseZones(wid);
+    }
+
+    // warehouses is public-read to any authenticated user, so this is safe for any signed-in role —
+    // merges every row into WAREHOUSES (all mode: 'supabase'), including ones created after this
+    // session started or added by someone else, so the switcher/Manage Warehouses list stays current.
+    async function supabaseLoadAllWarehouses() {
+        const { data, error } = await sb.from('warehouses').select('*');
+        if (error) { console.error("Could not load warehouse list:", error); return; }
+        (data || []).forEach(row => {
+            const idx = WAREHOUSES.findIndex(w => w.l === row.l);
+            const merged = { ...(idx >= 0 ? WAREHOUSES[idx] : {}), l: row.l, mode: 'supabase', name: row.name, address: row.address || '', phone: row.phone || '', contactEmail: row.contact_email || '' };
+            if (idx >= 0) WAREHOUSES[idx] = merged; else WAREHOUSES.push(merged);
+        });
     }
 
     // A profile's global role/home warehouse (profiles.role/profiles.warehouse_id) still works
@@ -2705,6 +2823,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function showListView(forceMode) {
         if (!requireAuth()) return;
         if (forceMode) listMode = forceMode;
+        // Manufacturers is a Supabase-only concept (static warehouses just use a free-text field,
+        // no dedicated entity/list) — its tab is hidden there too, so defaulting into it on a
+        // static warehouse would land on a view with no way back except the hidden Items tab.
+        if (listMode === 'manufacturers' && getWarehouseMeta(currentWarehouseId).mode !== 'supabase') listMode = 'items';
         switchView('list-view');
         renderWarehouseMeta();
         switchListMode(listMode, true);
@@ -2749,7 +2871,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 <span>🏬 <strong${meta.mode === 'supabase' ? ` role="button" tabindex="0" style="cursor:pointer; text-decoration:underline;" onclick="openWarehouseView()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openWarehouseView();}"` : ''}>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address || '—'}${meta.phone ? ` &nbsp;·&nbsp; ${meta.phone}` : ''}${meta.contactEmail ? ` &nbsp;·&nbsp; ${meta.contactEmail}` : ''}</span>
                 ${meta.mode === 'supabase' && currentUserRole === 'admin' ? `<button class="secondary" onclick="openWarehouseEditModal()" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">✏️ Edit Warehouse</button>` : ''}
                 <label for="warehouse-switcher" style="margin:0; font-size:0.85rem; color:var(--text-muted);">Switch:</label>
-                <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" style="width:auto; min-width:160px; margin:0; padding:6px 10px; font-size:0.85rem;">${WAREHOUSES.map(w => `<option value="${w.l}" ${w.l === currentWarehouseId ? 'selected' : ''}>${w.name}</option>`).join('')}</select>
+                <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" style="width:auto; min-width:160px; margin:0; padding:6px 10px; font-size:0.85rem;">${visibleWarehouses().map(w => `<option value="${w.l}" ${w.l === currentWarehouseId ? 'selected' : ''}>${w.name}</option>`).join('')}</select>
                 ${meta.mode === 'supabase' ? `<span style="font-size:0.8rem; color:var(--text-muted);">🔐 Signed in as <strong>${currentUserRole || '?'}</strong></span>` : ''}
             </div>`;
 
@@ -6146,7 +6268,7 @@ th { background: #eee; }
         urlList.innerHTML = '';
         let errorCount = 0;
 
-        WAREHOUSES.forEach(w => {
+        visibleWarehouses().forEach(w => {
             const labelEl = document.createElement('div');
             labelEl.className = 'label-card';
             applyLabelVars(labelEl);
@@ -6312,6 +6434,7 @@ ${css}
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
         const isAdmin = currentUserRole === 'admin';
         document.getElementById('btn-manage-users').classList.toggle('hidden', !(isSupa && isAdmin));
+        document.getElementById('btn-manage-warehouses').classList.toggle('hidden', !(isSupa && isAdmin));
         document.getElementById('display-name-row').classList.toggle('hidden', !isSupa);
         // Storage/database usage stats are admin-only — editors/maintainers/viewers don't need
         // (or, per the requested role model, shouldn't see) account-wide quota info.
