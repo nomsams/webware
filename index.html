@@ -178,6 +178,37 @@
         .map-cell { aspect-ratio: 1; background: var(--card-bg); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: var(--text-muted); font-weight: bold; transition: all 0.3s; }
         .map-cell.active { background: var(--primary); color: white; box-shadow: 0 0 12px rgba(37, 99, 235, 0.6); transform: scale(1.1); z-index: 2; }
 
+        /* --- LAYOUT DESIGNER (Warehouse page, draw mode) --- */
+        .zone-draw-grid {
+            position: relative; margin-top: 0.75rem; border-radius: 10px; overflow: hidden;
+            background-color: var(--card-bg);
+            background-image: linear-gradient(to right, var(--border) 1px, transparent 1px), linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+            border: 1px solid var(--border); user-select: none; cursor: crosshair;
+        }
+        .zone-block {
+            position: absolute; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+            font-weight: 800; font-size: 1rem; color: white; background: var(--primary); opacity: 0.85;
+            cursor: pointer; box-sizing: border-box; border: 2px solid transparent; transition: opacity 0.15s;
+        }
+        .zone-block:hover { opacity: 1; }
+        .zone-block.selected { border-color: white; box-shadow: 0 0 0 2px var(--primary); z-index: 2; }
+        .zone-draw-ghost {
+            position: absolute; border: 2px dashed var(--primary); background: var(--focus-ring);
+            box-sizing: border-box; pointer-events: none; border-radius: 6px;
+        }
+        .zone-mode-toggle button.active { background: var(--primary); color: white; }
+        .zone-manual-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+        .zone-manual-row input { margin: 0; }
+        .zone-manual-row input[data-field="zone"] { width: 56px; text-align: center; text-transform: uppercase; }
+        .zone-manual-row input[data-field="label"] { flex: 1; min-width: 120px; }
+        .zone-manual-row input[data-field="max_aisle"], .zone-manual-row input[data-field="max_rack"],
+        .zone-manual-row input[data-field="max_level"], .zone-manual-row input[data-field="max_bin"] { width: 64px; text-align: center; }
+
+        .rack-image-card { position: relative; border-radius: 10px; overflow: hidden; background: var(--card-bg); border: 1px solid var(--border); }
+        .rack-image-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+        .rack-image-card .rack-image-label { padding: 6px 8px; font-size: 0.78rem; color: var(--text-muted); }
+        .rack-image-card .rack-image-remove { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: white; cursor: pointer; display: grid; place-items: center; }
+
         /* --- PREVIEW & LABELS (Screen) --- */
         .preview-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); margin-top: 1rem; background: #94a3b8; padding: 1.5rem; border-radius: 12px; overflow-x: auto; max-height: 60vh; overflow-y: auto; }
         [data-theme="dark"] .preview-grid { background: #0f172a; border: 1px inset #334155; }
@@ -673,6 +704,49 @@
 
         <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Items from this manufacturer</strong>
         <div id="manufacturer-detail-items" style="margin-top:0.75rem;"></div>
+    </section>
+
+    <!-- View 3c: Warehouse detail — contact info, the Layout Designer, and rack/aisle photos -->
+    <section id="warehouse-view" class="card hidden">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
+            <button class="secondary" onclick="showListView('items')" style="flex-shrink:0;">← Back</button>
+            <button class="secondary hidden" id="btn-edit-warehouse-view" onclick="openWarehouseEditModal()" style="flex-shrink:0;">✏️ Edit Details</button>
+        </div>
+
+        <h1 id="warehouse-detail-name" style="font-size:1.6rem; color:var(--primary); margin-bottom:0.5rem;">Warehouse Name</h1>
+        <div id="warehouse-detail-info" style="margin-bottom:1.5rem;"></div>
+
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:0.5rem;">
+            <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">📐 Layout Designer</strong>
+            <span class="zone-mode-toggle hidden" id="zone-mode-toggle" style="display:flex; gap:6px;">
+                <button class="secondary active" id="btn-zone-mode-draw" onclick="setZoneDesignerMode('draw')" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🖊️ Draw</button>
+                <button class="secondary" id="btn-zone-mode-manual" onclick="setZoneDesignerMode('manual')" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">⌨️ Manual</button>
+            </span>
+            <button class="secondary hidden" id="btn-save-zone-layout" onclick="saveZoneLayout()" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem; margin-left:auto;">💾 Save Layout</button>
+        </div>
+        <p id="zone-designer-hint" style="color:var(--text-muted); font-size:0.82rem; margin-bottom:0.5rem;"></p>
+
+        <div id="zone-draw-mode">
+            <div class="zone-draw-grid" id="zone-draw-grid"></div>
+            <div id="zone-inspector" class="hidden" style="margin-top:1rem; padding:1rem; background:var(--primary-light); border-radius:10px; border:1px solid var(--border);"></div>
+        </div>
+        <div id="zone-manual-mode" class="hidden">
+            <div id="zone-manual-rows"></div>
+            <button class="secondary" id="btn-add-zone-manual" onclick="addManualZoneRow()" style="margin-top:6px;">+ Add Zone</button>
+        </div>
+
+        <div style="margin-top:2rem;">
+            <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">📷 Aisle / Rack Photos</strong>
+            <p style="color:var(--text-muted); font-size:0.82rem; margin:0.35rem 0 0.75rem;">Attach a photo to a specific zone/aisle/rack — a future update will let you overlay a grid on it and map Level/Bin positions directly onto the image.</p>
+            <div id="rack-image-upload-form" class="hidden" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:1rem;">
+                <select id="rack-image-zone" style="width:auto; margin:0;"></select>
+                <input type="number" id="rack-image-aisle" placeholder="Aisle" min="1" style="width:80px; margin:0;">
+                <input type="number" id="rack-image-rack" placeholder="Rack" min="1" style="width:80px; margin:0;">
+                <button class="secondary" onclick="document.getElementById('rack-image-file-input').click()">📷 Upload Photo</button>
+                <input type="file" id="rack-image-file-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" class="hidden" onchange="handleRackImageUpload(event)" aria-label="Upload rack photo">
+            </div>
+            <div id="rack-image-gallery" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:10px;"></div>
+        </div>
     </section>
 
     <!-- View 3d: Pack Order — a session-local pick list built by selecting items from anywhere
@@ -1981,7 +2055,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function switchView(viewId) {
-        ['auth-view','list-view','item-view','kit-view','manufacturer-view','pack-order-view','preview-view','settings-view'].forEach(v => {
+        ['auth-view','list-view','item-view','kit-view','manufacturer-view','warehouse-view','pack-order-view','preview-view','settings-view'].forEach(v => {
             document.getElementById(v).classList.add('hidden');
         });
         document.getElementById(viewId).classList.remove('hidden');
@@ -2371,7 +2445,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const meta = getWarehouseMeta(currentWarehouseId);
         document.getElementById('wh-meta-container').innerHTML =
             `<div class="wh-meta" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                <span>🏬 <strong>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address || '—'}${meta.phone ? ` &nbsp;·&nbsp; ${meta.phone}` : ''}${meta.contactEmail ? ` &nbsp;·&nbsp; ${meta.contactEmail}` : ''}</span>
+                <span>🏬 <strong${meta.mode === 'supabase' ? ` role="button" tabindex="0" style="cursor:pointer; text-decoration:underline;" onclick="openWarehouseView()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openWarehouseView();}"` : ''}>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address || '—'}${meta.phone ? ` &nbsp;·&nbsp; ${meta.phone}` : ''}${meta.contactEmail ? ` &nbsp;·&nbsp; ${meta.contactEmail}` : ''}</span>
                 ${meta.mode === 'supabase' && currentUserRole === 'admin' ? `<button class="secondary" onclick="openWarehouseEditModal()" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">✏️ Edit Warehouse</button>` : ''}
                 <label for="warehouse-switcher" style="margin:0; font-size:0.85rem; color:var(--text-muted);">Switch:</label>
                 <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" style="width:auto; min-width:160px; margin:0; padding:6px 10px; font-size:0.85rem;">${WAREHOUSES.map(w => `<option value="${w.l}" ${w.l === currentWarehouseId ? 'selected' : ''}>${w.name}</option>`).join('')}</select>
@@ -2828,6 +2902,334 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         closeWarehouseEditModal();
         showToast("Warehouse saved.", "success");
         renderWarehouseMeta();
+        if (activeView === 'warehouse-view') renderWarehouseDetailInfo();
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  WAREHOUSE PAGE — details + Layout Designer + rack/aisle photos
+    // ════════════════════════════════════════════════════════════════════════
+    const ZONE_GRID_COLS = 24, ZONE_GRID_ROWS = 14, ZONE_CELL_SIZE = 28;
+    var zoneDesignerMode = 'draw';
+    var selectedZoneLetter = null;
+    var zoneDrawStart = null;
+    var globalRackImages = [];
+
+    async function openWarehouseView() {
+        if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') return;
+        switchView('warehouse-view');
+        renderWarehouseDetailInfo();
+        document.getElementById('btn-edit-warehouse-view').classList.toggle('hidden', currentUserRole !== 'admin');
+        document.getElementById('zone-mode-toggle').classList.toggle('hidden', currentUserRole !== 'admin');
+        document.getElementById('btn-save-zone-layout').classList.toggle('hidden', currentUserRole !== 'admin');
+        document.getElementById('btn-add-zone-manual').classList.toggle('hidden', currentUserRole !== 'admin');
+        selectedZoneLetter = null;
+        setZoneDesignerMode('draw');
+        if (!globalRackImages.length) await supabaseLoadRackImages(currentWarehouseId);
+        renderRackImageForm();
+        renderRackImageGallery();
+    }
+
+    function renderWarehouseDetailInfo() {
+        const meta = getWarehouseMeta(currentWarehouseId);
+        document.getElementById('warehouse-detail-name').innerText = meta.name;
+        const field = (label, val) => `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:160px;flex-shrink:0;color:var(--text-muted);">${label}:</span><span>${val || '<span style="color:var(--text-muted)">N/A</span>'}</span></div>`;
+        document.getElementById('warehouse-detail-info').innerHTML =
+            field('Warehouse ID', escapeHtml(meta.l)) +
+            field('Address', meta.address ? escapeHtml(meta.address) : '') +
+            field('Phone', meta.phone ? escapeHtml(meta.phone) : '') +
+            field('Contact Email', meta.contactEmail ? escapeHtml(meta.contactEmail) : '');
+    }
+
+    // ── Layout Designer: draw mode <-> manual mode, sharing globalWarehouseZones as the single
+    // source of truth so switching modes never loses an edit made in the other one. ──
+    function setZoneDesignerMode(mode) {
+        zoneDesignerMode = mode;
+        document.getElementById('btn-zone-mode-draw').classList.toggle('active', mode === 'draw');
+        document.getElementById('btn-zone-mode-manual').classList.toggle('active', mode === 'manual');
+        document.getElementById('zone-draw-mode').classList.toggle('hidden', mode !== 'draw');
+        document.getElementById('zone-manual-mode').classList.toggle('hidden', mode !== 'manual');
+        document.getElementById('zone-designer-hint').textContent = mode === 'draw'
+            ? "Drag on the grid to draw a new zone — it's labeled automatically (A, B, C…). Click an existing zone to edit its levels/bins or delete it."
+            : "Type zone details directly. New rows get the next unused letter, but you can change it.";
+        if (mode === 'draw') renderZoneDrawGrid(); else renderZoneManualRows();
+    }
+
+    // Next unused letter in sequence: A..Z, then AA, AB... (extremely unlikely to matter beyond
+    // single letters for a real warehouse, but doesn't silently break if it ever does).
+    function nextZoneLetter(zones) {
+        const used = new Set(zones.map(z => z.zone));
+        for (let n = 1; n <= 2; n++) {
+            const max = Math.pow(26, n);
+            for (let i = 0; i < max; i++) {
+                let s = '', x = i;
+                for (let k = 0; k < n; k++) { s = String.fromCharCode(65 + (x % 26)) + s; x = Math.floor(x / 26); }
+                if (!used.has(s)) return s;
+            }
+        }
+        return 'Z' + Date.now(); // absurd fallback, never realistically reached
+    }
+
+    function renderZoneDrawGrid() {
+        const grid = document.getElementById('zone-draw-grid');
+        grid.style.width = (ZONE_GRID_COLS * ZONE_CELL_SIZE) + 'px';
+        grid.style.height = (ZONE_GRID_ROWS * ZONE_CELL_SIZE) + 'px';
+        grid.style.backgroundSize = `${ZONE_CELL_SIZE}px ${ZONE_CELL_SIZE}px`;
+        grid.innerHTML = '';
+        globalWarehouseZones.forEach(z => {
+            if (z.grid_col == null || z.grid_row == null) return; // manually-added zone, not yet placed
+            const block = document.createElement('div');
+            block.className = 'zone-block' + (z.zone === selectedZoneLetter ? ' selected' : '');
+            block.style.left = (z.grid_col * ZONE_CELL_SIZE) + 'px';
+            block.style.top = (z.grid_row * ZONE_CELL_SIZE) + 'px';
+            block.style.width = ((z.max_aisle || 1) * ZONE_CELL_SIZE) + 'px';
+            block.style.height = ((z.max_rack || 1) * ZONE_CELL_SIZE) + 'px';
+            block.innerText = z.zone;
+            block.title = `Zone ${z.zone}${z.label ? ' — ' + z.label : ''} (${z.max_aisle || 1} aisles × ${z.max_rack || 1} racks)`;
+            block.onclick = (e) => { e.stopPropagation(); selectZoneBlock(z.zone); };
+            grid.appendChild(block);
+        });
+
+        if (currentUserRole !== 'admin') { grid.onmousedown = null; grid.onmousemove = null; return; } // read-only — no drag-to-draw
+        grid.onmousedown = (e) => {
+            if (e.target !== grid) return; // clicked an existing block, not empty space
+            const rect = grid.getBoundingClientRect();
+            zoneDrawStart = {
+                col: Math.max(0, Math.min(ZONE_GRID_COLS - 1, Math.floor((e.clientX - rect.left) / ZONE_CELL_SIZE))),
+                row: Math.max(0, Math.min(ZONE_GRID_ROWS - 1, Math.floor((e.clientY - rect.top) / ZONE_CELL_SIZE)))
+            };
+            const ghost = document.createElement('div');
+            ghost.className = 'zone-draw-ghost';
+            ghost.id = 'zone-draw-ghost';
+            grid.appendChild(ghost);
+            updateGhostRect(zoneDrawStart, zoneDrawStart);
+        };
+        grid.onmousemove = (e) => {
+            if (!zoneDrawStart) return;
+            const rect = grid.getBoundingClientRect();
+            const col = Math.max(0, Math.min(ZONE_GRID_COLS - 1, Math.floor((e.clientX - rect.left) / ZONE_CELL_SIZE)));
+            const row = Math.max(0, Math.min(ZONE_GRID_ROWS - 1, Math.floor((e.clientY - rect.top) / ZONE_CELL_SIZE)));
+            updateGhostRect(zoneDrawStart, { col, row });
+        };
+        window.addEventListener('mouseup', finishZoneDraw);
+    }
+
+    function updateGhostRect(start, end) {
+        const ghost = document.getElementById('zone-draw-ghost');
+        if (!ghost) return;
+        const col = Math.min(start.col, end.col), row = Math.min(start.row, end.row);
+        const w = Math.abs(end.col - start.col) + 1, h = Math.abs(end.row - start.row) + 1;
+        ghost.style.left = (col * ZONE_CELL_SIZE) + 'px';
+        ghost.style.top = (row * ZONE_CELL_SIZE) + 'px';
+        ghost.style.width = (w * ZONE_CELL_SIZE) + 'px';
+        ghost.style.height = (h * ZONE_CELL_SIZE) + 'px';
+        ghost.dataset.col = col; ghost.dataset.row = row; ghost.dataset.w = w; ghost.dataset.h = h;
+    }
+
+    function finishZoneDraw(e) {
+        if (!zoneDrawStart) return;
+        window.removeEventListener('mouseup', finishZoneDraw);
+        const ghost = document.getElementById('zone-draw-ghost');
+        zoneDrawStart = null;
+        if (!ghost) return;
+        const { col, row, w, h } = ghost.dataset;
+        ghost.remove();
+        const zone = nextZoneLetter(globalWarehouseZones);
+        globalWarehouseZones.push({
+            warehouse_id: currentWarehouseId, zone, label: '',
+            max_aisle: Number(w), max_rack: Number(h), max_level: 1, max_bin: 1,
+            grid_col: Number(col), grid_row: Number(row)
+        });
+        selectedZoneLetter = zone;
+        renderZoneDrawGrid();
+        renderZoneInspector();
+    }
+
+    function selectZoneBlock(zone) {
+        selectedZoneLetter = zone;
+        renderZoneDrawGrid();
+        renderZoneInspector();
+    }
+
+    function renderZoneInspector() {
+        const box = document.getElementById('zone-inspector');
+        const z = globalWarehouseZones.find(z => z.zone === selectedZoneLetter);
+        if (!z) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+        box.classList.remove('hidden');
+        const readOnly = currentUserRole !== 'admin';
+        box.innerHTML = `
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:0.75rem;">
+                <strong style="font-size:1.1rem;">Zone ${escapeHtml(z.zone)}</strong>
+                <span style="color:var(--text-muted); font-size:0.85rem;">${z.max_aisle} aisles × ${z.max_rack} racks (drawn size)</span>
+                ${readOnly ? '' : `<button class="secondary" onclick="deleteSelectedZone()" style="margin-left:auto; color:var(--danger); padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🗑️ Delete Zone</button>`}
+            </div>
+            <label class="modal-label" for="zone-inspector-label">Label</label>
+            <input type="text" id="zone-inspector-label" value="${escapeHtml(z.label || '')}" placeholder="e.g. Hydraulics section" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('label', this.value)">
+            <div style="display:flex; gap:12px;">
+                <div style="flex:1;">
+                    <label class="modal-label" for="zone-inspector-level">Levels (shelf tiers)</label>
+                    <input type="number" id="zone-inspector-level" min="1" value="${z.max_level || 1}" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('max_level', this.value)">
+                </div>
+                <div style="flex:1;">
+                    <label class="modal-label" for="zone-inspector-bin">Bins per level</label>
+                    <input type="number" id="zone-inspector-bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('max_bin', this.value)">
+                </div>
+            </div>`;
+    }
+
+    function updateSelectedZoneField(field, value) {
+        const z = globalWarehouseZones.find(z => z.zone === selectedZoneLetter);
+        if (!z) return;
+        z[field] = (field === 'label') ? value : (parseInt(value, 10) || 1);
+    }
+
+    function deleteSelectedZone() {
+        if (!selectedZoneLetter) return;
+        if (!confirm(`Delete Zone ${selectedZoneLetter}? This only removes the layout entry — items already using this zone in their bin location code are untouched.`)) return;
+        globalWarehouseZones = globalWarehouseZones.filter(z => z.zone !== selectedZoneLetter);
+        selectedZoneLetter = null;
+        renderZoneDrawGrid();
+        renderZoneInspector();
+        renderZoneManualRows();
+    }
+
+    // ── Manual mode: same globalWarehouseZones array, edited as a plain table instead of drawn. ──
+    function renderZoneManualRows() {
+        const container = document.getElementById('zone-manual-rows');
+        const readOnly = currentUserRole !== 'admin';
+        container.innerHTML = globalWarehouseZones.map((z, idx) => `
+            <div class="zone-manual-row">
+                <input type="text" data-field="zone" value="${escapeHtml(z.zone)}" maxlength="2" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'zone', this.value.toUpperCase())">
+                <input type="text" data-field="label" placeholder="Label (optional)" value="${escapeHtml(z.label || '')}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'label', this.value)">
+                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Aisles <input type="number" data-field="max_aisle" min="1" value="${z.max_aisle || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_aisle', this.value)"></label>
+                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Racks <input type="number" data-field="max_rack" min="1" value="${z.max_rack || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_rack', this.value)"></label>
+                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Levels <input type="number" data-field="max_level" min="1" value="${z.max_level || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_level', this.value)"></label>
+                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Bins <input type="number" data-field="max_bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_bin', this.value)"></label>
+                ${readOnly ? '' : `<button class="secondary" onclick="removeManualZoneRow(${idx})" style="color:var(--danger); padding:0.35rem 0.6rem; min-height:auto;">✕</button>`}
+            </div>`).join('') || `<p style="color:var(--text-muted); font-size:0.85rem;">No zones defined yet.</p>`;
+    }
+
+    function updateManualZoneField(idx, field, value) {
+        const z = globalWarehouseZones[idx];
+        if (!z) return;
+        if (field === 'zone' || field === 'label') z[field] = value;
+        else z[field] = parseInt(value, 10) || 1;
+    }
+
+    function addManualZoneRow() {
+        const zone = nextZoneLetter(globalWarehouseZones);
+        // Stack new manually-added zones below whatever's already placed on the draw grid, so
+        // switching to Draw mode later doesn't show them overlapping.
+        const row = globalWarehouseZones.reduce((max, z) => Math.max(max, (z.grid_row || 0) + (z.max_rack || 1)), 0);
+        globalWarehouseZones.push({ warehouse_id: currentWarehouseId, zone, label: '', max_aisle: 1, max_rack: 1, max_level: 1, max_bin: 1, grid_col: 0, grid_row: row });
+        renderZoneManualRows();
+    }
+
+    function removeManualZoneRow(idx) {
+        globalWarehouseZones.splice(idx, 1);
+        renderZoneManualRows();
+    }
+
+    async function saveZoneLayout() {
+        if (currentUserRole !== 'admin') return;
+        const letters = globalWarehouseZones.map(z => z.zone.trim().toUpperCase()).filter(Boolean);
+        if (new Set(letters).size !== letters.length) { showToast("Zone letters must be unique.", "error"); return; }
+        if (letters.length !== globalWarehouseZones.length) { showToast("Every zone needs a letter.", "error"); return; }
+
+        const rows = globalWarehouseZones.map(z => ({
+            warehouse_id: currentWarehouseId, zone: z.zone.trim().toUpperCase(), label: z.label || null,
+            max_aisle: z.max_aisle || 1, max_rack: z.max_rack || 1, max_level: z.max_level || 1, max_bin: z.max_bin || 1,
+            grid_col: z.grid_col ?? null, grid_row: z.grid_row ?? null
+        }));
+
+        // Small admin-configured table, rewritten wholesale rather than diffed — simplest correct
+        // option given how infrequently this changes and how few rows it ever has.
+        const del = await sb.from('warehouse_zones').delete().eq('warehouse_id', currentWarehouseId);
+        if (del.error) { showToast("Save blocked: " + del.error.message, "error"); return; }
+        if (rows.length) {
+            const ins = await sb.from('warehouse_zones').insert(rows).select();
+            if (ins.error) { showToast("Save blocked: " + ins.error.message, "error"); return; }
+            globalWarehouseZones = ins.data;
+        } else {
+            globalWarehouseZones = [];
+        }
+        selectedZoneLetter = null;
+        showToast("Layout saved.", "success");
+        renderZoneDrawGrid();
+        renderZoneInspector();
+        renderZoneManualRows();
+        renderRackImageForm();
+    }
+
+    // ── Rack / aisle photos (warehouse_rack_images) ──
+    async function supabaseLoadRackImages(wid) {
+        const { data, error } = await sb.from('warehouse_rack_images').select('*').eq('warehouse_id', wid).order('zone').order('aisle').order('rack');
+        if (error) { console.error("Rack images load failed:", error); globalRackImages = []; return; }
+        globalRackImages = data || [];
+    }
+
+    function renderRackImageForm() {
+        const zones = getAvailableZones();
+        document.getElementById('rack-image-upload-form').classList.toggle('hidden', !zones.length || currentUserRole === 'viewer');
+        const select = document.getElementById('rack-image-zone');
+        select.innerHTML = zones.map(z => `<option value="${escapeHtml(z)}">Zone ${escapeHtml(z)}</option>`).join('');
+    }
+
+    function renderRackImageGallery() {
+        const gallery = document.getElementById('rack-image-gallery');
+        if (!globalRackImages.length) { gallery.innerHTML = `<p style="color:var(--text-muted); font-size:0.85rem;">No photos uploaded yet.</p>`; return; }
+        gallery.innerHTML = globalRackImages.map(img => `
+            <div class="rack-image-card">
+                <img src="${img.image_url}" alt="Zone ${escapeHtml(img.zone)} Aisle ${img.aisle} Rack ${img.rack}" onclick="openLightbox('${img.image_url}')" style="cursor:pointer;">
+                <div class="rack-image-label">Zone ${escapeHtml(img.zone)} · Aisle ${img.aisle} · Rack ${img.rack}</div>
+                ${currentUserRole !== 'viewer' ? `<button class="rack-image-remove" onclick="removeRackImage(${img.id})" aria-label="Remove photo">✕</button>` : ''}
+            </div>`).join('');
+    }
+
+    async function handleRackImageUpload(event) {
+        const file = event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        const zone = document.getElementById('rack-image-zone').value;
+        const aisle = parseInt(document.getElementById('rack-image-aisle').value, 10);
+        const rack = parseInt(document.getElementById('rack-image-rack').value, 10);
+        if (!zone || !aisle || !rack) { showToast("Pick a zone and enter an aisle and rack number first.", "error"); return; }
+
+        try {
+            const bmp = await createImageBitmap(file);
+            const blob = await drawToBlob(bmp, 1600, 0.85);
+            const path = `${currentWarehouseId}/${zone}-${aisle}-${rack}.jpg`;
+            const up = await sb.storage.from('rack-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+            if (up.error) throw up.error;
+            const url = sb.storage.from('rack-images').getPublicUrl(path).data.publicUrl + '?v=' + Date.now();
+            const { data, error } = await sb.from('warehouse_rack_images')
+                .upsert({ warehouse_id: currentWarehouseId, zone, aisle, rack, image_url: url }, { onConflict: 'warehouse_id,zone,aisle,rack' })
+                .select().single();
+            if (error) throw error;
+            const idx = globalRackImages.findIndex(i => i.id === data.id);
+            if (idx >= 0) globalRackImages[idx] = data; else globalRackImages.push(data);
+            renderRackImageGallery();
+            showToast("Photo uploaded.", "success");
+        } catch (e) {
+            console.error("Rack image upload failed:", e);
+            showToast("Could not upload photo: " + e.message, "error");
+        }
+    }
+
+    async function removeRackImage(id) {
+        const img = globalRackImages.find(i => i.id === id);
+        if (!img || !confirm("Remove this photo?")) return;
+        try {
+            const path = `${img.warehouse_id}/${img.zone}-${img.aisle}-${img.rack}.jpg`;
+            await sb.storage.from('rack-images').remove([path]);
+            const { error } = await sb.from('warehouse_rack_images').delete().eq('id', id);
+            if (error) throw error;
+            globalRackImages = globalRackImages.filter(i => i.id !== id);
+            renderRackImageGallery();
+            showToast("Photo removed.", "success");
+        } catch (e) {
+            console.error("Rack image removal failed:", e);
+            showToast("Could not remove photo: " + e.message, "error");
+        }
     }
 
     async function handleManufacturerLogoUpload(event) {
