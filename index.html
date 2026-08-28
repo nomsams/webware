@@ -3286,9 +3286,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const { col, row, w, h } = ghost.dataset;
         ghost.remove();
         const zone = nextZoneLetter(globalWarehouseZones);
+        // Bays vs Depth isn't which side you dragged as "width" vs "height" — a rack is at most 2
+        // deep (standalone, or back-to-back), so whichever dragged side is longer is always Bays
+        // (the walking run) and the shorter one is Depth, however the box was actually dragged.
         globalWarehouseZones.push({
             warehouse_id: currentWarehouseId, zone, label: '',
-            max_aisle: Number(w), max_rack: Number(h), max_level: 1, max_bin: 1,
+            max_aisle: Math.max(Number(w), Number(h)), max_rack: Math.min(Number(w), Number(h)), max_level: 1, max_bin: 1,
             grid_col: Number(col), grid_row: Number(row)
         });
         selectedZoneLetter = zone;
@@ -3374,7 +3377,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             window.removeEventListener('mouseup', up);
             if (moved) {
                 const z = globalWarehouseZones.find(zz => zz.zone === zone);
-                if (z) { z.grid_col = pending.col; z.grid_row = pending.row; z.max_aisle = pending.aisle; z.max_rack = pending.rack; }
+                // Same longer-side-is-Bays rule as a fresh draw (see finishZoneDraw) — resizing
+                // past the other side re-normalizes which is which rather than letting Depth grow
+                // past 2-ish just because you dragged that edge further.
+                if (z) { z.grid_col = pending.col; z.grid_row = pending.row; z.max_aisle = Math.max(pending.aisle, pending.rack); z.max_rack = Math.min(pending.aisle, pending.rack); }
                 renderZoneDrawGrid();
                 if (selectedZoneLetter === zone) renderZoneInspector();
                 pushZoneHistory(true);
