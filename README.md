@@ -50,8 +50,9 @@ A self-contained, single-file inventory management web app with encrypted storag
 | `itemnumber2` | No | Secondary item number |
 | `itemnumber3` | No | Internal/third item number |
 | `Numberofitems` | No | Stock quantity |
-| `Inventorylocation` | No | Location within warehouse |
+| `Inventorylocation` | No | Location within warehouse (free text) |
 | `MapPosition` | No | Warehouse locator grid cell, `A1`–`F6` (column letter + row number) |
+| `LocationCode` | No | Bin/picking location, `Zone-Aisle-Rack-Level-Bin` (e.g. `A-03-2-4-07`) — see [Bin Location Codes](#bin-location-codes) |
 | `Comments` | No | Free text notes |
 | `images` | No | Semicolon-separated filenames in `assets/` |
 
@@ -61,6 +62,27 @@ A self-contained, single-file inventory management web app with encrypted storag
 | `Spare-part-kit name` | Yes | Kit display name |
 | `kitnumber` | No | Optional kit number |
 | `BTK000001`... | No | Quantity of each BTK in this kit (empty = not included) |
+
+## Bin Location Codes
+
+A `LocationCode` (also settable via quick-edit or the Add/Edit modal — "Bin Location Code") pins an item to one physical slot for stocktaking ("inventering") and pick walks, more granular than `MapPosition`'s coarse locator grid:
+
+```
+A  -  03  -  2  -  4  -  07
+Zone  Aisle  Rack  Level  Bin
+```
+
+- **Zone** (1–2 letters) — broad area or building section (e.g. `A`, `B`). Assigned per your facility's layout; no inherent order beyond alphabetical convenience.
+- **Aisle** (2 digits, zero-padded) — the walking/forklift lane between racks. **Aisle `01` is the one nearest the exit/loading dock**, increasing as you move further in.
+- **Rack / Bay** (1–2 digits) — the upright section within that aisle. Numbered from the same end as Aisle `01`, for consistency — Rack `1` nearest the exit end of its aisle.
+- **Level / Shelf** (1–2 digits) — vertical tier. **Level `1` is the one closest to the ground**, counting upward.
+- **Bin / Slot** (2 digits, zero-padded) — the exact spot on that shelf. Numbered left-to-right when standing in the aisle facing the rack, with `01` nearest the main aisle/Aisle-`01` end.
+
+In short: **lower numbers are always closer to the ground or the exit.** That's a convention, not something the app enforces physically — pick a consistent direction for your building, mark it on the racking if it isn't obvious, and stay consistent. The app does enforce the *format* (`Zone-Aisle-Rack-Level-Bin`, e.g. `A-03-2-4-07`) via a regex on both the client and a Postgres `CHECK` constraint in Supabase mode; an item list can also be sorted by **Sort: Bin Location**, which walks items in this exact order (zone, then aisle, rack, level, bin) — items with no code sort last, since there's nowhere sensible to place them in a physical walk order.
+
+This is a separate field from `Inventorylocation` (older, free text — e.g. a shelf nickname) and `MapPosition` (the coarse 6×6 visual locator grid) — neither was removed, since both are already relied on. If you're standardizing going forward, `LocationCode` is the one built for actually walking the warehouse.
+
+**Same product, multiple bins or multiple warehouses:** the data model doesn't require a single item to live in one place. A duplicate `LocationCode`-bearing row (its own BTK, same `Manufacturer`/`itemnumber`, different bin and quantity) represents an overflow bin for a product already stocked elsewhere in the same warehouse — the existing BTK-collision duplicate check only fires on an actual repeated BTK, so two legitimately different bins for the same product don't trip it. The same reasoning extends across warehouses: a saved order still belongs to exactly one warehouse (pack orders are only ever sent from one at a time), so item lookup for an order never crosses warehouses — but if the same product exists elsewhere too, that's surfaced as an informational note rather than silently substituted (see `modules/order-parser.js`'s `elsewhere` field).
 
 ## QR Code System
 
@@ -130,6 +152,7 @@ Everything lives in the `public` schema with RLS enabled. Set up a fresh project
 | 6 | `schema_user_management.sql` | `list_profiles_with_email()`, `update_user_role()` |
 | 7 | `schema_display_names.sql` | `profiles.display_name`, `get_display_name()`, self-update policy |
 | 8 | `schema_orders.sql` | `orders`, `orders_number_seq` |
+| 9 | `schema_bin_location.sql` | `items.location_code` |
 
 `seed_items.sql` / `seed_kits.sql` are one-time data loads for the original Häny catalog, not schema — skip them for a fresh dataset.
 
@@ -137,7 +160,7 @@ Everything lives in the `public` schema with RLS enabled. Set up a fresh project
 
 - **`warehouses`** — `l` (text, PK, matches the app's warehouse ID e.g. `"1"`), `name`, `address`. Public-read to any authenticated user.
 - **`profiles`** — one row per auth account. `id` (uuid, PK = `auth.users.id`), `role` (`viewer`/`editor`/`admin`), `warehouse_id` (FK → `warehouses.l`), `display_name` (text, optional, self-settable only), `created_at`. A user may read their own row and update only its `display_name` (column-scoped grant — they can never touch their own `role`).
-- **`items`** — `btk` (text, PK), `warehouse_id` (FK), `manufacturer` (text, denormalized display copy kept in sync with `manufacturer_id`), `manufacturer_id` (FK → `manufacturers.id`, nullable), `itemnumber`, `itemname_en`, `itemname_sv`, `itemnumber2`, `itemnumber3`, `numberofitems` (int), `inventorylocation`, `map_position` (text, `A1`–`F6`), `comments`, `images` (legacy, unused for Supabase-mode items), `image_full_url`, `image_thumb_url`, `updated_at`/`updated_by` (set by a trigger on every write).
+- **`items`** — `btk` (text, PK), `warehouse_id` (FK), `manufacturer` (text, denormalized display copy kept in sync with `manufacturer_id`), `manufacturer_id` (FK → `manufacturers.id`, nullable), `itemnumber`, `itemname_en`, `itemname_sv`, `itemnumber2`, `itemnumber3`, `numberofitems` (int), `inventorylocation`, `map_position` (text, `A1`–`F6`), `location_code` (text, `Zone-Aisle-Rack-Level-Bin`, CHECK-constrained format — see [Bin Location Codes](#bin-location-codes)), `comments`, `images` (legacy, unused for Supabase-mode items), `image_full_url`, `image_thumb_url`, `updated_at`/`updated_by` (set by a trigger on every write).
 - **`kits`** — `id` (bigint identity, PK), `kitnumber` (text, nullable — several kits can legitimately share `null`, so the app never treats it alone as a unique key), `name`, `warehouse_id` (FK).
 - **`kit_items`** — `kit_id` (FK → `kits.id`), `btk` (FK → `items.btk`), `quantity` (int); composite PK `(kit_id, btk)`.
 - **`manufacturers`** — `id` (bigint identity, PK), `name` (text, unique), `description`, `contact_name`, `email`, `logo_url`, `created_at`. Global, not warehouse-scoped — the same supplier can ship to multiple warehouses.

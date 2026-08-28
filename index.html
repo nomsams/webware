@@ -448,6 +448,9 @@
         <label class="modal-label" for="ai-mapposition">Map Position (locator grid, A1–F6)</label>
         <input type="text" id="ai-mapposition" placeholder="e.g. A3" maxlength="2" style="text-transform:uppercase;">
 
+        <label class="modal-label" for="ai-locationcode">Bin Location Code (Zone-Aisle-Rack-Level-Bin)</label>
+        <input type="text" id="ai-locationcode" placeholder="e.g. A-03-2-4-07" style="text-transform:uppercase;">
+
         <label class="modal-label" for="ai-comments">Comments</label>
         <textarea id="ai-comments" placeholder="Optional notes..."></textarea>
 
@@ -537,6 +540,7 @@
                     <option value="name">Sort: Name (A–Z)</option>
                     <option value="manufacturer">Sort: Manufacturer</option>
                     <option value="btk">Sort: BTK Number</option>
+                    <option value="location">Sort: Bin Location (for walking the floor)</option>
                 </select>
                 <select id="manufacturer-filter" onchange="onManufacturerFilterChange()" style="margin: 0; width: auto;">
                     <option value="">All Manufacturers</option>
@@ -592,7 +596,7 @@
 
         <p id="quick-edit-hint" class="hidden" style="color:var(--text-muted); font-size:0.82rem; margin:-0.5rem 0 0.75rem;">💡 Double-click below to quick-edit this item</p>
 
-        <div id="detail-content" ondblclick="enterQuickEdit()" style="margin-top: 1rem; line-height: 1.8; font-size: 1.05rem;"></div>
+        <div id="detail-content" onmousedown="if(event.detail > 1) event.preventDefault()" ondblclick="enterQuickEdit()" style="margin-top: 1rem; line-height: 1.8; font-size: 1.05rem;"></div>
 
         <div id="img-add-controls-bottom" class="hidden" style="margin:1.5rem 0 1rem;"></div>
 
@@ -1104,7 +1108,7 @@
     // ════════════════════════════════════════════════════════════════════════
     const COLUMNS_B = [
         'Manufacturer', 'BTKnumber', 'itemnumber', 'itemname(english)', 'itemname(swedish)',
-        'itemnumber2', 'itemnumber3', 'Numberofitems', 'Inventorylocation', 'MapPosition', 'Comments', 'images'
+        'itemnumber2', 'itemnumber3', 'Numberofitems', 'Inventorylocation', 'MapPosition', 'LocationCode', 'Comments', 'images'
     ];
 
     // CSV C — Warehouse lookup metadata (non-secret, embedded for offline UX)
@@ -1171,6 +1175,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             Numberofitems: String(row.numberofitems ?? '0'),
             Inventorylocation: row.inventorylocation || 'None',
             MapPosition: row.map_position || 'None',
+            LocationCode: row.location_code || 'None',
             Comments: row.comments || 'None',
             images: row.images || '', // legacy static-mode field, unused for Supabase-mode items now
             imageFullUrl: row.image_full_url || '',
@@ -2420,6 +2425,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (sortBy === 'name') a.sort((x, y) => (x['itemname(english)'] || '').localeCompare(y['itemname(english)'] || ''));
         else if (sortBy === 'manufacturer') a.sort((x, y) => (x.Manufacturer || '').localeCompare(y.Manufacturer || '') || (x['itemname(english)'] || '').localeCompare(y['itemname(english)'] || ''));
         else if (sortBy === 'btk') a.sort((x, y) => (x.BTKnumber || '').localeCompare(y.BTKnumber || ''));
+        else if (sortBy === 'location') a.sort((x, y) => compareLocationCode(x.LocationCode, y.LocationCode));
         return a;
     }
 
@@ -3265,6 +3271,7 @@ th { background: #eee; }
             </div>
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Inventory Location:</span><span>${getStr(item.Inventorylocation)}</span></div>
             ${field('Map Position', item.MapPosition)}
+            <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Bin Location:</span><span>${getStr(item.LocationCode)}${describeLocationCode(item.LocationCode) ? ` <span style="color:var(--text-muted);">(${describeLocationCode(item.LocationCode)})</span>` : ''}</span></div>
             <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;"><span style="font-weight:600;color:var(--text-muted);">Comments:</span><div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div></div>
             ${field('Images', item.images)}
             ${item.updatedAt ? `<p style="color:var(--text-muted);font-size:0.8rem;margin-top:0.5rem;">Last updated: ${new Date(item.updatedAt).toLocaleString()}<span id="last-updated-by"></span></p>` : ''}`;
@@ -3351,6 +3358,8 @@ th { background: #eee; }
             <input type="text" id="qe-location" value="${escapeHtml(val(item.Inventorylocation))}">
             <label class="modal-label" for="qe-mapposition">Map Position (locator grid, A1–F6)</label>
             <input type="text" id="qe-mapposition" value="${escapeHtml(val(item.MapPosition))}" placeholder="e.g. A3" maxlength="2" style="text-transform:uppercase;">
+            <label class="modal-label" for="qe-locationcode">Bin Location Code (Zone-Aisle-Rack-Level-Bin)</label>
+            <input type="text" id="qe-locationcode" value="${escapeHtml(val(item.LocationCode))}" placeholder="e.g. A-03-2-4-07" style="text-transform:uppercase;">
             <label class="modal-label" for="qe-comments">Comments</label>
             <textarea id="qe-comments">${escapeHtml(val(item.Comments))}</textarea>`;
     }
@@ -3366,6 +3375,7 @@ th { background: #eee; }
             Numberofitems: document.getElementById('qe-qty').value.trim(),
             Inventorylocation: document.getElementById('qe-location').value.trim(),
             MapPosition: document.getElementById('qe-mapposition').value.trim().toUpperCase(),
+            LocationCode: document.getElementById('qe-locationcode').value.trim().toUpperCase(),
             Comments: document.getElementById('qe-comments').value.trim(),
         };
     }
@@ -3421,6 +3431,7 @@ th { background: #eee; }
             Numberofitems: fields.Numberofitems || '0',
             Inventorylocation: fields.Inventorylocation || 'None',
             MapPosition: fields.MapPosition || 'None',
+            LocationCode: fields.LocationCode || 'None',
             Comments: fields.Comments || 'None',
             images: existingImages
         };
@@ -3434,7 +3445,8 @@ th { background: #eee; }
                 itemname_en: updated['itemname(english)'], itemname_sv: updated['itemname(swedish)'],
                 itemnumber2: updated.itemnumber2, itemnumber3: updated.itemnumber3,
                 numberofitems: parseInt(updated.Numberofitems) || 0,
-                inventorylocation: updated.Inventorylocation, map_position: updated.MapPosition === 'None' ? null : updated.MapPosition, comments: updated.Comments
+                inventorylocation: updated.Inventorylocation, map_position: updated.MapPosition === 'None' ? null : updated.MapPosition,
+                location_code: updated.LocationCode === 'None' ? null : updated.LocationCode, comments: updated.Comments
             };
             const { error } = await sb.from('items').update(row).eq('btk', btk);
             if (error) return showToast("Save blocked: " + error.message, "error");
@@ -3535,6 +3547,35 @@ th { background: #eee; }
         return row * 6 + col;
     }
 
+    // Bin location code: Zone-Aisle-Rack-Level-Bin, e.g. "A-03-2-4-07" — see the "Bin Location
+    // Codes" section in README.md for the full numbering convention (Level 1 = floor level,
+    // Aisle/Rack/Bin 1 = nearest the exit). Zone is 1-2 letters; Aisle and Bin are always
+    // zero-padded to 2 digits; Rack and Level are 1-2 digits, unpadded. Returns null if the
+    // string doesn't match — callers should show it as invalid rather than silently drop it.
+    const LOCATION_CODE_RE = /^([A-Z]{1,2})-(\d{2})-(\d{1,2})-(\d{1,2})-(\d{2})$/;
+    function parseLocationCode(code) {
+        const m = String(code || '').trim().toUpperCase().match(LOCATION_CODE_RE);
+        if (!m) return null;
+        return { zone: m[1], aisle: Number(m[2]), rack: Number(m[3]), level: Number(m[4]), bin: Number(m[5]) };
+    }
+    function describeLocationCode(code) {
+        const p = parseLocationCode(code);
+        if (!p) return null;
+        return `Zone ${p.zone} · Aisle ${p.aisle} · Rack ${p.rack} · Level ${p.level} · Bin ${p.bin}`;
+    }
+
+    // Walking order for "Sort: Bin Location" — zone alphabetically, then aisle/rack/level/bin
+    // numerically, matching the numbering convention in README.md (so sorted order is the actual
+    // order you'd walk the floor). Items with no valid code sort after every located item, since
+    // there's nowhere sensible to place them in a physical walk order.
+    function compareLocationCode(a, b) {
+        const pa = parseLocationCode(a), pb = parseLocationCode(b);
+        if (!pa && !pb) return 0;
+        if (!pa) return 1;
+        if (!pb) return -1;
+        return pa.zone.localeCompare(pb.zone) || pa.aisle - pb.aisle || pa.rack - pb.rack || pa.level - pb.level || pa.bin - pb.bin;
+    }
+
     function renderLocatorMap(item) {
         const map = document.getElementById('locator-map');
         const caption = document.getElementById('locator-map-caption');
@@ -3563,7 +3604,7 @@ th { background: #eee; }
         editTargetBTK = null;
         document.getElementById('modal-title').innerText = '➕ Add New Item';
         document.getElementById('modal-notice').style.display = 'block';
-        ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-location','ai-mapposition','ai-comments']
+        ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-location','ai-mapposition','ai-locationcode','ai-comments']
             .forEach(id => { document.getElementById(id).value = ''; });
         document.getElementById('add-item-modal').classList.add('open');
     }
@@ -3587,6 +3628,7 @@ th { background: #eee; }
         document.getElementById('ai-qty').value = item.Numberofitems === 'None' ? '' : item.Numberofitems;
         document.getElementById('ai-location').value = item.Inventorylocation === 'None' ? '' : item.Inventorylocation;
         document.getElementById('ai-mapposition').value = item.MapPosition === 'None' ? '' : item.MapPosition;
+        document.getElementById('ai-locationcode').value = item.LocationCode === 'None' ? '' : item.LocationCode;
         document.getElementById('ai-comments').value = item.Comments === 'None' ? '' : item.Comments;
         document.getElementById('add-item-modal').classList.add('open');
     }
@@ -3614,6 +3656,7 @@ th { background: #eee; }
             'Numberofitems':     document.getElementById('ai-qty').value.trim() || '0',
             'Inventorylocation': document.getElementById('ai-location').value.trim() || 'None',
             'MapPosition':       document.getElementById('ai-mapposition').value.trim().toUpperCase() || 'None',
+            'LocationCode':      document.getElementById('ai-locationcode').value.trim().toUpperCase() || 'None',
             'Comments':          document.getElementById('ai-comments').value.trim() || 'None',
             'images':            existingImages
         };
@@ -3625,7 +3668,8 @@ th { background: #eee; }
                 itemname_en: newItem['itemname(english)'], itemname_sv: newItem['itemname(swedish)'],
                 itemnumber2: newItem.itemnumber2, itemnumber3: newItem.itemnumber3,
                 numberofitems: parseInt(newItem.Numberofitems) || 0,
-                inventorylocation: newItem.Inventorylocation, map_position: newItem.MapPosition === 'None' ? null : newItem.MapPosition, comments: newItem.Comments
+                inventorylocation: newItem.Inventorylocation, map_position: newItem.MapPosition === 'None' ? null : newItem.MapPosition,
+                location_code: newItem.LocationCode === 'None' ? null : newItem.LocationCode, comments: newItem.Comments
             };
             const req = (modalMode === 'edit')
                 ? sb.from('items').update(row).eq('btk', editTargetBTK)
