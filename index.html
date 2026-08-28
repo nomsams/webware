@@ -183,6 +183,8 @@
         .merge-cell { background: var(--card-bg); border: 2px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; min-width: 150px; max-width: 220px; vertical-align: middle; word-break: break-word; transition: all 0.15s; }
         .merge-cell:hover { border-color: var(--primary); }
         .merge-cell.selected { border-color: var(--primary); background: var(--primary-light); font-weight: 600; }
+        .merge-cell.disabled { opacity: 0.5; cursor: not-allowed; background: var(--border); font-style: italic; }
+        .merge-cell.disabled:hover { border-color: var(--border); }
         .merge-col-header { font-size: 0.72rem; color: var(--text-muted); font-weight: 700; padding: 4px 12px; white-space: nowrap; }
         .merge-custom-note { display: flex; align-items: center; gap: 8px; background: var(--primary-light); border-radius: 8px; padding: 6px 10px; font-size: 0.8rem; margin: 4px 0 10px; }
 
@@ -1028,14 +1030,14 @@
          rest are deleted and their full data is logged as a comment on the survivor. -->
     <section id="merge-view" class="card hidden">
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
-            <button class="secondary" onclick="closeMergeView()">← Back</button>
+            <button class="secondary" onclick="cancelMergeFlow()">← Back</button>
         </div>
-        <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">🔀 Merge Items</h1>
-        <p style="color:var(--text-muted); margin-bottom:1rem; font-size:0.9rem;">Tap the value you want to keep in each row — one item survives with the winning values below; the rest are permanently deleted, and everything they had gets logged as a comment on the survivor first. Double-click a Quantity cell to type a combined number instead of picking one as-is.</p>
+        <h1 id="merge-view-title" style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">🔀 Merge Items</h1>
+        <p id="merge-view-intro" style="color:var(--text-muted); margin-bottom:1rem; font-size:0.9rem;"></p>
         <div id="merge-grid-container" style="overflow-x:auto;"></div>
         <div class="modal-actions" style="margin-top:1.5rem;">
-            <button class="secondary full-width" onclick="closeMergeView()">Cancel</button>
-            <button class="danger full-width" onclick="confirmMerge()">🔀 Merge & Delete the Rest</button>
+            <button class="secondary full-width" onclick="cancelMergeFlow()">Cancel</button>
+            <button class="danger full-width" id="btn-merge-confirm">🔀 Merge & Delete the Rest</button>
         </div>
     </section>
 
@@ -2555,25 +2557,52 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         return { deduped: Array.from(seen.values()), dupes: Array.from(dupeSet) };
     }
 
+    // A BTK only in the CSV is new — added directly, no review needed. A BTK that already exists
+    // in the currently loaded warehouse is a conflict, resolved one at a time via the merge-view
+    // grid (see openCSVConflictMergeView) instead of blindly overwriting it — this also used to
+    // silently blank any field the CSV lacked a column for, since normalizeItems() fills every
+    // COLUMNS_B field with '' when a row doesn't have it; csvImportPresentColumns now tracks which
+    // headers the file actually had, so a shorter/older CSV can't wipe out newer fields it never
+    // knew about (a BTK with no conflict has nothing to protect, so this only matters for the
+    // conflict grid). A BTK only in the existing warehouse, not mentioned in the CSV, is untouched.
     function handleCSVUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
         const reader = new FileReader();
         reader.onload = function(e) {
-            const items = parseCSVString(e.target.result);
+            const res = Papa.parse(e.target.result, { header: true, skipEmptyLines: true });
+            const presentColumns = new Set(res.meta.fields || []);
+            const items = normalizeItems(res.data);
             if (!items.length) { showToast("No valid rows (need BTKnumber column).", "error"); return; }
             const { deduped, dupes } = dedupeByBTK(items);
-            globalInventory = deduped;
-            saveDraft(currentWarehouseId);
-            clearSelection();
-            document.getElementById('search-box').value = '';
-            filterList(true);
-            if (dupes.length) {
-                const preview = dupes.slice(0, 5).join(', ') + (dupes.length > 5 ? '…' : '');
-                showToast(`Imported ${deduped.length} items — ${dupes.length} duplicate BTK number(s) collapsed to their last row: ${preview} (draft autosaved).`, "warning", 9000);
-            } else {
-                showToast(`Imported ${deduped.length} items (draft autosaved).`, "success");
-            }
+
+            const existingByBTK = new Map(globalInventory.map(i => [i.BTKnumber, i]));
+            const newItems = [];
+            const conflicts = [];
+            deduped.forEach(row => {
+                const existing = existingByBTK.get(row.BTKnumber);
+                if (existing) conflicts.push({ existing, incoming: row });
+                else newItems.push(row);
+            });
+
+            resetCsvImportState();
+            csvImportPendingNew = newItems;
+            csvImportDupesReport = dupes;
+            csvImportPresentColumns = presentColumns;
+
+            if (conflicts.length === 0) { commitCSVImport(); return; }
+
+            csvImportQueue = conflicts;
+            csvImportIndex = 0;
+            csvImportResolvedItems = [];
+            showConfirmModal({
+                title: `${conflicts.length} item${conflicts.length > 1 ? 's' : ''} already in this warehouse`,
+                body: `This CSV also matches ${conflicts.length} BTK number${conflicts.length > 1 ? 's' : ''} already saved here. You'll review each one and choose what to keep — anything you pick "From CSV" for will overwrite what's currently in the database.` +
+                    (newItems.length ? ` ${newItems.length} brand-new item(s) in the file will just be added, no review needed.` : '') +
+                    `\n\nReview the ${conflicts.length} conflict${conflicts.length > 1 ? 's' : ''} now?`,
+                confirmLabel: 'Review Conflicts',
+                onConfirm: () => openCSVConflictMergeView()
+            });
         };
         reader.readAsText(file);
         event.target.value = '';
@@ -5429,17 +5458,24 @@ th { background: #eee; }
     // image" button deletes outright, and two items silently sharing one URL means removing the
     // photo from the duplicate would also blow it away for the original. Re-uploading on the
     // duplicate (if wanted) is one tap away either way.
-    function generateUniqueBTK(base) {
-        const exists = (b) => globalInventory.some(i => i.BTKnumber === b);
-        let n = 2, candidate = `${base}-COPY`;
-        while (exists(candidate)) { candidate = `${base}-COPY${n}`; n++; }
+    // BTK numbers are canonically BTK + a 6-digit zero-padded number (see decompressId) —
+    // duplicating finds the highest numeric BTK already in the loaded warehouse and mints the
+    // next one, rather than tacking a "-COPY" suffix onto the original's own number.
+    function generateUniqueBTK() {
+        let maxN = 0;
+        globalInventory.forEach(i => {
+            const m = String(i.BTKnumber || '').trim().toUpperCase().match(/^BTK0*(\d+)$/);
+            if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+        });
+        let n = maxN + 1, candidate = 'BTK' + String(n).padStart(6, '0');
+        while (globalInventory.some(i => i.BTKnumber === candidate)) { n++; candidate = 'BTK' + String(n).padStart(6, '0'); }
         return candidate;
     }
     async function duplicateItem() {
         if (!canEditItems() || !currentItemBTK) return;
         const original = globalInventory.find(i => i.BTKnumber === currentItemBTK);
         if (!original) return;
-        const newBTK = generateUniqueBTK(original.BTKnumber);
+        const newBTK = generateUniqueBTK();
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
             const mfr = await resolveManufacturer(original.Manufacturer);
@@ -5506,6 +5542,10 @@ th { background: #eee; }
     var mergeCandidates = [];
     var mergeSelections = {}; // fieldKey -> index into mergeCandidates
     var mergeCustomQty = null; // non-null while a typed-in combined quantity overrides the picker
+    // 'manual' = merging 2+ items picked from the item list into one survivor (deletes the rest).
+    // 'csv-conflict' = resolving one BTK that exists both in the database and in an imported CSV
+    // row — see the CSV IMPORT section below. Same grid/interaction, different framing and fields.
+    var mergeMode = 'manual';
 
     const MERGE_FIELDS = [
         { key: 'BTKnumber', label: 'BTK Number' },
@@ -5519,32 +5559,75 @@ th { background: #eee; }
         { key: 'Inventorylocation', label: 'Inventory Location' },
         { key: 'MapPosition', label: 'Map Position' },
         { key: 'LocationCode', label: 'Bin Location Code' },
-        { key: 'Comments', label: 'Comments' }
+        { key: 'Comments', label: 'Comments' },
+        { key: 'images', label: 'Image / Photo Reference' }
     ];
+    // BTK is moot in csv-conflict mode (both sides share the same BTK by definition); images is
+    // only relevant there too (CSV import is always static/draft-mode, so it's a plain filename
+    // reference, not a Supabase Storage object with the removal-hazard that keeps it out of manual
+    // merge — see duplicateItem()'s comment for why that hazard doesn't apply here).
+    function mergeFieldsForMode() {
+        return MERGE_FIELDS.filter(f => {
+            if (f.key === 'BTKnumber') return mergeMode !== 'csv-conflict';
+            if (f.key === 'images') return mergeMode === 'csv-conflict';
+            return true;
+        });
+    }
 
     function openMergeView() {
         if (!canEditItems() || selectedItems.size < 2) return;
         mergeCandidates = Array.from(selectedItems).map(id => globalInventory.find(i => i.BTKnumber === id)).filter(Boolean);
         if (mergeCandidates.length < 2) { showToast("Need at least 2 valid items to merge.", "warning"); return; }
+        mergeMode = 'manual';
         mergeSelections = {};
         MERGE_FIELDS.forEach(f => { mergeSelections[f.key] = 0; }); // default: first selected item's value wins
         mergeCustomQty = null;
+        document.getElementById('merge-view-title').textContent = '🔀 Merge Items';
+        document.getElementById('merge-view-intro').textContent =
+            "Tap the value you want to keep in each row — one item survives with the winning values below; the rest are permanently deleted, and everything they had gets logged as a comment on the survivor first. Double-click a Quantity cell to type a combined number instead of picking one as-is.";
+        const btn = document.getElementById('btn-merge-confirm');
+        btn.textContent = '🔀 Merge & Delete the Rest';
+        btn.onclick = confirmMerge;
         switchView('merge-view');
         document.getElementById('fab-bar').classList.remove('visible'); // its own Merge/Cancel buttons replace the FAB here
         renderMergeGrid();
     }
     function closeMergeView() { showListView('items'); updateFab(); }
+    // Mid-CSV-import, "Cancel"/"← Back" abandons the whole import — nothing's been written to
+    // globalInventory yet (everything's held in the csvImport* queue until the last conflict is
+    // resolved), so there's no partial-import state to clean up, just the queue itself.
+    function cancelMergeFlow() {
+        if (mergeMode === 'csv-conflict') {
+            const hadConflicts = csvImportQueue.length > 0;
+            resetCsvImportState();
+            closeMergeView();
+            if (hadConflicts) showToast("Import cancelled — nothing was changed.", "warning");
+            return;
+        }
+        closeMergeView();
+    }
 
     function mergeFieldDisplay(val) { return (val === undefined || val === null || val === 'None' || val === '') ? '(none)' : String(val); }
 
     function renderMergeGrid() {
         const container = document.getElementById('merge-grid-container');
+        const isCsv = mergeMode === 'csv-conflict';
         let html = '<table class="merge-table"><tr><td></td>' +
-            mergeCandidates.map((item, idx) => `<td class="merge-col-header">Item ${idx + 1}<br>${escapeHtml(item.BTKnumber)}</td>`).join('') + '</tr>';
+            (isCsv
+                ? '<td class="merge-col-header">🗄️ Existing (Database)</td><td class="merge-col-header">📄 From CSV</td>'
+                : mergeCandidates.map((item, idx) => `<td class="merge-col-header">Item ${idx + 1}<br>${escapeHtml(item.BTKnumber)}</td>`).join(''))
+            + '</tr>';
 
-        MERGE_FIELDS.forEach(f => {
+        mergeFieldsForMode().forEach(f => {
             html += `<tr><td class="merge-row-label">${escapeHtml(f.label)}</td>`;
             mergeCandidates.forEach((item, idx) => {
+                // Column genuinely absent from this CSV file (not just blank in this row) — nothing
+                // to compare, so the existing value wins with no choice offered for it.
+                const csvColumnAbsent = isCsv && idx === 1 && !csvImportPresentColumns.has(f.key);
+                if (csvColumnAbsent) {
+                    html += `<td class="merge-cell disabled" title="This column isn't in the imported CSV">(not in this CSV)</td>`;
+                    return;
+                }
                 const isQty = f.key === 'Numberofitems';
                 const selected = isQty ? (mergeCustomQty === null && mergeSelections[f.key] === idx) : mergeSelections[f.key] === idx;
                 const dblclick = isQty ? ` ondblclick="promptCustomMergeQty(event,${idx})"` : '';
@@ -5586,6 +5669,28 @@ th { background: #eee; }
         return mergeCandidates[idx][key];
     }
 
+    // Shared by manual merge (runMerge) and CSV-conflict resolution (resolveCsvConflict) — both
+    // just read the current mergeSelections picks into one final item object, they differ only in
+    // what happens to it afterward (delete losers + save vs. queue it and move to the next
+    // conflict).
+    function buildMergedItemObject(finalBTK, finalQty, finalComments, imagesFallback) {
+        return {
+            Manufacturer: getMergeValue('Manufacturer'),
+            BTKnumber: finalBTK,
+            itemnumber: getMergeValue('itemnumber'),
+            'itemname(english)': getMergeValue('itemname(english)'),
+            'itemname(swedish)': getMergeValue('itemname(swedish)'),
+            itemnumber2: getMergeValue('itemnumber2'),
+            itemnumber3: getMergeValue('itemnumber3'),
+            Numberofitems: String(finalQty),
+            Inventorylocation: getMergeValue('Inventorylocation'),
+            MapPosition: getMergeValue('MapPosition'),
+            LocationCode: getMergeValue('LocationCode'),
+            Comments: finalComments || 'None',
+            images: imagesFallback || ''
+        };
+    }
+
     async function confirmMerge() {
         const survivorBTK = getMergeValue('BTKnumber');
         const survivor = mergeCandidates.find(i => i.BTKnumber === survivorBTK) || mergeCandidates[mergeSelections['BTKnumber'] || 0];
@@ -5618,21 +5723,7 @@ th { background: #eee; }
 
     async function runMerge(survivor, survivorBTK, losers, finalQty, mergedComments) {
         const loserBTKs = losers.map(i => i.BTKnumber);
-        const mergedItem = {
-            Manufacturer: getMergeValue('Manufacturer'),
-            BTKnumber: survivorBTK,
-            itemnumber: getMergeValue('itemnumber'),
-            'itemname(english)': getMergeValue('itemname(english)'),
-            'itemname(swedish)': getMergeValue('itemname(swedish)'),
-            itemnumber2: getMergeValue('itemnumber2'),
-            itemnumber3: getMergeValue('itemnumber3'),
-            Numberofitems: String(finalQty),
-            Inventorylocation: getMergeValue('Inventorylocation'),
-            MapPosition: getMergeValue('MapPosition'),
-            LocationCode: getMergeValue('LocationCode'),
-            Comments: mergedComments || 'None',
-            images: survivor.images || ''
-        };
+        const mergedItem = buildMergedItemObject(survivorBTK, finalQty, mergedComments, survivor.images);
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
             const mfr = await resolveManufacturer(mergedItem.Manufacturer);
@@ -5664,6 +5755,91 @@ th { background: #eee; }
         clearSelection();
         showToast(`Merged into ${survivorBTK} (draft autosaved).`, "success");
         openItem(survivorBTK, { type: 'global' });
+    }
+
+    // ── CSV IMPORT CONFLICT RESOLUTION ─────────────────────────────────────
+    // Items CSV import (static/draft warehouses only — Supabase mode doesn't use this button, see
+    // updateWarehouseMetaBar) used to be a blind wholesale replace: globalInventory = the file's
+    // contents, full stop, including silently blanking any field the CSV happened not to have a
+    // column for. Now: a BTK only in the CSV is added as-is (no review needed — nothing to
+    // conflict with); a BTK that already exists in both goes through the same merge-view grid used
+    // for manually merging items, framed as "Existing (Database)" vs "From CSV", one conflict at a
+    // time; a BTK only in the existing warehouse and not mentioned in the CSV is left untouched.
+    // Nothing is written to globalInventory until every conflict in the file has been resolved.
+    var csvImportQueue = [];        // [{ existing, incoming }] — one entry per conflicting BTK
+    var csvImportIndex = 0;         // which conflict is currently on screen
+    var csvImportResolvedItems = []; // merged result for each conflict already resolved
+    var csvImportPendingNew = [];   // brand-new (non-conflicting) rows, added as-is on commit
+    var csvImportDupesReport = [];  // BTKs that collided within the CSV file itself
+    var csvImportPresentColumns = new Set(); // header names actually present in the uploaded file
+
+    function resetCsvImportState() {
+        csvImportQueue = []; csvImportIndex = 0; csvImportResolvedItems = [];
+        csvImportPendingNew = []; csvImportDupesReport = []; csvImportPresentColumns = new Set();
+    }
+
+    function openCSVConflictMergeView() {
+        if (csvImportIndex >= csvImportQueue.length) { commitCSVImport(); return; }
+        const { existing, incoming } = csvImportQueue[csvImportIndex];
+        mergeMode = 'csv-conflict';
+        mergeCandidates = [existing, incoming]; // idx 0 = existing/database, idx 1 = incoming/CSV
+        mergeSelections = {};
+        MERGE_FIELDS.forEach(f => {
+            const presentInCsv = csvImportPresentColumns.has(f.key);
+            const csvVal = incoming[f.key];
+            // Default to the CSV's value when it actually supplied one; otherwise keep what's
+            // already saved — protects against a shorter/partial CSV blanking real data by default,
+            // while still making a straightforward "this file has fresher data" import a single tap.
+            const preferCsv = presentInCsv && csvVal !== '' && csvVal !== undefined && csvVal !== 'None';
+            mergeSelections[f.key] = preferCsv ? 1 : 0;
+        });
+        mergeCustomQty = null;
+        document.getElementById('merge-view-title').textContent = '🔀 Resolve CSV Conflicts';
+        document.getElementById('merge-view-intro').textContent =
+            `Conflict ${csvImportIndex + 1} of ${csvImportQueue.length} — BTK ${existing.BTKnumber} already exists. Tap the value to keep in each row; anything you pick "From CSV" for overwrites what's currently saved. Columns this CSV file doesn't have are left as-is automatically.`;
+        const btn = document.getElementById('btn-merge-confirm');
+        btn.textContent = (csvImportIndex === csvImportQueue.length - 1) ? '✔ Resolve & Finish Import' : '✔ Resolve & Next Conflict';
+        btn.onclick = resolveCsvConflict;
+        switchView('merge-view');
+        document.getElementById('fab-bar').classList.remove('visible');
+        renderMergeGrid();
+    }
+
+    function resolveCsvConflict() {
+        const { existing } = csvImportQueue[csvImportIndex];
+        const finalQty = mergeCustomQty !== null ? mergeCustomQty : (parseInt(getMergeValue('Numberofitems'), 10) || 0);
+        const finalComments = mergeFieldDisplay(getMergeValue('Comments'));
+        const mergedItem = buildMergedItemObject(existing.BTKnumber, finalQty, finalComments === '(none)' ? '' : finalComments, getMergeValue('images'));
+        csvImportResolvedItems.push(mergedItem);
+        csvImportIndex++;
+        openCSVConflictMergeView();
+    }
+
+    function commitCSVImport() {
+        csvImportResolvedItems.forEach(item => {
+            const idx = globalInventory.findIndex(i => i.BTKnumber === item.BTKnumber);
+            if (idx >= 0) globalInventory[idx] = item; else globalInventory.push(item);
+        });
+        csvImportPendingNew.forEach(item => {
+            const idx = globalInventory.findIndex(i => i.BTKnumber === item.BTKnumber);
+            if (idx >= 0) globalInventory[idx] = item; else globalInventory.push(item);
+        });
+        saveDraft(currentWarehouseId);
+        clearSelection();
+        document.getElementById('search-box').value = '';
+        if (activeView === 'merge-view') showListView('items');
+        filterList(true);
+
+        const conflictCount = csvImportResolvedItems.length;
+        const newCount = csvImportPendingNew.length;
+        const dupes = csvImportDupesReport;
+        let msg = `Imported ${newCount} new item(s)` + (conflictCount ? `, updated ${conflictCount} existing item(s)` : '') + '.';
+        if (dupes.length) {
+            const preview = dupes.slice(0, 5).join(', ') + (dupes.length > 5 ? '…' : '');
+            msg += ` ${dupes.length} duplicate BTK(s) within the file collapsed to their last row: ${preview}.`;
+        }
+        showToast(msg + ' (draft autosaved).', (conflictCount || dupes.length) ? 'warning' : 'success', 9000);
+        resetCsvImportState();
     }
 
     async function submitItemForm() {
