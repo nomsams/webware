@@ -656,19 +656,20 @@
                 <button class="search-clear" onclick="clearSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
             </div>
             <div class="list-stats" id="list-stats">Loading inventory...</div>
-            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
-                <select id="sort-by" onchange="onSortChange()" style="margin: 0; width: auto;">
-                    <option value="name">Sort: Name (A–Z)</option>
-                    <option value="manufacturer">Sort: Manufacturer</option>
-                    <option value="btk">Sort: BTK Number</option>
-                    <option value="location">Sort: Bin Location (for walking the floor)</option>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+                <label for="sort-by" style="margin: 0; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Sort</label>
+                <select id="sort-by" onchange="onSortChange()" style="margin: 0; width: auto; padding: 6px 10px; min-height: unset; font-size: 0.8rem;">
+                    <option value="name">Name (A–Z)</option>
+                    <option value="manufacturer">Manufacturer</option>
+                    <option value="btk">BTK Number</option>
+                    <option value="location">Bin Location</option>
                 </select>
-                <select id="manufacturer-filter" onchange="onManufacturerFilterChange()" style="margin: 0; width: auto;">
-                    <option value="">All Manufacturers</option>
+                <select id="manufacturer-filter" onchange="onManufacturerFilterChange()" style="margin: 0; width: auto; padding: 6px 10px; min-height: unset; font-size: 0.8rem;">
+                    <option value="">Manufacturers</option>
                 </select>
-                <div class="select-all-banner" style="margin-left: auto; margin-bottom: 0; padding: 8px 16px;" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
-                    <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 12px; pointer-events: none;" aria-hidden="true">
-                    <span style="font-weight: 600;">Select All Visible Items</span>
+                <div class="select-all-banner" style="margin-left: auto; margin-bottom: 0; padding: 6px 12px; min-height: unset;" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
+                    <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 8px; pointer-events: none;" aria-hidden="true">
+                    <span style="font-weight: 600; font-size: 0.85rem;">Select All</span>
                 </div>
             </div>
         </div>
@@ -2505,7 +2506,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             globalInventory.map(i => i.Manufacturer).filter(m => m && m !== 'None')
         )).sort((a, b) => a.localeCompare(b));
         const current = sel.value;
-        sel.innerHTML = '<option value="">All Manufacturers</option>' + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+        sel.innerHTML = '<option value="">Manufacturers</option>' + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
         if (names.includes(current)) sel.value = current;
         else manufacturerFilter = '';
     }
