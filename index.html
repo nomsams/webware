@@ -2875,11 +2875,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 ${meta.mode === 'supabase' ? `<span style="font-size:0.8rem; color:var(--text-muted);">🔐 Signed in as <strong>${currentUserRole || '?'}</strong></span>` : ''}
             </div>`;
 
-        // CSV import/export operate on the local encrypted vault — not applicable in Supabase mode.
+        // Kits CSV / Warehouses CSV / full-database export still only operate on the local
+        // encrypted vault, not applicable in Supabase mode. Items CSV import now works in both
+        // modes (see commitCSVImport) — gated by role instead, same bar as Remove/Merge/Duplicate.
         const isSupa = meta.mode === 'supabase';
-        ['btn-items-csv', 'btn-kits-csv', 'btn-warehouse-csv', 'btn-export-db'].forEach(id => {
+        ['btn-kits-csv', 'btn-warehouse-csv', 'btn-export-db'].forEach(id => {
             document.getElementById(id).classList.toggle('hidden', isSupa);
         });
+        document.getElementById('btn-items-csv').classList.toggle('hidden', isSupa && currentUserRole === 'viewer');
         document.getElementById('btn-batch-images').classList.toggle('hidden', !isSupa || currentUserRole === 'viewer');
         document.getElementById('btn-export-csv').classList.toggle('hidden', !isSupa);
         document.getElementById('seg-manufacturers').classList.toggle('hidden', !isSupa);
@@ -6042,20 +6045,57 @@ th { background: #eee; }
         openCSVConflictMergeView();
     }
 
-    function commitCSVImport() {
-        csvImportResolvedItems.forEach(item => {
-            const idx = globalInventory.findIndex(i => i.BTKnumber === item.BTKnumber);
-            if (idx >= 0) globalInventory[idx] = item; else globalInventory.push(item);
-        });
-        csvImportPendingNew.forEach(item => {
-            const idx = globalInventory.findIndex(i => i.BTKnumber === item.BTKnumber);
-            if (idx >= 0) globalInventory[idx] = item; else globalInventory.push(item);
-        });
-        saveDraft(currentWarehouseId);
-        clearSelection();
-        document.getElementById('search-box').value = '';
-        if (activeView === 'merge-view') showListView('items');
-        filterList(true);
+    // Shared by Supabase-mode CSV import — same field mapping as submitItemForm()/duplicateItem()/
+    // runMerge() use for their own Supabase writes, just pulled out since CSV import needs it once
+    // per row instead of once per user action.
+    async function itemToSupabaseRow(item) {
+        const mfr = await resolveManufacturer(item.Manufacturer);
+        return {
+            manufacturer: mfr.name, manufacturer_id: mfr.id, itemnumber: item.itemnumber,
+            itemname_en: item['itemname(english)'], itemname_sv: item['itemname(swedish)'],
+            itemnumber2: item.itemnumber2, itemnumber3: item.itemnumber3,
+            numberofitems: parseInt(item.Numberofitems, 10) || 0,
+            inventorylocation: item.Inventorylocation === 'None' ? null : item.Inventorylocation,
+            map_position: item.MapPosition === 'None' ? null : item.MapPosition,
+            location_code: item.LocationCode === 'None' ? null : item.LocationCode,
+            comments: item.Comments === 'None' ? null : item.Comments
+        };
+    }
+
+    async function commitCSVImport() {
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        let writeErrors = 0;
+
+        if (isSupa) {
+            for (const item of csvImportResolvedItems) {
+                const row = await itemToSupabaseRow(item);
+                const { error } = await sb.from('items').update(row).eq('btk', item.BTKnumber);
+                if (error) { writeErrors++; console.error(`Could not update ${item.BTKnumber}:`, error); }
+            }
+            for (const item of csvImportPendingNew) {
+                const row = await itemToSupabaseRow(item);
+                const { error } = await sb.from('items').insert({ ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: '' });
+                if (error) { writeErrors++; console.error(`Could not add ${item.BTKnumber}:`, error); }
+            }
+            clearSelection();
+            document.getElementById('search-box').value = '';
+            if (activeView === 'merge-view') showListView('items');
+            await supabaseLoadList(currentWarehouseId);
+        } else {
+            csvImportResolvedItems.forEach(item => {
+                const idx = globalInventory.findIndex(i => i.BTKnumber === item.BTKnumber);
+                if (idx >= 0) globalInventory[idx] = item; else globalInventory.push(item);
+            });
+            csvImportPendingNew.forEach(item => {
+                const idx = globalInventory.findIndex(i => i.BTKnumber === item.BTKnumber);
+                if (idx >= 0) globalInventory[idx] = item; else globalInventory.push(item);
+            });
+            saveDraft(currentWarehouseId);
+            clearSelection();
+            document.getElementById('search-box').value = '';
+            if (activeView === 'merge-view') showListView('items');
+            filterList(true);
+        }
 
         const conflictCount = csvImportResolvedItems.length;
         const newCount = csvImportPendingNew.length;
@@ -6067,7 +6107,9 @@ th { background: #eee; }
             const preview = dupes.slice(0, 5).join(', ') + (dupes.length > 5 ? '…' : '');
             msg += ` ${dupes.length} duplicate BTK(s) within the file collapsed to their last row: ${preview}.`;
         }
-        showToast(msg + ' (draft autosaved).', (conflictCount || dupes.length) ? 'warning' : 'success', 9000);
+        if (writeErrors) msg += ` ${writeErrors} row(s) failed to save — see console for details.`;
+        if (!isSupa) msg += ' (draft autosaved).';
+        showToast(msg, (conflictCount || dupes.length || writeErrors) ? 'warning' : 'success', 9000);
         resetCsvImportState();
     }
 
