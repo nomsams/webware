@@ -576,8 +576,8 @@
         <label class="modal-label" for="ai-mapposition">Map Position (locator grid, A1–F6)</label>
         <input type="text" id="ai-mapposition" placeholder="e.g. A3" maxlength="2" style="text-transform:uppercase;">
 
-        <label class="modal-label" for="ai-locationcode">Bin Location Code (Zone-Aisle-Rack-Level-Bin)</label>
-        <input type="text" id="ai-locationcode" placeholder="e.g. A-03-2-4-07" style="text-transform:uppercase;">
+        <label class="modal-label" for="ai-locationcode">Bin Location Code (Zone+Depth-Level-Bin)</label>
+        <input type="text" id="ai-locationcode" placeholder="e.g. A1-4-07" style="text-transform:uppercase;">
 
         <label class="modal-label" for="ai-comments">Comments</label>
         <textarea id="ai-comments" placeholder="Optional notes..."></textarea>
@@ -733,7 +733,7 @@
 
         <div id="bin-map-section" class="hidden" style="margin-top: 2rem; margin-bottom: 1rem;">
             <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Bin Location Map (Aisle × Rack)</strong>
+                <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Bin Location Map (Rack Depth × Level)</strong>
                 <span id="bin-map-zone-select-wrap" class="hidden">
                     <select id="bin-map-zone-select" onchange="onBinMapZoneChange()" style="width:auto; margin:0; padding:4px 8px; font-size:0.8rem;"></select>
                 </span>
@@ -3039,7 +3039,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('zone-draw-mode').classList.toggle('hidden', mode !== 'draw');
         document.getElementById('zone-manual-mode').classList.toggle('hidden', mode !== 'manual');
         document.getElementById('zone-designer-hint').textContent = mode === 'draw'
-            ? "Drag empty space to draw a rack area — auto-labeled A, B, C… Width = how many aisles wide; height = how many racks deep (1 = single row, 2 = back-to-back). Drag its body to move it, drag an edge to resize it, double-click to edit its levels/bins, or select it and press Delete. Arrow keys nudge the selected area. Ctrl+Z / Ctrl+Shift+Z to undo/redo."
+            ? "Drag empty space to draw a rack area — auto-labeled A, B, C… Width = how many bays long it is (just for the drawing); height = how many racks deep (1 = single row = Depth 1 on items, 2 = back-to-back = Depth 1 front / Depth 2 back). Drag its body to move it, drag an edge to resize it, double-click to edit its levels/bins, or select it and press Delete. Arrow keys nudge the selected area. Ctrl+Z / Ctrl+Shift+Z to undo/redo."
             : "Type rack area details directly. New rows get the next unused letter, but you can change it. Ctrl+Z / Ctrl+Shift+Z to undo/redo.";
         if (mode === 'draw') renderZoneDrawGrid(); else renderZoneManualRows();
     }
@@ -3074,7 +3074,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             block.style.width = ((z.max_aisle || 1) * ZONE_CELL_SIZE) + 'px';
             block.style.height = ((z.max_rack || 1) * ZONE_CELL_SIZE) + 'px';
             block.innerText = z.zone;
-            block.title = `Rack Area ${z.zone}${z.label ? ' — ' + z.label : ''} (${z.max_aisle || 1} aisles wide × ${z.max_rack || 1} racks deep) — drag to move, double-click to edit`;
+            block.title = `Rack Area ${z.zone}${z.label ? ' — ' + z.label : ''} (${z.max_aisle || 1} bays wide × ${z.max_rack || 1} racks deep) — drag to move, double-click to edit`;
             block.ondblclick = (e) => { e.stopPropagation(); selectZoneBlock(z.zone); };
             if (currentUserRole === 'admin') {
                 block.onmousedown = (e) => {
@@ -3256,7 +3256,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         box.innerHTML = `
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:0.75rem;">
                 <strong style="font-size:1.1rem;">Rack Area ${escapeHtml(z.zone)}</strong>
-                <span style="color:var(--text-muted); font-size:0.85rem;">${z.max_aisle} aisles wide × ${z.max_rack} racks deep${z.max_rack >= 2 ? ' (back-to-back)' : ''}</span>
+                <span style="color:var(--text-muted); font-size:0.85rem;">${z.max_aisle} bays wide × ${z.max_rack} racks deep${z.max_rack >= 2 ? ' (back-to-back)' : ''}</span>
                 ${readOnly ? '' : `<button class="secondary" onclick="deleteSelectedZone()" style="margin-left:auto; color:var(--danger); padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🗑️ Delete Zone</button>`}
             </div>
             <label class="modal-label" for="zone-inspector-label">Label</label>
@@ -3299,8 +3299,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             <div class="zone-manual-row">
                 <input type="text" data-field="zone" value="${escapeHtml(z.zone)}" maxlength="2" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'zone', this.value.toUpperCase())">
                 <input type="text" data-field="label" placeholder="Label (optional)" value="${escapeHtml(z.label || '')}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'label', this.value)">
-                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Aisles <input type="number" data-field="max_aisle" min="1" value="${z.max_aisle || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_aisle', this.value)"></label>
-                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Racks <input type="number" data-field="max_rack" min="1" value="${z.max_rack || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_rack', this.value)"></label>
+                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Bays <input type="number" data-field="max_aisle" min="1" value="${z.max_aisle || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_aisle', this.value)"></label>
+                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Depth <input type="number" data-field="max_rack" min="1" value="${z.max_rack || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_rack', this.value)"></label>
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Levels <input type="number" data-field="max_level" min="1" value="${z.max_level || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_level', this.value)"></label>
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Bins <input type="number" data-field="max_bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_bin', this.value)"></label>
                 ${readOnly ? '' : `<button class="secondary" onclick="removeManualZoneRow(${idx})" style="color:var(--danger); padding:0.35rem 0.6rem; min-height:auto;">✕</button>`}
@@ -4403,8 +4403,8 @@ th { background: #eee; }
             <input type="text" id="qe-location" value="${escapeHtml(val(item.Inventorylocation))}">
             <label class="modal-label" for="qe-mapposition">Map Position (locator grid, A1–F6)</label>
             <input type="text" id="qe-mapposition" value="${escapeHtml(val(item.MapPosition))}" placeholder="e.g. A3" maxlength="2" style="text-transform:uppercase;">
-            <label class="modal-label" for="qe-locationcode">Bin Location Code (Zone-Aisle-Rack-Level-Bin)</label>
-            <input type="text" id="qe-locationcode" value="${escapeHtml(val(item.LocationCode))}" placeholder="e.g. A-03-2-4-07" style="text-transform:uppercase;">
+            <label class="modal-label" for="qe-locationcode">Bin Location Code (Zone+Depth-Level-Bin)</label>
+            <input type="text" id="qe-locationcode" value="${escapeHtml(val(item.LocationCode))}" placeholder="e.g. A1-4-07" style="text-transform:uppercase;">
             <label class="modal-label" for="qe-comments">Comments</label>
             <textarea id="qe-comments">${escapeHtml(val(item.Comments))}</textarea>`;
     }
@@ -4592,24 +4592,28 @@ th { background: #eee; }
         return row * 6 + col;
     }
 
-    // Bin location code: Zone-Aisle-Rack-Level-Bin, e.g. "A-03-2-4-07" — see the "Bin Location
-    // Codes" section in README.md for the full numbering convention (Level 1 = floor level,
-    // Aisle/Rack/Bin 1 = nearest the exit). Zone is 1-2 letters; Aisle and Bin are always
-    // zero-padded to 2 digits; Rack and Level are 1-2 digits, unpadded. Returns null if the
-    // string doesn't match — callers should show it as invalid rather than silently drop it.
-    const LOCATION_CODE_RE = /^([A-Z]{1,2})-(\d{2})-(\d{1,2})-(\d{1,2})-(\d{2})$/;
+    // Bin location code: Zone+Depth-Level-Bin, e.g. "A1-4-07" — Zone A, Depth 1 (the front rack;
+    // 2 would be the back rack of a back-to-back pair — see the rack area's drawn depth in the
+    // Layout Designer), Level 4, Bin 7. See the "Bin Location Codes" section in README.md for the
+    // full numbering convention (Level 1 = floor level). Zone is 1-2 letters; Depth and Level are
+    // 1-2 digits, unpadded; Bin is always zero-padded to 2 digits. A rack area's *width* (how many
+    // bays long it is) is purely a Layout Designer drawing property — never part of an item's own
+    // code, since it was never really a property of one item. Returns null if the string doesn't
+    // match — callers should show it as invalid rather than silently drop it.
+    const LOCATION_CODE_RE = /^([A-Z]{1,2})(\d{1,2})-(\d{1,2})-(\d{2})$/;
     function parseLocationCode(code) {
         const m = String(code || '').trim().toUpperCase().match(LOCATION_CODE_RE);
         if (!m) return null;
-        return { zone: m[1], aisle: Number(m[2]), rack: Number(m[3]), level: Number(m[4]), bin: Number(m[5]) };
+        return { zone: m[1], depth: Number(m[2]), level: Number(m[3]), bin: Number(m[4]) };
     }
     function describeLocationCode(code) {
         const p = parseLocationCode(code);
         if (!p) return null;
-        return `Zone ${p.zone} · Aisle ${p.aisle} · Rack ${p.rack} · Level ${p.level} · Bin ${p.bin}`;
+        const depthLabel = p.depth === 1 ? ' (front)' : p.depth === 2 ? ' (back)' : '';
+        return `Zone ${p.zone} · Rack ${p.depth}${depthLabel} · Level ${p.level} · Bin ${p.bin}`;
     }
 
-    // Walking order for "Sort: Bin Location" — zone alphabetically, then aisle/rack/level/bin
+    // Walking order for "Sort: Bin Location" — zone alphabetically, then depth/level/bin
     // numerically, matching the numbering convention in README.md (so sorted order is the actual
     // order you'd walk the floor). Items with no valid code sort after every located item, since
     // there's nowhere sensible to place them in a physical walk order.
@@ -4618,7 +4622,7 @@ th { background: #eee; }
         if (!pa && !pb) return 0;
         if (!pa) return 1;
         if (!pb) return -1;
-        return pa.zone.localeCompare(pb.zone) || pa.aisle - pb.aisle || pa.rack - pb.rack || pa.level - pb.level || pa.bin - pb.bin;
+        return pa.zone.localeCompare(pb.zone) || pa.depth - pb.depth || pa.level - pb.level || pa.bin - pb.bin;
     }
 
     function renderLocatorMap(item) {
@@ -4640,13 +4644,14 @@ th { background: #eee; }
         else caption.textContent = '';
     }
 
-    // ── BIN LOCATION MAP (Zone → Aisle × Rack grid) ──────────────────────────
+    // ── BIN LOCATION MAP (Zone → Depth × Level grid) ─────────────────────────
     // Unlike the fixed 6x6 MapPosition grid above, this is sized to whatever the warehouse
-    // actually uses: an explicit bound from warehouse_zones if one exists for the zone, otherwise
-    // auto-detected by scanning every item's location_code for the highest aisle/rack seen. Level
-    // and Bin aren't shown as grid axes (a 2D grid can't show all four) — Aisle/Rack place you in
-    // the room; Level/Bin (finer, within-rack detail) are already in describeLocationCode()'s text
-    // in the field list above.
+    // actually uses: an explicit bound from warehouse_zones if one exists for the zone (max_rack
+    // as max depth, max_level as max level — the same columns the Layout Designer's inspector
+    // already sets), otherwise auto-detected by scanning every item's location_code for the
+    // highest depth/level seen. Bin isn't a grid axis — a 2D grid only has two, and Depth/Level
+    // are the two that actually place you at a specific rack and shelf; Bin (the finer,
+    // within-shelf position) is already in describeLocationCode()'s text in the field list above.
     var binMapSelectedZone = null;
 
     function getAvailableZones() {
@@ -4659,19 +4664,19 @@ th { background: #eee; }
     }
 
     // Explicit warehouse_zones row wins when present; otherwise scan globalInventory for the
-    // highest aisle/rack actually in use for this zone. Returns null if the zone has no explicit
+    // highest depth/level actually in use for this zone. Returns null if the zone has no explicit
     // row AND no located items (nothing to size a grid to).
     function getZoneBounds(zone) {
         const explicit = globalWarehouseZones.find(z => z.zone === zone);
-        if (explicit && explicit.max_aisle && explicit.max_rack) {
-            return { maxAisle: explicit.max_aisle, maxRack: explicit.max_rack };
+        if (explicit && explicit.max_rack && explicit.max_level) {
+            return { maxDepth: explicit.max_rack, maxLevel: explicit.max_level };
         }
-        let maxAisle = 0, maxRack = 0;
+        let maxDepth = 0, maxLevel = 0;
         globalInventory.forEach(i => {
             const p = parseLocationCode(i.LocationCode);
-            if (p && p.zone === zone) { maxAisle = Math.max(maxAisle, p.aisle); maxRack = Math.max(maxRack, p.rack); }
+            if (p && p.zone === zone) { maxDepth = Math.max(maxDepth, p.depth); maxLevel = Math.max(maxLevel, p.level); }
         });
-        return (maxAisle && maxRack) ? { maxAisle, maxRack } : null;
+        return (maxDepth && maxLevel) ? { maxDepth, maxLevel } : null;
     }
 
     function onBinMapZoneChange() {
@@ -4706,14 +4711,16 @@ th { background: #eee; }
             caption.textContent = `No sized layout for Zone ${binMapSelectedZone} yet.`;
             return;
         }
-        map.style.gridTemplateColumns = `repeat(${bounds.maxAisle}, 1fr)`;
-        for (let rack = 1; rack <= bounds.maxRack; rack++) {
-            for (let aisle = 1; aisle <= bounds.maxAisle; aisle++) {
-                const isActive = itemPos && itemPos.zone === binMapSelectedZone && itemPos.aisle === aisle && itemPos.rack === rack;
+        // Columns = Depth (front-to-back), rows = Level (floor-to-ceiling), level 1 (ground) drawn
+        // at the bottom to match how you'd actually look at the rack.
+        map.style.gridTemplateColumns = `repeat(${bounds.maxDepth}, 1fr)`;
+        for (let level = bounds.maxLevel; level >= 1; level--) {
+            for (let depth = 1; depth <= bounds.maxDepth; depth++) {
+                const isActive = itemPos && itemPos.zone === binMapSelectedZone && itemPos.depth === depth && itemPos.level === level;
                 const cell = document.createElement('div');
                 cell.className = 'map-cell' + (isActive ? ' active' : '');
-                cell.title = `Aisle ${aisle} · Rack ${rack}`;
-                cell.innerText = isActive ? `${aisle}·${rack}` : '';
+                cell.title = `Rack ${depth} · Level ${level}`;
+                cell.innerText = isActive ? `${depth}·${level}` : '';
                 map.appendChild(cell);
             }
         }
