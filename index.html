@@ -206,6 +206,13 @@
         }
         .zone-block:hover { opacity: 1; }
         .zone-block.selected { border-color: white; box-shadow: 0 0 0 2px var(--primary); z-index: 2; }
+        .zone-resize-edge { position: absolute; z-index: 3; }
+        .zone-resize-n, .zone-resize-s { left: 4px; right: 4px; height: 10px; cursor: ns-resize; }
+        .zone-resize-n { top: -5px; }
+        .zone-resize-s { bottom: -5px; }
+        .zone-resize-e, .zone-resize-w { top: 4px; bottom: 4px; width: 10px; cursor: ew-resize; }
+        .zone-resize-w { left: -5px; }
+        .zone-resize-e { right: -5px; }
         .zone-draw-ghost {
             position: absolute; border: 2px dashed var(--primary); background: var(--focus-ring);
             box-sizing: border-box; pointer-events: none; border-radius: 6px;
@@ -3032,7 +3039,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('zone-draw-mode').classList.toggle('hidden', mode !== 'draw');
         document.getElementById('zone-manual-mode').classList.toggle('hidden', mode !== 'manual');
         document.getElementById('zone-designer-hint').textContent = mode === 'draw'
-            ? "Drag empty space to draw a rack area — auto-labeled A, B, C… Width = how many aisles wide; height = how many racks deep (1 = single row, 2 = back-to-back). Drag an existing area to move it, or double-click it to edit its levels/bins or delete it. Ctrl+Z / Ctrl+Shift+Z to undo/redo."
+            ? "Drag empty space to draw a rack area — auto-labeled A, B, C… Width = how many aisles wide; height = how many racks deep (1 = single row, 2 = back-to-back). Drag its body to move it, drag an edge to resize it, double-click to edit its levels/bins, or select it and press Delete. Arrow keys nudge the selected area. Ctrl+Z / Ctrl+Shift+Z to undo/redo."
             : "Type rack area details directly. New rows get the next unused letter, but you can change it. Ctrl+Z / Ctrl+Shift+Z to undo/redo.";
         if (mode === 'draw') renderZoneDrawGrid(); else renderZoneManualRows();
     }
@@ -3081,6 +3088,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                     window.addEventListener('mousemove', onZoneBlockDragMove);
                     window.addEventListener('mouseup', onZoneBlockDragEnd);
                 };
+                ['n', 's', 'e', 'w'].forEach(edge => {
+                    const strip = document.createElement('div');
+                    strip.className = `zone-resize-edge zone-resize-${edge}`;
+                    strip.onmousedown = (e) => startRackAreaEdgeResize(e, z.zone, edge, block);
+                    block.appendChild(strip);
+                });
             }
             grid.appendChild(block);
         });
@@ -3173,6 +3186,59 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             pushZoneHistory(true);
         }
         // No movement at all (just a click) — leave it as-is; double-click is what opens the editor.
+    }
+
+    // Dragging one of a block's 4 edge strips resizes it from that side — dragging the right (e)
+    // or bottom (s) edge only changes max_aisle/max_rack; dragging the left (w) or top (n) edge
+    // moves grid_col/grid_row too, since the *opposite* edge is the one that has to stay put.
+    // Live-updates the block's own inline style during the drag (like the move-drag above), with
+    // a clean re-render once on drop.
+    function startRackAreaEdgeResize(startEvent, zone, edge, block) {
+        startEvent.preventDefault();
+        startEvent.stopPropagation(); // don't also start a move-drag or a new-zone draw
+        const z0 = globalWarehouseZones.find(zz => zz.zone === zone);
+        if (!z0) return;
+        const orig = { col: z0.grid_col, row: z0.grid_row, aisle: z0.max_aisle || 1, rack: z0.max_rack || 1 };
+        const startX = startEvent.clientX, startY = startEvent.clientY;
+        let moved = false;
+        let pending = { ...orig };
+
+        const move = (e) => {
+            const dx = e.clientX - startX, dy = e.clientY - startY;
+            if (!moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) moved = true;
+            if (!moved) return;
+            const colDelta = Math.round(dx / ZONE_CELL_SIZE);
+            const rowDelta = Math.round(dy / ZONE_CELL_SIZE);
+            pending = { ...orig };
+            if (edge === 'e') {
+                pending.aisle = Math.max(1, Math.min(ZONE_GRID_COLS - orig.col, orig.aisle + colDelta));
+            } else if (edge === 'w') {
+                const newCol = Math.max(0, Math.min(orig.col + orig.aisle - 1, orig.col + colDelta));
+                pending.col = newCol; pending.aisle = orig.aisle + (orig.col - newCol);
+            } else if (edge === 's') {
+                pending.rack = Math.max(1, Math.min(ZONE_GRID_ROWS - orig.row, orig.rack + rowDelta));
+            } else if (edge === 'n') {
+                const newRow = Math.max(0, Math.min(orig.row + orig.rack - 1, orig.row + rowDelta));
+                pending.row = newRow; pending.rack = orig.rack + (orig.row - newRow);
+            }
+            block.style.left = (pending.col * ZONE_CELL_SIZE) + 'px';
+            block.style.top = (pending.row * ZONE_CELL_SIZE) + 'px';
+            block.style.width = (pending.aisle * ZONE_CELL_SIZE) + 'px';
+            block.style.height = (pending.rack * ZONE_CELL_SIZE) + 'px';
+        };
+        const up = () => {
+            window.removeEventListener('mousemove', move);
+            window.removeEventListener('mouseup', up);
+            if (moved) {
+                const z = globalWarehouseZones.find(zz => zz.zone === zone);
+                if (z) { z.grid_col = pending.col; z.grid_row = pending.row; z.max_aisle = pending.aisle; z.max_rack = pending.rack; }
+                renderZoneDrawGrid();
+                if (selectedZoneLetter === zone) renderZoneInspector();
+                pushZoneHistory(true);
+            }
+        };
+        window.addEventListener('mousemove', move);
+        window.addEventListener('mouseup', up);
     }
 
     function selectZoneBlock(zone) {
@@ -3346,18 +3412,40 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('btn-zone-redo').disabled = zoneHistoryIndex >= zoneHistory.length - 1;
     }
 
-    // Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) for the Layout Designer only — scoped to warehouse-view
-    // and skipped while focus is in a text input/textarea so the browser's own native undo still
-    // works there (e.g. mid-edit in the zone label field) instead of reverting the whole layout.
+    // Layout Designer keyboard shortcuts — scoped to warehouse-view and skipped while focus is in
+    // a text input/textarea, so the browser's own native undo/backspace still works there (e.g.
+    // mid-edit in the zone label field) instead of reverting or deleting the whole rack area.
+    //   Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) — undo/redo, any mode.
+    //   Delete / Backspace — delete the selected rack area, draw mode only.
+    //   Arrow keys — nudge the selected rack area one cell, draw mode only.
     document.addEventListener('keydown', (e) => {
         if (activeView !== 'warehouse-view') return;
         const tag = document.activeElement && document.activeElement.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-        if (!(e.ctrlKey || e.metaKey)) return;
         const key = e.key.toLowerCase();
-        if (key === 'z' && !e.shiftKey) { e.preventDefault(); undoZoneChange(); }
-        else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); redoZoneChange(); }
+
+        if (e.ctrlKey || e.metaKey) {
+            if (key === 'z' && !e.shiftKey) { e.preventDefault(); undoZoneChange(); }
+            else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); redoZoneChange(); }
+            return;
+        }
+
+        if (zoneDesignerMode !== 'draw' || !selectedZoneLetter || currentUserRole !== 'admin') return;
+        if (key === 'delete' || key === 'backspace') { e.preventDefault(); deleteSelectedZone(); return; }
+        if (key.startsWith('arrow')) { e.preventDefault(); nudgeSelectedZone(key); }
     });
+
+    function nudgeSelectedZone(key) {
+        const z = globalWarehouseZones.find(zz => zz.zone === selectedZoneLetter);
+        if (!z) return;
+        const w = z.max_aisle || 1, h = z.max_rack || 1;
+        if (key === 'arrowup') z.grid_row = Math.max(0, z.grid_row - 1);
+        else if (key === 'arrowdown') z.grid_row = Math.min(ZONE_GRID_ROWS - h, z.grid_row + 1);
+        else if (key === 'arrowleft') z.grid_col = Math.max(0, z.grid_col - 1);
+        else if (key === 'arrowright') z.grid_col = Math.min(ZONE_GRID_COLS - w, z.grid_col + 1);
+        renderZoneDrawGrid();
+        pushZoneHistory(false); // debounced — holding the key down shouldn't spam undo steps
+    }
 
     // ── Rack / aisle photos (warehouse_rack_images) ──
     async function supabaseLoadRackImages(wid) {
