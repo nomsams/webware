@@ -261,6 +261,7 @@
         .label-text div { line-height: 1.2; font-family: Arial, Helvetica, sans-serif !important; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .l-nums { font-size: calc(14pt * var(--fs)); font-weight: 900; color: #000; letter-spacing: -0.3px; margin-top: 0.5mm; }
         .l-name { font-size: calc(11pt * var(--fs)); font-weight: 700; color: #000; margin-top: 1.5mm; }
+        .l-mfr  { font-size: calc(8pt * var(--fs)); color: #333; font-weight: 600; margin-top: 0.5mm; }
         .l-btk  { font-size: calc(6pt * var(--fs)); color: #555; font-weight: 600; letter-spacing: 0.3px; margin-top: auto; }
         .label-url { font-size: 0.65rem; color: var(--text-muted); text-align: center; margin-top: 4px; font-family: monospace; word-break: break-all; }
         .label-cell { display: flex; flex-direction: column; align-items: center; }
@@ -371,7 +372,7 @@
                static @page only applies if someone prints the app view directly (e.g. Ctrl+P). */
             @page { size: 90mm 29mm; margin: 0; }
             .label-card { box-shadow: none !important; margin: 0; page-break-after: always; width: var(--label-w); height: var(--label-h); background: white !important; color: black !important; border: none !important; border-radius: 0 !important; }
-            .l-nums, .l-name, .l-btk { color: black !important; }
+            .l-nums, .l-name, .l-mfr, .l-btk { color: black !important; }
             .no-print { display: none !important; }
         }
     </style>
@@ -607,7 +608,7 @@
         <button class="icon-btn hidden" id="btn-pack-order" onclick="openPackOrderView()" aria-label="View Pack Order" title="Pack Order" style="position:relative;">
             📦<span id="pack-order-badge" class="badge-count">0</span>
         </button>
-        <button class="icon-btn" id="btn-inventering" onclick="openInventeringSetup()" aria-label="Inventering" title="Inventering (stocktaking)">
+        <button class="icon-btn" id="btn-inventering" onclick="openInventeringSetup()" aria-label="Stocktaking" title="Stocktaking">
             📋
         </button>
         <button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle Dark Mode" title="Toggle Theme">
@@ -845,7 +846,7 @@
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
             <button class="secondary" onclick="showListView('items')">← Back</button>
         </div>
-        <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">📋 Inventering</h1>
+        <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">📋 Stocktaking</h1>
         <p style="color:var(--text-muted); margin-bottom:1rem;">Set up a stocktaking session for <strong id="inventering-warehouse-name"></strong>.</p>
 
         <label class="modal-label" for="inventering-area-select">Rack Area</label>
@@ -863,7 +864,7 @@
         </div>
         <div id="inventering-item-picker"></div>
 
-        <button class="success-btn full-width" onclick="startInventering()" style="margin-top:1.5rem;">▶️ Start Inventering</button>
+        <button class="success-btn full-width" onclick="startInventering()" style="margin-top:1.5rem;">▶️ Start Stocktaking</button>
     </section>
 
     <!-- View 3f: Inventering session — the counting checklist itself -->
@@ -872,7 +873,7 @@
             <button class="secondary" onclick="closeInventeringView()">← Back</button>
             <button class="secondary" onclick="clearInventeringSession()" style="color:var(--danger);">🗑️ Clear Session</button>
         </div>
-        <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">📋 Inventering</h1>
+        <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">📋 Stocktaking</h1>
         <p id="inventering-progress" style="color:var(--text-muted); margin-bottom:1rem;"></p>
         <div id="inventering-items"></div>
     </section>
@@ -960,13 +961,13 @@
             <div style="display:flex;align-items:center;gap:6px;">
                 <span style="font-weight:600;font-size:0.85rem;">Left margin</span>
                 <button class="secondary" style="min-width:28px;padding:2px 8px;" onclick="stepPad('l',-1)">−</button>
-                <span id="label-pad-left-val" class="range-value">2mm</span>
+                <span id="label-pad-left-val" class="range-value">4mm</span>
                 <button class="secondary" style="min-width:28px;padding:2px 8px;" onclick="stepPad('l',1)">+</button>
             </div>
             <div style="display:flex;align-items:center;gap:6px;">
                 <span style="font-weight:600;font-size:0.85rem;">Right margin</span>
                 <button class="secondary" style="min-width:28px;padding:2px 8px;" onclick="stepPad('r',-1)">−</button>
-                <span id="label-pad-right-val" class="range-value">2mm</span>
+                <span id="label-pad-right-val" class="range-value">4mm</span>
                 <button class="secondary" style="min-width:28px;padding:2px 8px;" onclick="stepPad('r',1)">+</button>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
@@ -1100,7 +1101,7 @@
     var editTargetBTK = null;
     var DEMO_PASSPHRASE = 'varuhuset';
     var DEMO_VERSION = 3;
-    var labelPadLeft = 2, labelPadRight = 2, labelFontScale = 1;
+    var labelPadLeft = 4, labelPadRight = 4, labelFontScale = 1;
     var labelMode = 'items';
     var labelPaperType = 'default'; // 'default' (29x90 Brother QL) | 'wide68' (68mm wide, custom length)
     var labelWide68Height = 28; // mm — the adjustable dimension for the wide68 paper type
@@ -4424,6 +4425,34 @@ th { background: #eee; }
         }
     }
 
+    // Lets a counter fix a wrong stock number right from the session list, no detour into the
+    // item's own page — same prompt() UX as editPackOrderQty(), same persistence as adjustStock().
+    function editInventeringQty(btk) {
+        const item = globalInventory.find(i => i.BTKnumber === btk);
+        if (!item || !canEditItems()) return;
+        const current = parseInt(item.Numberofitems, 10) || 0;
+        const input = prompt(`Set quantity for this item (was ${current}):`, String(current));
+        if (input === null) return; // cancelled
+        const next = parseInt(input, 10);
+        if (isNaN(next) || next < 0) { showToast("Enter a valid number.", "error"); return; }
+        setInventeringQty(btk, next);
+    }
+
+    async function setInventeringQty(btk, next) {
+        const item = globalInventory.find(i => i.BTKnumber === btk);
+        if (!item) return;
+        const current = parseInt(item.Numberofitems, 10) || 0;
+        item.Numberofitems = String(next);
+        renderInventeringList();
+
+        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const { error } = await sb.from('items').update({ numberofitems: next }).eq('btk', btk);
+            if (error) { item.Numberofitems = String(current); renderInventeringList(); showToast("Could not update stock: " + error.message, "error"); return; }
+        } else {
+            saveDraft(currentWarehouseId);
+        }
+    }
+
     // Clicking a row (not the Done button) opens that item's own detail view — Back returns here
     // via backFromItem()'s 'inventering' branch, same pattern as Pack Order's rows.
     function renderInventeringList() {
@@ -4442,22 +4471,30 @@ th { background: #eee; }
             const item = globalInventory.find(i => i.BTKnumber === line.btk);
             const name = item ? (item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed') : 'Unknown item (not in the currently loaded warehouse)';
             const num1 = (item && item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
+            const num2 = (item && item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
+            const nums = [num1, num2].filter(Boolean).join(' · ');
+            const mfr = (item && item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
             const loc = item ? describeLocationCode(item.LocationCode) : null;
             const qty = item ? item.Numberofitems : '?';
+            const qtyEditable = item && canEditItems();
             const lastCounted = (item && item.lastInventoriedAt) ? `Last counted ${new Date(item.lastInventoriedAt).toLocaleDateString()}` : '';
             const div = document.createElement('div');
             div.className = 'kit-row';
             div.style.cursor = 'pointer';
             div.innerHTML = `
-                <div class="pack-order-qty">${escapeHtml(String(qty))}</div>
+                <div class="pack-order-qty"${qtyEditable ? ' role="button" tabindex="0" title="Click to change quantity" data-role="qty-display"' : ''}>${escapeHtml(String(qty))}</div>
                 <div class="kit-info">
                     <div class="item-title" style="font-size:1.05rem;font-weight:800;${line.done ? 'text-decoration:line-through;opacity:0.6;' : ''}">${escapeHtml(name)}</div>
-                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${escapeHtml(line.btk)}${num1 ? ' · ' + escapeHtml(num1) : ''}${loc ? ' · 📍 ' + escapeHtml(loc) : ''}</div>
+                    ${nums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${escapeHtml(nums)}</div>` : ''}
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${mfr ? escapeHtml(mfr) + ' · ' : ''}${escapeHtml(line.btk)}${loc ? ' · 📍 ' + escapeHtml(loc) : ''}</div>
                     ${lastCounted ? `<div class="item-sub" style="font-size:0.72rem;color:var(--text-muted);opacity:0.8;">${lastCounted}</div>` : ''}
                 </div>
                 <button class="${line.done ? 'success-btn' : 'secondary'} pack-toggle-btn" data-role="toggle">${line.done ? '✅ Done' : '⬜ Not Done'}</button>`;
             div.onclick = () => openItem(line.btk, { type: 'inventering' });
             div.querySelector('[data-role="toggle"]').onclick = (e) => { e.stopPropagation(); toggleInventeringDone(line.btk); };
+            if (qtyEditable) {
+                div.querySelector('[data-role="qty-display"]').onclick = (e) => { e.stopPropagation(); editInventeringQty(line.btk); };
+            }
             frag.appendChild(div);
         });
         container.appendChild(frag);
@@ -5389,10 +5426,12 @@ th { background: #eee; }
             const num2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
             const nums = [num1, num2].filter(Boolean).join(' · ');
             const name = item['itemname(english)'] || item['itemname(swedish)'] || 'Unknown';
+            const mfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
 
             textDiv.innerHTML = `
                 ${nums ? `<div class="l-nums">${nums}</div>` : ''}
                 <div class="l-name">${name}</div>
+                ${mfr ? `<div class="l-mfr">${mfr}</div>` : ''}
                 <div class="l-btk">${item.BTKnumber || id}</div>`;
 
             labelEl.appendChild(qrDiv);
@@ -5511,13 +5550,14 @@ th { background: #eee; }
         // wins over these stylesheet defaults. @page size can't be driven by a custom property though,
         // so that one has to be resolved from the current paper type here, at build time.
         const dims = getLabelDims();
-        const css = `.label-card{--pad-l:2mm;--pad-r:2mm;--fs:1;--label-w:${dims.w}mm;--label-h:${dims.h}mm;width:var(--label-w);height:var(--label-h);background:#fff!important;color:#000;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm var(--pad-r) 1.5mm var(--pad-l);overflow:hidden;position:relative}
+        const css = `.label-card{--pad-l:4mm;--pad-r:4mm;--fs:1;--label-w:${dims.w}mm;--label-h:${dims.h}mm;width:var(--label-w);height:var(--label-h);background:#fff!important;color:#000;display:flex;align-items:stretch;box-sizing:border-box;padding:1.5mm var(--pad-r) 1.5mm var(--pad-l);overflow:hidden;position:relative}
 .label-qr{width:calc(var(--label-h) - 3mm);height:calc(var(--label-h) - 3mm);flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-right:4mm}
 .label-qr img,.label-qr canvas{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
 .label-text{flex-grow:1;display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-end;overflow:hidden;height:100%;text-align:right;min-width:0}
 .label-text div{line-height:1.2;font-family:Arial,Helvetica,sans-serif!important;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .l-nums{font-size:calc(14pt * var(--fs));font-weight:900;color:#000;letter-spacing:-0.3px;margin-top:0.5mm}
 .l-name{font-size:calc(11pt * var(--fs));font-weight:700;color:#000;margin-top:1.5mm}
+.l-mfr{font-size:calc(8pt * var(--fs));color:#333;font-weight:600;margin-top:0.5mm}
 .l-btk{font-size:calc(6pt * var(--fs));color:#555;font-weight:600;letter-spacing:0.3px;margin-top:auto}
 .preview-grid{background:none!important;display:block;padding:0;gap:0;margin:0;max-height:none;overflow:visible}
 .no-print{display:none!important}
