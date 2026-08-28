@@ -591,6 +591,7 @@
             <select id="ai-loc-depth" onchange="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:90px; margin:0;"><option value="">Depth…</option></select>
             <select id="ai-loc-level" onchange="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:80px; margin:0;"><option value="">Level…</option></select>
             <input type="number" id="ai-loc-bin" placeholder="Bin" min="1" oninput="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:70px; margin:0;">
+            <input type="number" id="ai-loc-binrow" placeholder="Row (deep)" min="1" title="How many bins back from the front of the shelf — leave blank if it's the front-most (or only) bin" oninput="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:70px; margin:0;">
         </div>
         <p id="ai-loc-grid-caption" style="color:var(--text-muted); font-size:0.78rem; margin:0 0 4px;"></p>
         <div class="warehouse-map loc-picker-grid" id="ai-loc-grid"></div>
@@ -4839,6 +4840,7 @@ th { background: #eee; }
                 <select id="qe-loc-depth" onchange="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:90px; margin:0;"><option value="">Depth…</option></select>
                 <select id="qe-loc-level" onchange="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:80px; margin:0;"><option value="">Level…</option></select>
                 <input type="number" id="qe-loc-bin" placeholder="Bin" min="1" oninput="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:70px; margin:0;">
+                <input type="number" id="qe-loc-binrow" placeholder="Row (deep)" min="1" title="How many bins back from the front of the shelf — leave blank if it's the front-most (or only) bin" oninput="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:70px; margin:0;">
             </div>
             <p id="qe-loc-grid-caption" style="color:var(--text-muted); font-size:0.78rem; margin:0 0 4px;"></p>
             <div class="warehouse-map loc-picker-grid" id="qe-loc-grid"></div>
@@ -5041,17 +5043,22 @@ th { background: #eee; }
     // bays long it is) is purely a Layout Designer drawing property — never part of an item's own
     // code, since it was never really a property of one item. Returns null if the string doesn't
     // match — callers should show it as invalid rather than silently drop it.
-    const LOCATION_CODE_RE = /^([A-Z]{1,2})(\d{1,2})-(\d{1,2})-(\d{2})$/;
+    // Trailing -Row is optional and omitted from the code whenever it's 1 (the default, front-most
+    // bin) — so every code written before Bin Row existed still parses exactly as before, no
+    // migration needed. Row is a bin's own front-to-back position on a multi-deep shelf spot,
+    // distinct from rack Depth (which is about racks, not individual bins).
+    const LOCATION_CODE_RE = /^([A-Z]{1,2})(\d{1,2})-(\d{1,2})-(\d{2})(?:-(\d{1,2}))?$/;
     function parseLocationCode(code) {
         const m = String(code || '').trim().toUpperCase().match(LOCATION_CODE_RE);
         if (!m) return null;
-        return { zone: m[1], depth: Number(m[2]), level: Number(m[3]), bin: Number(m[4]) };
+        return { zone: m[1], depth: Number(m[2]), level: Number(m[3]), bin: Number(m[4]), binRow: m[5] ? Number(m[5]) : 1 };
     }
     function describeLocationCode(code) {
         const p = parseLocationCode(code);
         if (!p) return null;
         const depthLabel = p.depth === 1 ? ' (front)' : p.depth === 2 ? ' (back)' : '';
-        return `Zone ${p.zone} · Rack ${p.depth}${depthLabel} · Level ${p.level} · Bin ${p.bin}`;
+        const rowLabel = p.binRow > 1 ? ` (${p.binRow - 1} bin${p.binRow > 2 ? 's' : ''} back)` : '';
+        return `Zone ${p.zone} · Rack ${p.depth}${depthLabel} · Level ${p.level} · Bin ${p.bin}${rowLabel}`;
     }
 
     // Walking order for "Sort: Bin Location" — zone alphabetically, then depth/level/bin
@@ -5063,7 +5070,7 @@ th { background: #eee; }
         if (!pa && !pb) return 0;
         if (!pa) return 1;
         if (!pb) return -1;
-        return pa.zone.localeCompare(pb.zone) || pa.depth - pb.depth || pa.level - pb.level || pa.bin - pb.bin;
+        return pa.zone.localeCompare(pb.zone) || pa.depth - pb.depth || pa.level - pb.level || pa.bin - pb.bin || pa.binRow - pb.binRow;
     }
 
     // ── Assisted Bin Location Code picker (quick-edit + Add/Edit modal) ──────
@@ -5097,12 +5104,14 @@ th { background: #eee; }
         levelSelect.innerHTML = '<option value="">Level…</option>' + Array.from({ length: maxLevel }, (_, i) => i + 1)
             .map(n => `<option value="${n}">${n}</option>`).join('');
         const binInput = document.getElementById(`${prefix}-loc-bin`);
+        const binRowInput = document.getElementById(`${prefix}-loc-binrow`);
         if (parsed) {
             if (parsed.depth <= maxDepth) depthSelect.value = String(parsed.depth);
             if (parsed.level <= maxLevel) levelSelect.value = String(parsed.level);
             binInput.value = parsed.bin || '';
+            binRowInput.value = parsed.binRow > 1 ? String(parsed.binRow) : '';
         } else {
-            depthSelect.value = ''; levelSelect.value = ''; binInput.value = '';
+            depthSelect.value = ''; levelSelect.value = ''; binInput.value = ''; binRowInput.value = '';
         }
         renderLocationCodePickerGrid(prefix);
     }
@@ -5152,15 +5161,19 @@ th { background: #eee; }
         syncLocationCodeFromPicker(prefix);
     }
 
-    // Only writes into the text field once all four pieces are present — a half-filled picker
-    // shouldn't overwrite a code someone's in the middle of typing by hand instead.
+    // Only writes into the text field once the four required pieces are present — a half-filled
+    // picker shouldn't overwrite a code someone's in the middle of typing by hand instead. Bin Row
+    // is optional and left off the code entirely when it's 1 (front) or blank, so a plain shelf
+    // (never more than one bin deep) never grows a trailing "-1" nobody asked for.
     function syncLocationCodeFromPicker(prefix) {
         const zone = document.getElementById(`${prefix}-loc-zone`).value;
         const depth = document.getElementById(`${prefix}-loc-depth`).value;
         const level = document.getElementById(`${prefix}-loc-level`).value;
         const bin = document.getElementById(`${prefix}-loc-bin`).value;
+        const binRow = parseInt(document.getElementById(`${prefix}-loc-binrow`).value, 10) || 1;
         if (!zone || !depth || !level || !bin) return;
-        document.getElementById(`${prefix}-locationcode`).value = `${zone}${depth}-${level}-${String(bin).padStart(2, '0')}`;
+        const rowSuffix = binRow > 1 ? `-${binRow}` : '';
+        document.getElementById(`${prefix}-locationcode`).value = `${zone}${depth}-${level}-${String(bin).padStart(2, '0')}${rowSuffix}`;
     }
 
     function syncLocationPickerFromText(prefix) {
@@ -5174,12 +5187,16 @@ th { background: #eee; }
 
     function showLocationCodeInfo() {
         alert(
-            "Bin Location Code format: ZoneDepth-Level-Bin\n\n" +
+            "Bin Location Code format: ZoneDepth-Level-Bin(-Row)\n\n" +
             "Example: A1-4-07\n" +
             "  • A = Zone (which rack area — see the Warehouse page's Layout Designer)\n" +
             "  • 1 = Depth (which rack: 1 is the front row, 2 would be the back row of a back-to-back pair)\n" +
             "  • 4 = Level (shelf tier — 1 is the one closest to the ground, counting up)\n" +
             "  • 07 = Bin (the exact spot on that shelf)\n\n" +
+            "Example with Row: A1-4-07-2\n" +
+            "  • -2 = Bin Row — only needed on a shelf that's several bins deep front-to-back. " +
+            "1 (the default, and left off the code) is the front-most bin you'd see first; " +
+            "2 means it's one bin further back, hidden behind bin 07 until that one's moved.\n\n" +
             "Pick from the dropdowns above, or just type the code directly if you already know it."
         );
     }
