@@ -191,6 +191,10 @@
         .warehouse-map { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 0.5rem; background: var(--border); padding: 10px; border-radius: 12px; }
         .map-cell { aspect-ratio: 1; background: var(--card-bg); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: var(--text-muted); font-weight: bold; transition: all 0.3s; }
         .map-cell.active { background: var(--primary); color: white; box-shadow: 0 0 12px rgba(37, 99, 235, 0.6); transform: scale(1.1); z-index: 2; }
+        .map-cell.clickable { cursor: pointer; }
+        .map-cell.clickable:hover { background: var(--primary-light); }
+        .loc-picker-grid { max-width: 260px; }
+        .loc-picker-grid .map-cell { font-size: 0.7rem; }
 
         /* --- LAYOUT DESIGNER (Warehouse page, draw mode) --- */
         .zone-draw-grid {
@@ -588,6 +592,8 @@
             <select id="ai-loc-level" onchange="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:80px; margin:0;"><option value="">Level…</option></select>
             <input type="number" id="ai-loc-bin" placeholder="Bin" min="1" oninput="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:70px; margin:0;">
         </div>
+        <p id="ai-loc-grid-caption" style="color:var(--text-muted); font-size:0.78rem; margin:0 0 4px;"></p>
+        <div class="warehouse-map loc-picker-grid" id="ai-loc-grid"></div>
         <input type="text" id="ai-locationcode" placeholder="…or type the code directly, e.g. A1-4-07" oninput="syncLocationPickerFromText('ai')" style="text-transform:uppercase;">
 
         <label class="modal-label" for="ai-comments">Comments</label>
@@ -4828,6 +4834,8 @@ th { background: #eee; }
                 <select id="qe-loc-level" onchange="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:80px; margin:0;"><option value="">Level…</option></select>
                 <input type="number" id="qe-loc-bin" placeholder="Bin" min="1" oninput="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:70px; margin:0;">
             </div>
+            <p id="qe-loc-grid-caption" style="color:var(--text-muted); font-size:0.78rem; margin:0 0 4px;"></p>
+            <div class="warehouse-map loc-picker-grid" id="qe-loc-grid"></div>
             <input type="text" id="qe-locationcode" value="${escapeHtml(val(item.LocationCode))}" placeholder="…or type the code directly, e.g. A1-4-07" oninput="syncLocationPickerFromText('qe')" style="text-transform:uppercase;">
             <label class="modal-label" for="qe-comments">Comments</label>
             <textarea id="qe-comments">${escapeHtml(val(item.Comments))}</textarea>`;
@@ -5089,6 +5097,47 @@ th { background: #eee; }
             binInput.value = parsed.bin || '';
         } else {
             depthSelect.value = ''; levelSelect.value = ''; binInput.value = '';
+        }
+        renderLocationCodePickerGrid(prefix);
+    }
+
+    // Clicking a cell sets Depth+Level directly — an alternative to the dropdowns for people who
+    // think in terms of "where on the rack" rather than typed numbers. Bin still isn't a grid axis
+    // (see renderBinLocationMap's comment) so it stays a typed field even here.
+    function pickLocationCell(prefix, depth, level) {
+        document.getElementById(`${prefix}-loc-depth`).value = String(depth);
+        document.getElementById(`${prefix}-loc-level`).value = String(level);
+        syncLocationCodeFromPicker(prefix);
+        renderLocationCodePickerGrid(prefix);
+    }
+
+    // Interactive Depth × Level grid for the Add/Edit modal and quick-edit's location picker —
+    // same getZoneBounds() sizing as the read-only Bin Location Map on the item view, but every
+    // cell is clickable instead of just showing where the item currently is.
+    function renderLocationCodePickerGrid(prefix) {
+        const grid = document.getElementById(`${prefix}-loc-grid`);
+        const caption = document.getElementById(`${prefix}-loc-grid-caption`);
+        if (!grid) return;
+        const zone = document.getElementById(`${prefix}-loc-zone`).value;
+        grid.innerHTML = '';
+        grid.style.gridTemplateColumns = '';
+        if (!zone) { caption.textContent = ''; return; }
+        const bounds = getZoneBounds(zone);
+        if (!bounds) { caption.textContent = `No sized layout for Zone ${zone} yet — use the dropdowns/text above.`; return; }
+        caption.textContent = `Zone ${zone} — tap a cell to set Depth × Level`;
+        const curDepth = document.getElementById(`${prefix}-loc-depth`).value;
+        const curLevel = document.getElementById(`${prefix}-loc-level`).value;
+        grid.style.gridTemplateColumns = `repeat(${bounds.maxDepth}, 1fr)`;
+        for (let level = bounds.maxLevel; level >= 1; level--) {
+            for (let depth = 1; depth <= bounds.maxDepth; depth++) {
+                const isActive = String(depth) === curDepth && String(level) === curLevel;
+                const cell = document.createElement('div');
+                cell.className = 'map-cell clickable' + (isActive ? ' active' : '');
+                cell.title = `Rack ${depth} · Level ${level}`;
+                cell.innerText = `${depth}·${level}`;
+                cell.onclick = () => pickLocationCell(prefix, depth, level);
+                grid.appendChild(cell);
+            }
         }
     }
 
