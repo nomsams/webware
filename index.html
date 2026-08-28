@@ -172,7 +172,19 @@
         .fab-btn { border-radius: 50px; padding: 0.75rem 1.5rem; margin: 0; }
         .fab-btn-pack { background: var(--success); }
         .fab-btn-pack:hover { background: #0d9c6f; }
+        .fab-btn-danger { background: var(--danger); }
+        .fab-btn-danger:hover { background: #b91c1c; }
+        .fab-btn-merge { background: var(--border); color: var(--text-main); }
         .fab-clear { background: var(--border); color: var(--text-main); border-radius: 50px; padding: 0 1rem; font-weight: bold; }
+
+        /* Merge view — one row per field, one column per item being merged */
+        .merge-table { border-collapse: separate; border-spacing: 0 6px; width: 100%; min-width: 480px; }
+        .merge-row-label { font-weight: 700; color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; padding: 8px 12px 8px 0; vertical-align: middle; }
+        .merge-cell { background: var(--card-bg); border: 2px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; min-width: 150px; max-width: 220px; vertical-align: middle; word-break: break-word; transition: all 0.15s; }
+        .merge-cell:hover { border-color: var(--primary); }
+        .merge-cell.selected { border-color: var(--primary); background: var(--primary-light); font-weight: 600; }
+        .merge-col-header { font-size: 0.72rem; color: var(--text-muted); font-weight: 700; padding: 4px 12px; white-space: nowrap; }
+        .merge-custom-note { display: flex; align-items: center; gap: 8px; background: var(--primary-light); border-radius: 8px; padding: 6px 10px; font-size: 0.8rem; margin: 4px 0 10px; }
 
         /* Floating edit bar (quick-edit Save/Cancel) — fixed to the viewport bottom, same
            slide-in transition as the FAB above, so entering/leaving quick-edit never shifts the
@@ -607,6 +619,20 @@
     </div>
 </div>
 
+<!-- Generic destructive-action confirmation (Remove/Merge) — replaces native confirm()/alert()
+     for anything that permanently deletes data, so the warning reads like the rest of the app
+     instead of a jarring browser dialog. See showConfirmModal(). -->
+<div class="modal-overlay" id="confirm-modal" onclick="handleConfirmModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:480px;">
+        <h3 id="confirm-modal-title" style="margin-top:0;"></h3>
+        <div id="confirm-modal-body" style="color:var(--text-main); line-height:1.6; white-space:pre-line; font-size:0.92rem; max-height:45vh; overflow-y:auto;"></div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeConfirmModal()">Cancel</button>
+            <button class="danger full-width" id="confirm-modal-confirm-btn" onclick="runConfirmModalAction()">Confirm</button>
+        </div>
+    </div>
+</div>
+
 <header>
     <div class="logo-container">
         <img src="logo.png" alt="Company Logo" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzI1NjNlYiIgcng9IjIwIi8+PHRleHQgeD0iNTAiIHk9IjU4IiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjQ0IiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSIjZmZmZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5XVzwvdGV4dD48L3N2Zz4='" />
@@ -724,6 +750,7 @@
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
             <button class="secondary" onclick="backFromItem()" style="flex-shrink:0;">← Back</button>
             <button class="secondary" id="btn-edit-item" onclick="openEditItemModal()" style="flex-shrink:0;">✏️ Edit</button>
+            <button class="secondary" id="btn-duplicate-item" onclick="duplicateItem()" style="flex-shrink:0;">📋 Duplicate</button>
             <button id="btn-prev-item" class="hidden secondary" onclick="prevInKit()" style="flex-shrink:0;">⬅️ Prev</button>
             <button id="btn-next-item" class="hidden secondary" onclick="nextInKit()" style="flex-shrink:0;">➡️ Next</button>
             <button id="btn-single-label" style="flex:1; min-width:160px;">🏷️ Create Label</button>
@@ -891,7 +918,7 @@
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
             <button class="secondary" onclick="closePackOrderView()">← Back</button>
             <button class="secondary" id="btn-pack-order-edit" onclick="togglePackOrderEditMode()" style="flex-shrink:0;">✏️ Edit Order</button>
-            <button class="secondary" onclick="printPackOrder()" style="flex-shrink:0; padding:0.5rem 0.9rem; min-height:38px;" title="Print (or Save as PDF) on A4">🖨️ Print</button>
+            <button class="secondary" onclick="printPackOrder()" style="flex-shrink:0;" title="Print (or Save as PDF) on A4">🖨️ Print</button>
             <button class="secondary" onclick="clearPackOrder()" style="color:var(--danger); flex-shrink:0;">🗑️ Clear Order</button>
         </div>
         <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">📦 Pack Order</h1>
@@ -997,6 +1024,21 @@
         </div>
     </section>
 
+    <!-- View: Merge Items — pick which selected item's value survives for each field, then the
+         rest are deleted and their full data is logged as a comment on the survivor. -->
+    <section id="merge-view" class="card hidden">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
+            <button class="secondary" onclick="closeMergeView()">← Back</button>
+        </div>
+        <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">🔀 Merge Items</h1>
+        <p style="color:var(--text-muted); margin-bottom:1rem; font-size:0.9rem;">Tap the value you want to keep in each row — one item survives with the winning values below; the rest are permanently deleted, and everything they had gets logged as a comment on the survivor first. Double-click a Quantity cell to type a combined number instead of picking one as-is.</p>
+        <div id="merge-grid-container" style="overflow-x:auto;"></div>
+        <div class="modal-actions" style="margin-top:1.5rem;">
+            <button class="secondary full-width" onclick="closeMergeView()">Cancel</button>
+            <button class="danger full-width" onclick="confirmMerge()">🔀 Merge & Delete the Rest</button>
+        </div>
+    </section>
+
     <!-- View 5: Settings -->
     <section id="settings-view" class="card hidden">
         <h2 style="margin-bottom: 1.5rem;">App Settings</h2>
@@ -1055,6 +1097,8 @@
             <button class="fab-btn fab-btn-pack" onclick="addSelectionToPackOrder()">
                 📦 Pack (<span id="selected-count-pack">0</span>)
             </button>
+            <button class="fab-btn fab-btn-danger hidden" id="btn-fab-remove" onclick="confirmRemoveSelectedItems()">🗑️ Remove</button>
+            <button class="fab-btn fab-btn-merge hidden" id="btn-fab-merge" onclick="openMergeView()">🔀 Merge</button>
         </div>
     </div>
 
@@ -2281,7 +2325,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function switchView(viewId) {
-        ['auth-view','list-view','item-view','kit-view','manufacturer-view','warehouse-view','pack-order-view','inventering-setup-view','inventering-view','preview-view','settings-view'].forEach(v => {
+        ['auth-view','list-view','item-view','kit-view','manufacturer-view','warehouse-view','pack-order-view','inventering-setup-view','inventering-view','preview-view','settings-view','merge-view'].forEach(v => {
             document.getElementById(v).classList.add('hidden');
         });
         document.getElementById(viewId).classList.remove('hidden');
@@ -4003,6 +4047,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('selected-count').innerText = selectedItems.size;
         document.getElementById('selected-count-pack').innerText = selectedItems.size;
         fab.classList.toggle('visible', selectedItems.size > 0);
+        // Remove/Merge are destructive, unlike Labels/Pack — gated on canEditItems() so a viewer
+        // never sees them, regardless of how many items they've selected.
+        const canEdit = canEditItems();
+        document.getElementById('btn-fab-remove').classList.toggle('hidden', !canEdit || selectedItems.size === 0);
+        document.getElementById('btn-fab-merge').classList.toggle('hidden', !canEdit || selectedItems.size < 2);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -4556,6 +4605,7 @@ th { background: #eee; }
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
         const isViewer = isSupa && currentUserRole === 'viewer';
         document.getElementById('btn-edit-item').classList.toggle('hidden', isViewer);
+        document.getElementById('btn-duplicate-item').classList.toggle('hidden', isViewer);
 
         const filenames = renderItemGallery(item);
         renderImageAddControls(filenames.length > 0);
@@ -5348,6 +5398,273 @@ th { background: #eee; }
 
     function closeAddItemModal() { document.getElementById('add-item-modal').classList.remove('open'); }
     function handleModalOverlayClick(e) { if (e.target === document.getElementById('add-item-modal')) closeAddItemModal(); }
+
+    // ── Generic destructive-action confirmation (Remove / Merge) ─────────────
+    // Stands in for native confirm()/alert() everywhere an action permanently deletes data, so the
+    // warning looks like the rest of the app instead of a jarring browser dialog. `onConfirm` runs
+    // only after the Confirm button is actually clicked; Cancel/overlay-click/away-navigation just
+    // drop it on the floor.
+    var confirmModalAction = null;
+    function showConfirmModal(opts) {
+        document.getElementById('confirm-modal-title').textContent = opts.title || 'Are you sure?';
+        document.getElementById('confirm-modal-body').textContent = opts.body || '';
+        document.getElementById('confirm-modal-confirm-btn').textContent = opts.confirmLabel || 'Confirm';
+        confirmModalAction = opts.onConfirm || null;
+        document.getElementById('confirm-modal').classList.add('open');
+    }
+    function closeConfirmModal() {
+        document.getElementById('confirm-modal').classList.remove('open');
+        confirmModalAction = null;
+    }
+    function runConfirmModalAction() {
+        const action = confirmModalAction;
+        closeConfirmModal();
+        if (action) action();
+    }
+    function handleConfirmModalOverlayClick(e) { if (e.target === document.getElementById('confirm-modal')) closeConfirmModal(); }
+
+    // ── DUPLICATE ITEM ────────────────────────────────────────────────────────
+    // Copies every field of the current item under a fresh, guaranteed-unique BTK number. Images
+    // are deliberately NOT carried over: Supabase-mode photos are Storage objects the "remove
+    // image" button deletes outright, and two items silently sharing one URL means removing the
+    // photo from the duplicate would also blow it away for the original. Re-uploading on the
+    // duplicate (if wanted) is one tap away either way.
+    function generateUniqueBTK(base) {
+        const exists = (b) => globalInventory.some(i => i.BTKnumber === b);
+        let n = 2, candidate = `${base}-COPY`;
+        while (exists(candidate)) { candidate = `${base}-COPY${n}`; n++; }
+        return candidate;
+    }
+    async function duplicateItem() {
+        if (!canEditItems() || !currentItemBTK) return;
+        const original = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+        if (!original) return;
+        const newBTK = generateUniqueBTK(original.BTKnumber);
+
+        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const mfr = await resolveManufacturer(original.Manufacturer);
+            const row = {
+                manufacturer: mfr.name, manufacturer_id: mfr.id, itemnumber: original.itemnumber,
+                itemname_en: original['itemname(english)'], itemname_sv: original['itemname(swedish)'],
+                itemnumber2: original.itemnumber2, itemnumber3: original.itemnumber3,
+                numberofitems: parseInt(original.Numberofitems, 10) || 0,
+                inventorylocation: original.Inventorylocation === 'None' ? null : original.Inventorylocation,
+                map_position: original.MapPosition === 'None' ? null : original.MapPosition,
+                location_code: original.LocationCode === 'None' ? null : original.LocationCode,
+                comments: original.Comments === 'None' ? null : original.Comments
+            };
+            const { error } = await sb.from('items').insert({ ...row, btk: newBTK, warehouse_id: currentWarehouseId, images: '' });
+            if (error) return showToast("Could not duplicate: " + error.message, "error");
+            await supabaseLoadList(currentWarehouseId);
+            showToast(`Duplicated as ${newBTK}.`, "success");
+            openItem(newBTK, { type: 'global' });
+            return;
+        }
+
+        const copy = { ...original, BTKnumber: newBTK, images: original.images || '' };
+        globalInventory.push(copy);
+        saveDraft(currentWarehouseId);
+        showToast(`Duplicated as ${newBTK} (draft autosaved).`, "success");
+        openItem(newBTK, { type: 'global' });
+    }
+
+    // ── REMOVE ITEMS (multi-select, from the item list) ───────────────────────
+    function confirmRemoveSelectedItems() {
+        if (!canEditItems() || selectedItems.size === 0) return;
+        const ids = Array.from(selectedItems);
+        const items = ids.map(id => globalInventory.find(i => i.BTKnumber === id)).filter(Boolean);
+        const names = items.map(i => `• ${i['itemname(english)'] || i['itemname(swedish)'] || 'Unnamed'} (${i.BTKnumber})`).join('\n');
+        showConfirmModal({
+            title: `Delete ${ids.length} item${ids.length > 1 ? 's' : ''}?`,
+            body: `This permanently removes:\n\n${names}\n\nThis can't be undone.`,
+            confirmLabel: '🗑️ Delete',
+            onConfirm: () => removeItems(ids)
+        });
+    }
+    async function removeItems(ids) {
+        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const { error } = await sb.from('items').delete().in('btk', ids);
+            if (error) return showToast("Could not delete: " + error.message, "error");
+            clearSelection();
+            await supabaseLoadList(currentWarehouseId);
+            showToast(`Deleted ${ids.length} item(s).`, "success");
+        } else {
+            globalInventory = globalInventory.filter(i => !ids.includes(i.BTKnumber));
+            saveDraft(currentWarehouseId);
+            clearSelection();
+            if (listMode === 'items') filterList(false);
+            showToast(`Deleted ${ids.length} item(s) (draft autosaved).`, "success");
+        }
+    }
+
+    // ── MERGE ITEMS ─────────────────────────────────────────────────────────
+    // Every field is "pick the winning cell" (radio, one per row) except Quantity, which can also
+    // be double-clicked to type a combined number instead. Whatever BTK wins the BTK Number row is
+    // the surviving row (updated in place with every other winning value); every other selected
+    // item is deleted, but nothing is silently lost — their full original data is appended to the
+    // survivor's Comments first.
+    var mergeCandidates = [];
+    var mergeSelections = {}; // fieldKey -> index into mergeCandidates
+    var mergeCustomQty = null; // non-null while a typed-in combined quantity overrides the picker
+
+    const MERGE_FIELDS = [
+        { key: 'BTKnumber', label: 'BTK Number' },
+        { key: 'itemname(english)', label: 'Item Name (English)' },
+        { key: 'itemname(swedish)', label: 'Item Name (Swedish)' },
+        { key: 'itemnumber', label: 'Item #1' },
+        { key: 'itemnumber2', label: 'Item #2' },
+        { key: 'itemnumber3', label: 'Item #3 (Internal)' },
+        { key: 'Manufacturer', label: 'Manufacturer' },
+        { key: 'Numberofitems', label: 'Quantity' },
+        { key: 'Inventorylocation', label: 'Inventory Location' },
+        { key: 'MapPosition', label: 'Map Position' },
+        { key: 'LocationCode', label: 'Bin Location Code' },
+        { key: 'Comments', label: 'Comments' }
+    ];
+
+    function openMergeView() {
+        if (!canEditItems() || selectedItems.size < 2) return;
+        mergeCandidates = Array.from(selectedItems).map(id => globalInventory.find(i => i.BTKnumber === id)).filter(Boolean);
+        if (mergeCandidates.length < 2) { showToast("Need at least 2 valid items to merge.", "warning"); return; }
+        mergeSelections = {};
+        MERGE_FIELDS.forEach(f => { mergeSelections[f.key] = 0; }); // default: first selected item's value wins
+        mergeCustomQty = null;
+        switchView('merge-view');
+        document.getElementById('fab-bar').classList.remove('visible'); // its own Merge/Cancel buttons replace the FAB here
+        renderMergeGrid();
+    }
+    function closeMergeView() { showListView('items'); updateFab(); }
+
+    function mergeFieldDisplay(val) { return (val === undefined || val === null || val === 'None' || val === '') ? '(none)' : String(val); }
+
+    function renderMergeGrid() {
+        const container = document.getElementById('merge-grid-container');
+        let html = '<table class="merge-table"><tr><td></td>' +
+            mergeCandidates.map((item, idx) => `<td class="merge-col-header">Item ${idx + 1}<br>${escapeHtml(item.BTKnumber)}</td>`).join('') + '</tr>';
+
+        MERGE_FIELDS.forEach(f => {
+            html += `<tr><td class="merge-row-label">${escapeHtml(f.label)}</td>`;
+            mergeCandidates.forEach((item, idx) => {
+                const isQty = f.key === 'Numberofitems';
+                const selected = isQty ? (mergeCustomQty === null && mergeSelections[f.key] === idx) : mergeSelections[f.key] === idx;
+                const dblclick = isQty ? ` ondblclick="promptCustomMergeQty(event,${idx})"` : '';
+                html += `<td class="merge-cell${selected ? ' selected' : ''}" onclick="pickMergeField('${f.key}',${idx})"${dblclick}>${escapeHtml(mergeFieldDisplay(item[f.key]))}</td>`;
+            });
+            html += '</tr>';
+            if (isQtyRowNote(f.key)) html += `<tr><td></td><td colspan="${mergeCandidates.length}">${qtyCustomNoteHtml()}</td></tr>`;
+        });
+        html += '</table>';
+        container.innerHTML = html;
+    }
+    function isQtyRowNote(key) { return key === 'Numberofitems' && mergeCustomQty !== null; }
+    function qtyCustomNoteHtml() {
+        return `<div class="merge-custom-note">✏️ Using custom combined quantity: <strong>${mergeCustomQty}</strong>
+            <button class="secondary" style="padding:2px 10px; min-height:auto; font-size:0.78rem;" onclick="clearCustomMergeQty()">✕ Clear</button></div>`;
+    }
+    function pickMergeField(key, idx) {
+        mergeSelections[key] = idx;
+        if (key === 'Numberofitems') mergeCustomQty = null;
+        renderMergeGrid();
+    }
+    function promptCustomMergeQty(e, idx) {
+        e.stopPropagation();
+        const seed = mergeCustomQty !== null ? mergeCustomQty : (parseInt(mergeCandidates[idx].Numberofitems, 10) || 0);
+        const val = prompt("Combined quantity:", String(seed));
+        if (val === null) return;
+        const n = parseInt(val, 10);
+        if (isNaN(n) || n < 0) { showToast("Enter a valid number.", "error"); return; }
+        mergeCustomQty = n;
+        renderMergeGrid();
+    }
+    function clearCustomMergeQty() {
+        mergeCustomQty = null;
+        renderMergeGrid();
+    }
+
+    function getMergeValue(key) {
+        const idx = mergeSelections[key] || 0;
+        return mergeCandidates[idx][key];
+    }
+
+    async function confirmMerge() {
+        const survivorBTK = getMergeValue('BTKnumber');
+        const survivor = mergeCandidates.find(i => i.BTKnumber === survivorBTK) || mergeCandidates[mergeSelections['BTKnumber'] || 0];
+        const losers = mergeCandidates.filter(i => i !== survivor && i.BTKnumber !== survivorBTK);
+        if (losers.length === 0) { showToast("Pick a different BTK to merge into, or select more items.", "warning"); return; }
+
+        const finalQty = mergeCustomQty !== null ? mergeCustomQty : (parseInt(getMergeValue('Numberofitems'), 10) || 0);
+        const winningComments = mergeFieldDisplay(getMergeValue('Comments'));
+        const auditLines = losers.map(i => {
+            const name = i['itemname(english)'] || i['itemname(swedish)'] || 'Unnamed';
+            return `[Merged ${new Date().toLocaleDateString()}] Deleted ${i.BTKnumber} (${name}) — ` +
+                `Manufacturer: ${mergeFieldDisplay(i.Manufacturer)}, Item#1: ${mergeFieldDisplay(i.itemnumber)}, ` +
+                `Item#2: ${mergeFieldDisplay(i.itemnumber2)}, Item#3: ${mergeFieldDisplay(i.itemnumber3)}, ` +
+                `Qty: ${mergeFieldDisplay(i.Numberofitems)}, Inventory Location: ${mergeFieldDisplay(i.Inventorylocation)}, ` +
+                `Map Position: ${mergeFieldDisplay(i.MapPosition)}, Bin Location: ${mergeFieldDisplay(i.LocationCode)}, ` +
+                `Comments: ${mergeFieldDisplay(i.Comments)}`;
+        });
+        const mergedComments = [winningComments === '(none)' ? '' : winningComments, ...auditLines].filter(Boolean).join('\n\n');
+
+        const promptBody = losers.map(i => `You are about to delete data entry ${i.BTKnumber} for ${i['itemname(english)'] || i['itemname(swedish)'] || 'Unnamed'}.`).join('\n') +
+            `\n\nSurviving item: ${survivorBTK}. Its full data will be replaced with your picks, and everything deleted above will be added to its Comments.`;
+
+        showConfirmModal({
+            title: `Merge ${mergeCandidates.length} items into ${survivorBTK}?`,
+            body: promptBody,
+            confirmLabel: '🔀 Merge & Delete',
+            onConfirm: () => runMerge(survivor, survivorBTK, losers, finalQty, mergedComments)
+        });
+    }
+
+    async function runMerge(survivor, survivorBTK, losers, finalQty, mergedComments) {
+        const loserBTKs = losers.map(i => i.BTKnumber);
+        const mergedItem = {
+            Manufacturer: getMergeValue('Manufacturer'),
+            BTKnumber: survivorBTK,
+            itemnumber: getMergeValue('itemnumber'),
+            'itemname(english)': getMergeValue('itemname(english)'),
+            'itemname(swedish)': getMergeValue('itemname(swedish)'),
+            itemnumber2: getMergeValue('itemnumber2'),
+            itemnumber3: getMergeValue('itemnumber3'),
+            Numberofitems: String(finalQty),
+            Inventorylocation: getMergeValue('Inventorylocation'),
+            MapPosition: getMergeValue('MapPosition'),
+            LocationCode: getMergeValue('LocationCode'),
+            Comments: mergedComments || 'None',
+            images: survivor.images || ''
+        };
+
+        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const mfr = await resolveManufacturer(mergedItem.Manufacturer);
+            const row = {
+                manufacturer: mfr.name, manufacturer_id: mfr.id, itemnumber: mergedItem.itemnumber,
+                itemname_en: mergedItem['itemname(english)'], itemname_sv: mergedItem['itemname(swedish)'],
+                itemnumber2: mergedItem.itemnumber2, itemnumber3: mergedItem.itemnumber3,
+                numberofitems: finalQty,
+                inventorylocation: mergedItem.Inventorylocation === 'None' ? null : mergedItem.Inventorylocation,
+                map_position: mergedItem.MapPosition === 'None' ? null : mergedItem.MapPosition,
+                location_code: mergedItem.LocationCode === 'None' ? null : mergedItem.LocationCode,
+                comments: mergedComments || null
+            };
+            const { error: updateError } = await sb.from('items').update(row).eq('btk', survivorBTK);
+            if (updateError) return showToast("Merge failed while saving the survivor: " + updateError.message, "error");
+            const { error: deleteError } = await sb.from('items').delete().in('btk', loserBTKs);
+            if (deleteError) return showToast("Survivor saved, but couldn't delete the rest: " + deleteError.message, "error");
+            clearSelection();
+            await supabaseLoadList(currentWarehouseId);
+            showToast(`Merged into ${survivorBTK}.`, "success");
+            openItem(survivorBTK, { type: 'global' });
+            return;
+        }
+
+        const idx = globalInventory.findIndex(i => i.BTKnumber === survivorBTK);
+        if (idx >= 0) globalInventory[idx] = mergedItem;
+        globalInventory = globalInventory.filter(i => !loserBTKs.includes(i.BTKnumber));
+        saveDraft(currentWarehouseId);
+        clearSelection();
+        showToast(`Merged into ${survivorBTK} (draft autosaved).`, "success");
+        openItem(survivorBTK, { type: 'global' });
+    }
 
     async function submitItemForm() {
         const btk = document.getElementById('ai-btknumber').value.trim();
