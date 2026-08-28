@@ -434,9 +434,9 @@
 
 <!-- Manage Users Modal (admin only) -->
 <div class="modal-overlay" id="manage-users-modal" onclick="handleUsersModalOverlayClick(event)">
-    <div class="modal-box" style="max-width:520px;">
+    <div class="modal-box" style="max-width:620px;">
         <h3>👥 Manage Users</h3>
-        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">Roles apply per warehouse account. Changes take effect on that person's next action.</p>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">The dropdown sets each person's global role (their home warehouse, from account setup). The row below it grants an *additional* role in one specific warehouse — e.g. "Maintainer in Warehouse 2" — without changing their global role. Changes take effect on that person's next action.</p>
         <div id="users-list-container">Loading…</div>
         <div class="modal-actions">
             <button class="secondary full-width" onclick="closeManageUsersModal()">Close</button>
@@ -1015,7 +1015,7 @@
             <p class="setting-desc">Off by default. When on, items below the threshold get a ⚠️ badge in the list and item view.</p>
         </div>
 
-        <div class="setting-row">
+        <div class="setting-row" id="storage-usage-row">
             <label>Image Storage (Supabase)</label>
             <div style="background:var(--border); border-radius:8px; height:10px; overflow:hidden; margin-bottom:6px;">
                 <div id="storage-usage-bar" style="height:100%; background:var(--primary); width:0%; transition:width 0.3s;"></div>
@@ -1472,40 +1472,94 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     // ── Manage Users (admin only) — role changes go through RPCs (schema_user_management.sql)
     // since resolving other users' emails needs a security-definer join against auth.users. ──
+    var manageUsersWarehouses = [];
+    var manageUsersPermissions = [];
+
     async function openManageUsersModal() {
         if (currentUserRole !== 'admin') { showToast("Admin only.", "warning"); return; }
         document.getElementById('manage-users-modal').classList.add('open');
         const container = document.getElementById('users-list-container');
         container.innerHTML = 'Loading…';
-        const { data, error } = await sb.rpc('list_profiles_with_email');
-        if (error) {
-            container.innerHTML = `<p style="color:var(--danger);">Could not load users: ${escapeHtml(error.message)}</p>`;
+        const [usersRes, permsRes, whRes] = await Promise.all([
+            sb.rpc('list_profiles_with_email'),
+            sb.rpc('list_warehouse_permissions'),
+            sb.from('warehouses').select('l, name'),
+        ]);
+        if (usersRes.error) {
+            container.innerHTML = `<p style="color:var(--danger);">Could not load users: ${escapeHtml(usersRes.error.message)}</p>`;
             return;
         }
-        renderUsersList(data || []);
+        manageUsersWarehouses = whRes.data || [];
+        manageUsersPermissions = permsRes.data || [];
+        renderUsersList(usersRes.data || []);
     }
 
     function renderUsersList(users) {
         const container = document.getElementById('users-list-container');
         if (!users.length) { container.innerHTML = '<p>No users found.</p>'; return; }
-        container.innerHTML = users.map(u => `
-            <div style="display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border);">
-                <div style="flex:1; min-width:0;">
-                    <div style="font-weight:600; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(u.email || u.id)}</div>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">Warehouse: ${escapeHtml(u.warehouse_id || '—')}</div>
+        container.innerHTML = users.map(u => {
+            const grants = manageUsersPermissions.filter(p => p.user_id === u.id);
+            const grantRows = grants.map(g => {
+                const whName = (manageUsersWarehouses.find(w => w.l === g.warehouse_id) || {}).name || g.warehouse_id;
+                return `<div style="display:flex; align-items:center; gap:8px; font-size:0.8rem; padding:2px 0;">
+                    <span style="flex:1;">${escapeHtml(whName)}: <strong style="text-transform:capitalize;">${escapeHtml(g.role)}</strong></span>
+                    <button class="secondary" onclick="revokeWarehousePermission('${u.id}','${escapeHtml(g.warehouse_id)}')" style="padding:2px 8px; min-height:auto; font-size:0.75rem; color:var(--danger);">✕</button>
+                </div>`;
+            }).join('');
+            const warehouseOptions = manageUsersWarehouses.map(w => `<option value="${escapeHtml(w.l)}">${escapeHtml(w.name)}</option>`).join('');
+            return `
+            <div style="padding:10px 0; border-bottom:1px solid var(--border);">
+                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-weight:600; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(u.email || u.id)}</div>
+                        <div style="font-size:0.8rem; color:var(--text-muted);">Home warehouse: ${escapeHtml(u.warehouse_id || '—')}</div>
+                    </div>
+                    <select onchange="changeUserRole('${u.id}', this.value)" style="width:auto; margin:0;">
+                        <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>Viewer</option>
+                        <option value="editor" ${u.role === 'editor' ? 'selected' : ''}>Editor</option>
+                        <option value="maintainer" ${u.role === 'maintainer' ? 'selected' : ''}>Maintainer</option>
+                        <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
+                    </select>
                 </div>
-                <select onchange="changeUserRole('${u.id}', this.value)" style="width:auto; margin:0;">
-                    <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>Viewer</option>
-                    <option value="editor" ${u.role === 'editor' ? 'selected' : ''}>Editor</option>
-                    <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
-                </select>
-            </div>`).join('');
+                <div style="margin:6px 0 4px;">
+                    ${grantRows || `<div style="font-size:0.78rem; color:var(--text-muted);">No extra per-warehouse permissions.</div>`}
+                </div>
+                <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                    <select id="grant-wh-${u.id}" style="width:auto; flex:1; min-width:90px; margin:0; padding:4px 8px; font-size:0.78rem;">${warehouseOptions}</select>
+                    <select id="grant-role-${u.id}" style="width:auto; margin:0; padding:4px 8px; font-size:0.78rem;">
+                        <option value="viewer">Viewer</option>
+                        <option value="editor">Editor</option>
+                        <option value="maintainer" selected>Maintainer</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                    <button class="secondary" onclick="grantWarehousePermission('${u.id}')" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">+ Add</button>
+                </div>
+            </div>`;
+        }).join('');
     }
 
     async function changeUserRole(userId, role) {
         const { error } = await sb.rpc('update_user_role', { p_user_id: userId, p_role: role });
         if (error) { showToast("Could not update role: " + error.message, "error"); return; }
         showToast("Role updated.", "success");
+    }
+
+    async function grantWarehousePermission(userId) {
+        const wid = document.getElementById(`grant-wh-${userId}`).value;
+        const role = document.getElementById(`grant-role-${userId}`).value;
+        if (!wid) { showToast("No warehouses available to grant.", "warning"); return; }
+        const { error } = await sb.rpc('set_warehouse_permission', { p_user_id: userId, p_warehouse_id: wid, p_role: role });
+        if (error) { showToast("Could not add permission: " + error.message, "error"); return; }
+        showToast("Permission added.", "success");
+        openManageUsersModal();
+    }
+
+    async function revokeWarehousePermission(userId, wid) {
+        if (!confirm("Remove this warehouse permission?")) return;
+        const { error } = await sb.rpc('revoke_warehouse_permission', { p_user_id: userId, p_warehouse_id: wid });
+        if (error) { showToast("Could not remove permission: " + error.message, "error"); return; }
+        showToast("Permission removed.", "success");
+        openManageUsersModal();
     }
 
     function closeManageUsersModal() { document.getElementById('manage-users-modal').classList.remove('open'); }
@@ -1545,11 +1599,36 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!user) throw new Error("No active Supabase session");
         const { data: profile, error } = await sb.from('profiles').select('*').eq('id', user.id).single();
         if (error) throw error;
-        currentUserRole = profile.role;
         currentWarehouseId = wid;
         currentActiveKey = 'supabase-session'; // sentinel so requireAuth() passes
+        currentUserRole = await computeEffectiveRole(profile, wid);
         await supabaseLoadWarehouseMeta(wid);
         await supabaseLoadWarehouseZones(wid);
+    }
+
+    // A profile's global role/home warehouse (profiles.role/profiles.warehouse_id) still works
+    // exactly as before for viewer/editor/admin. 'maintainer'-style access is additive: an
+    // explicit warehouse_permissions grant for the specific warehouse being opened overrides the
+    // global role for that warehouse only — someone whose global role is 'viewer' can still be
+    // granted 'editor' (or 'maintainer', which every existing viewer-gate already treats the same
+    // as editor) in one specific warehouse this way. Admins stay admin everywhere regardless, per
+    // their own explicit "need to see and do everything" — a grant can never demote one. This only
+    // drives client-side UI gating (canEditItems() and every currentUserRole check); the actual
+    // enforcement is server-side via RLS regardless of what this computes, so an edge case here is
+    // a UX inconvenience, never a security hole.
+    var myWarehousePermissions = [];
+    async function computeEffectiveRole(profile, wid) {
+        if (profile.role === 'admin') return 'admin';
+        try {
+            const { data, error } = await sb.rpc('list_warehouse_permissions');
+            if (error) throw error;
+            myWarehousePermissions = data || [];
+            const grant = myWarehousePermissions.find(p => p.warehouse_id === wid);
+            if (grant) return grant.role;
+        } catch (e) {
+            console.error("Could not load warehouse permissions:", e);
+        }
+        return profile.warehouse_id === wid ? profile.role : 'viewer';
     }
 
     // Warehouse name/address/phone/contact email for Supabase-mode warehouses are DB-driven (the
@@ -5518,10 +5597,14 @@ ${css}
         return !isNaN(qty) && qty < lowStockThreshold;
     }
     function syncSettingsVisibility() {
-        refreshStorageUsage();
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
-        document.getElementById('btn-manage-users').classList.toggle('hidden', !(isSupa && currentUserRole === 'admin'));
+        const isAdmin = currentUserRole === 'admin';
+        document.getElementById('btn-manage-users').classList.toggle('hidden', !(isSupa && isAdmin));
         document.getElementById('display-name-row').classList.toggle('hidden', !isSupa);
+        // Storage/database usage stats are admin-only — editors/maintainers/viewers don't need
+        // (or, per the requested role model, shouldn't see) account-wide quota info.
+        document.getElementById('storage-usage-row').classList.toggle('hidden', !(isSupa && isAdmin));
+        if (isSupa && isAdmin) refreshStorageUsage();
         if (isSupa) loadMyDisplayName();
     }
     function toggleSettings() {
