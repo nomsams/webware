@@ -3032,8 +3032,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('zone-draw-mode').classList.toggle('hidden', mode !== 'draw');
         document.getElementById('zone-manual-mode').classList.toggle('hidden', mode !== 'manual');
         document.getElementById('zone-designer-hint').textContent = mode === 'draw'
-            ? "Drag empty space to draw a new zone — auto-labeled A, B, C… Drag an existing zone to move it, or double-click it to edit its levels/bins or delete it. Ctrl+Z / Ctrl+Shift+Z to undo/redo."
-            : "Type zone details directly. New rows get the next unused letter, but you can change it. Ctrl+Z / Ctrl+Shift+Z to undo/redo.";
+            ? "Drag empty space to draw a rack area — auto-labeled A, B, C… Width = how many aisles wide; height = how many racks deep (1 = single row, 2 = back-to-back). Drag an existing area to move it, or double-click it to edit its levels/bins or delete it. Ctrl+Z / Ctrl+Shift+Z to undo/redo."
+            : "Type rack area details directly. New rows get the next unused letter, but you can change it. Ctrl+Z / Ctrl+Shift+Z to undo/redo.";
         if (mode === 'draw') renderZoneDrawGrid(); else renderZoneManualRows();
     }
 
@@ -3067,7 +3067,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             block.style.width = ((z.max_aisle || 1) * ZONE_CELL_SIZE) + 'px';
             block.style.height = ((z.max_rack || 1) * ZONE_CELL_SIZE) + 'px';
             block.innerText = z.zone;
-            block.title = `Zone ${z.zone}${z.label ? ' — ' + z.label : ''} (${z.max_aisle || 1} aisles × ${z.max_rack || 1} racks) — drag to move, double-click to edit`;
+            block.title = `Rack Area ${z.zone}${z.label ? ' — ' + z.label : ''} (${z.max_aisle || 1} aisles wide × ${z.max_rack || 1} racks deep) — drag to move, double-click to edit`;
             block.ondblclick = (e) => { e.stopPropagation(); selectZoneBlock(z.zone); };
             if (currentUserRole === 'admin') {
                 block.onmousedown = (e) => {
@@ -3189,8 +3189,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const readOnly = currentUserRole !== 'admin';
         box.innerHTML = `
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:0.75rem;">
-                <strong style="font-size:1.1rem;">Zone ${escapeHtml(z.zone)}</strong>
-                <span style="color:var(--text-muted); font-size:0.85rem;">${z.max_aisle} aisles × ${z.max_rack} racks (drawn size)</span>
+                <strong style="font-size:1.1rem;">Rack Area ${escapeHtml(z.zone)}</strong>
+                <span style="color:var(--text-muted); font-size:0.85rem;">${z.max_aisle} aisles wide × ${z.max_rack} racks deep${z.max_rack >= 2 ? ' (back-to-back)' : ''}</span>
                 ${readOnly ? '' : `<button class="secondary" onclick="deleteSelectedZone()" style="margin-left:auto; color:var(--danger); padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🗑️ Delete Zone</button>`}
             </div>
             <label class="modal-label" for="zone-inspector-label">Label</label>

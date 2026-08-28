@@ -72,7 +72,7 @@ A  -  03  -  2  -  4  -  07
 Zone  Aisle  Rack  Level  Bin
 ```
 
-- **Zone** (1–2 letters) — broad area or building section (e.g. `A`, `B`). Assigned per your facility's layout; no inherent order beyond alphabetical convenience.
+- **Zone** (1–2 letters) — a rack area: one run of racking (e.g. `A`, `B`). In the [Layout Designer](#warehouse-page--layout-designer) this is what you actually draw — a rack area 1 unit deep is a single row of shelving; 2 deep means two rows standing back-to-back (a common space-saving layout, sharing a back wall). Assigned per your facility's layout; no inherent order beyond alphabetical convenience.
 - **Aisle** (2 digits, zero-padded) — the walking/forklift lane between racks. **Aisle `01` is the one nearest the exit/loading dock**, increasing as you move further in.
 - **Rack / Bay** (1–2 digits) — the upright section within that aisle. Numbered from the same end as Aisle `01`, for consistency — Rack `1` nearest the exit end of its aisle.
 - **Level / Shelf** (1–2 digits) — vertical tier. **Level `1` is the one closest to the ground**, counting upward.
@@ -92,10 +92,10 @@ This is a separate field from `Inventorylocation` (older, free text — e.g. a s
 
 Click the warehouse name in the header bar (Supabase mode) to open its full page: contact details (with "✏️ Edit Details"), the **Layout Designer**, and aisle/rack photos.
 
-The Layout Designer edits `warehouse_zones` — admin-only to draw or save, visible read-only to everyone else — in two interchangeable modes over the same underlying data, so switching modes never loses an edit:
+The Layout Designer edits `warehouse_zones` — admin-only to draw or save, visible read-only to everyone else — in two interchangeable modes over the same underlying data, so switching modes never loses an edit. What you're drawing is a **rack area**: a physical run of racking, not a whole building section — width is how many aisles it spans, height is how many racks stand deep at that spot (1 = a single row; 2 = two rows back-to-back, sharing a back wall, a common space-saving layout).
 
-- **🖊️ Draw** (default): drag empty space to draw a new zone. It's labeled automatically in sequence — `A`, then `B`, `C`, and so on — sized to however many cells you dragged across (that becomes its Aisle × Rack count directly: a zone drawn 5 cells wide is 5 aisles). **Drag an existing zone** to move it; **double-click** it to open an inspector for its label and Level/Bin counts (not drawable — they're shelf depth, not floor space) or to delete it. A plain click with no movement does neither, on purpose — it's what lets a drag-to-move and a double-click-to-edit coexist without one accidentally triggering the other.
-- **⌨️ Manual**: the same zones as a plain editable table — type a letter, label, and aisle/rack/level/bin counts directly, or "+ Add Zone" for a new row (also auto-lettered, but freely editable). Useful when you already know the numbers and don't want to drag rectangles, or need a zone drawn nowhere in particular yet.
+- **🖊️ Draw** (default): drag empty space to draw a new rack area. It's labeled automatically in sequence — `A`, then `B`, `C`, and so on — sized to however many cells you dragged across (that becomes its Aisle × Rack count directly: an area drawn 5 cells wide is 5 aisles wide). **Drag an existing area** to move it; **double-click** it to open an inspector for its label and Level/Bin counts (not drawable — they're shelf depth, not floor space) or to delete it. A plain click with no movement does neither, on purpose — it's what lets a drag-to-move and a double-click-to-edit coexist without one accidentally triggering the other.
+- **⌨️ Manual**: the same rack areas as a plain editable table — type a letter, label, and aisle/rack/level/bin counts directly, or "+ Add Zone" for a new row (also auto-lettered, but freely editable). Useful when you already know the numbers and don't want to drag rectangles, or need one placed nowhere in particular yet.
 
 **↶ Undo / ↷ Redo** (buttons above the grid, or **Ctrl+Z** / **Ctrl+Shift+Z**) cover every layout edit — drawing, moving, deleting, and field edits in either mode — for the current page visit; opening the Warehouse page again starts a fresh history from whatever's currently saved. Typing (a label, a count) collapses into one undo step per pause rather than one per keystroke. The shortcut only acts while the Layout Designer is open and focus isn't in a text field, so the browser's own undo still works normally while you're mid-edit in one.
 
