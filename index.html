@@ -5530,16 +5530,85 @@ th { background: #eee; }
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
             const { error } = await sb.from('items').delete().in('btk', ids);
             if (error) return showToast("Could not delete: " + error.message, "error");
+            // kit_items.btk has an ON DELETE CASCADE FK to items.btk, so the DB already dropped any
+            // kit reference to these BTKs the instant the row above was deleted — this just keeps
+            // the in-memory globalKits (which isn't reloaded by supabaseLoadList) in sync with that.
+            removeKitItemsInMemory(ids);
             clearSelection();
             await supabaseLoadList(currentWarehouseId);
             showToast(`Deleted ${ids.length} item(s).`, "success");
         } else {
             globalInventory = globalInventory.filter(i => !ids.includes(i.BTKnumber));
+            removeKitItemsInMemory(ids); // no FK/cascade in draft mode — do it ourselves
             saveDraft(currentWarehouseId);
             clearSelection();
             if (listMode === 'items') filterList(false);
             showToast(`Deleted ${ids.length} item(s) (draft autosaved).`, "success");
         }
+    }
+
+    // ── KIT REFERENCE CLEANUP (Remove/Merge touching globalKits/kit_items) ────
+    // Kits reference items by BTK — a kit's items are `{btk: qty}` (static mode) or kit_items rows
+    // keyed on btk (Supabase). Deleting or merging away a BTK used to leave that reference dangling
+    // forever with no error anywhere: the kit's own "distinct item(s)" count still included it, but
+    // it silently vanished from every rendered list (kit detail, Pack Order/Labels from a kit,
+    // Stocktaking's "by Kit" picker) since each of those does a plain globalInventory lookup per
+    // BTK and skips whatever doesn't resolve.
+    function removeKitItemsInMemory(deletedBTKs) {
+        const deleted = new Set(deletedBTKs);
+        let touched = 0;
+        globalKits.forEach(kit => {
+            if (!kit.items) return;
+            let hit = false;
+            deleted.forEach(btk => { if (kit.items[btk] != null) { delete kit.items[btk]; hit = true; } });
+            if (hit) touched++;
+        });
+        return touched;
+    }
+    // Folds every oldBTK's quantity into survivorBTK within each kit that referenced it — if the
+    // survivor was ALSO already in that same kit under its own BTK, the two quantities are summed
+    // rather than the kit silently losing one of them.
+    function remapKitItemsInMemory(oldBTKs, survivorBTK) {
+        const old = new Set(oldBTKs);
+        let touched = 0;
+        globalKits.forEach(kit => {
+            if (!kit.items) return;
+            let addQty = 0, hit = false;
+            old.forEach(btk => { if (kit.items[btk] != null) { addQty += kit.items[btk]; delete kit.items[btk]; hit = true; } });
+            if (hit) { kit.items[survivorBTK] = (kit.items[survivorBTK] || 0) + addQty; touched++; }
+        });
+        return touched;
+    }
+    // Supabase counterpart — must run BEFORE the loser items rows are deleted: kit_items.btk has an
+    // ON DELETE CASCADE FK to items.btk, so once a loser row is gone, any kit_items row still
+    // pointing at it is gone with it, with no chance to recover the association afterward. Deletes
+    // every kit_items row for the old BTKs first (kit_items' primary key is (kit_id, btk), so an
+    // UPDATE can't rename into a kit that already has the survivor without colliding), then either
+    // bumps the survivor's existing row in that kit or inserts a fresh one.
+    async function remapKitItemsSupabase(oldBTKs, survivorBTK) {
+        if (!oldBTKs.length) return 0;
+        const { data: oldRows, error: fetchErr } = await sb.from('kit_items').select('kit_id, quantity').in('btk', oldBTKs);
+        if (fetchErr) { console.error("Could not check kit references before merge:", fetchErr); return 0; }
+        if (!oldRows || !oldRows.length) return 0;
+
+        const kitIds = Array.from(new Set(oldRows.map(r => r.kit_id)));
+        const { data: survivorRows } = await sb.from('kit_items').select('kit_id, quantity').eq('btk', survivorBTK).in('kit_id', kitIds);
+        const survivorQtyByKit = new Map((survivorRows || []).map(r => [r.kit_id, r.quantity || 0]));
+
+        const oldQtyByKit = new Map();
+        oldRows.forEach(r => { oldQtyByKit.set(r.kit_id, (oldQtyByKit.get(r.kit_id) || 0) + (r.quantity || 0)); });
+
+        await sb.from('kit_items').delete().in('btk', oldBTKs);
+
+        for (const [kitId, addQty] of oldQtyByKit) {
+            const existingQty = survivorQtyByKit.get(kitId);
+            if (existingQty !== undefined) {
+                await sb.from('kit_items').update({ quantity: existingQty + addQty }).eq('kit_id', kitId).eq('btk', survivorBTK);
+            } else {
+                await sb.from('kit_items').insert({ kit_id: kitId, btk: survivorBTK, quantity: addQty });
+            }
+        }
+        return oldQtyByKit.size;
     }
 
     // ── MERGE ITEMS ─────────────────────────────────────────────────────────
@@ -5748,11 +5817,15 @@ th { background: #eee; }
             };
             const { error: updateError } = await sb.from('items').update(row).eq('btk', survivorBTK);
             if (updateError) return showToast("Merge failed while saving the survivor: " + updateError.message, "error");
+            // Must happen before the delete below — kit_items.btk cascades on items.btk delete, so
+            // once the loser rows are gone, any kit reference to them is gone with no way back.
+            const kitsTouched = await remapKitItemsSupabase(loserBTKs, survivorBTK);
+            remapKitItemsInMemory(loserBTKs, survivorBTK);
             const { error: deleteError } = await sb.from('items').delete().in('btk', loserBTKs);
             if (deleteError) return showToast("Survivor saved, but couldn't delete the rest: " + deleteError.message, "error");
             clearSelection();
             await supabaseLoadList(currentWarehouseId);
-            showToast(`Merged into ${survivorBTK}.`, "success");
+            showToast(`Merged into ${survivorBTK}.` + (kitsTouched ? ` Updated ${kitsTouched} kit(s) that referenced the merged item(s).` : ''), "success");
             openItem(survivorBTK, { type: 'global' });
             return;
         }
@@ -5760,9 +5833,10 @@ th { background: #eee; }
         const idx = globalInventory.findIndex(i => i.BTKnumber === survivorBTK);
         if (idx >= 0) globalInventory[idx] = mergedItem;
         globalInventory = globalInventory.filter(i => !loserBTKs.includes(i.BTKnumber));
+        const kitsTouched = remapKitItemsInMemory(loserBTKs, survivorBTK);
         saveDraft(currentWarehouseId);
         clearSelection();
-        showToast(`Merged into ${survivorBTK} (draft autosaved).`, "success");
+        showToast(`Merged into ${survivorBTK} (draft autosaved).` + (kitsTouched ? ` Updated ${kitsTouched} kit(s) that referenced the merged item(s).` : ''), "success");
         openItem(survivorBTK, { type: 'global' });
     }
 
