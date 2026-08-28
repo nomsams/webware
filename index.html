@@ -69,7 +69,7 @@
         .segmented button.active { background: var(--card-bg); color: var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 
         /* --- FORMS & BUTTONS --- */
-        input[type="password"], input[type="text"], textarea, select {
+        input[type="password"], input[type="text"], input[type="email"], textarea, select {
             width: 100%; padding: 0.85rem 1rem; border: 1.5px solid var(--border); border-radius: 12px;
             margin-bottom: 1rem; font-size: 1rem; background: var(--card-bg); color: var(--text-main);
             transition: border-color 0.2s, box-shadow 0.2s; min-height: 48px;
@@ -485,7 +485,7 @@
         <h2 style="margin-bottom: 0.5rem;">Secure Unlock</h2>
         <p style="margin-bottom: 1.5rem; color: var(--text-muted);">Enter warehouse ID and decryption key to load its database.</p>
         <label class="modal-label" for="auth-warehouse">Warehouse ID</label>
-        <input type="text" id="auth-warehouse" aria-label="Warehouse ID" placeholder="e.g. 1" value="1" oninput="syncAuthFieldsForTypedWarehouse()">
+        <input type="text" id="auth-warehouse" aria-label="Warehouse ID" placeholder="e.g. 1" value="1" oninput="syncAuthFieldsForTypedWarehouse()" style="max-width:140px;">
         <input type="password" id="decryption-key" aria-label="Decryption Key" placeholder="Enter decryption key" onkeydown="if(event.key === 'Enter') attemptManualDecryption()">
         <button class="full-width" id="btn-unlock-static" onclick="attemptManualDecryption()">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>
@@ -494,7 +494,7 @@
         <div id="supabase-login-fields" class="hidden">
             <input type="email" id="sb-email" aria-label="Email" placeholder="Email" autocomplete="username">
             <input type="password" id="sb-password" aria-label="Password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key === 'Enter') attemptSupabaseLogin()">
-            <button class="full-width" onclick="attemptSupabaseLogin()">
+            <button class="full-width" id="btn-supabase-login" onclick="attemptSupabaseLogin()">
                 <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>
                 Sign In
             </button>
@@ -2061,27 +2061,40 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         applyAuthFieldVisibility(document.getElementById('auth-warehouse').value.trim() || '1');
     }
 
+    let supabaseLoginInFlight = false;
     async function attemptSupabaseLogin() {
-        const wid = document.getElementById('auth-warehouse').value.trim() || '1';
-        const email = document.getElementById('sb-email').value.trim();
-        const password = document.getElementById('sb-password').value;
-        if (!email || !password) return showToast("Please enter email and password", "error");
-
-        const { error } = await sb.auth.signInWithPassword({ email, password });
-        if (error) {
-            document.getElementById('auth-error').style.display = 'block';
-            return showToast("Login failed: " + error.message, "error");
-        }
-        document.getElementById('auth-error').style.display = 'none';
+        // Guards against a double "Signed in." toast (and a duplicate signInWithPassword call)
+        // when the request is slow enough that someone presses Enter and then also clicks the
+        // button, or double-clicks it, before the first attempt has resolved.
+        if (supabaseLoginInFlight) return;
+        supabaseLoginInFlight = true;
+        const btn = document.getElementById('btn-supabase-login');
+        if (btn) btn.disabled = true;
         try {
-            await loadSupabaseSession(wid);
-        } catch (e) {
-            console.error("Profile load failed:", e);
-            return showToast("Signed in, but no profile found for this account.", "error");
+            const wid = document.getElementById('auth-warehouse').value.trim() || '1';
+            const email = document.getElementById('sb-email').value.trim();
+            const password = document.getElementById('sb-password').value;
+            if (!email || !password) return showToast("Please enter email and password", "error");
+
+            const { error } = await sb.auth.signInWithPassword({ email, password });
+            if (error) {
+                document.getElementById('auth-error').style.display = 'block';
+                return showToast("Login failed: " + error.message, "error");
+            }
+            document.getElementById('auth-error').style.display = 'none';
+            try {
+                await loadSupabaseSession(wid);
+            } catch (e) {
+                console.error("Profile load failed:", e);
+                return showToast("Signed in, but no profile found for this account.", "error");
+            }
+            showToast("Signed in.", "success");
+            if (pendingItemId) { const id = pendingItemId; pendingItemId = null; await supabaseItemRoute(id, wid); }
+            else await supabaseLoadList(wid);
+        } finally {
+            supabaseLoginInFlight = false;
+            if (btn) btn.disabled = false;
         }
-        showToast("Signed in.", "success");
-        if (pendingItemId) { const id = pendingItemId; pendingItemId = null; await supabaseItemRoute(id, wid); }
-        else await supabaseLoadList(wid);
     }
 
     function attemptManualDecryption() {
