@@ -25,13 +25,17 @@ begin
 end; $$;
 grant execute on function public.list_profiles_with_email to authenticated;
 
+-- Fix: 'maintainer' was added as a valid global role by schema_maintainer_role.sql (which also
+-- widened profiles' own CHECK constraint to allow it), but this allowlist was never updated to
+-- match — picking "Maintainer" in the global-role dropdown would fail here with "invalid role:
+-- maintainer" even though the database itself would happily accept it.
 create or replace function public.update_user_role(p_user_id uuid, p_role text)
 returns void language plpgsql security definer as $$
 begin
   if (select p.role from public.profiles p where p.id = auth.uid()) != 'admin' then
     raise exception 'not authorized';
   end if;
-  if p_role not in ('viewer', 'editor', 'admin') then
+  if p_role not in ('viewer', 'editor', 'maintainer', 'admin') then
     raise exception 'invalid role: %', p_role;
   end if;
   update public.profiles set role = p_role where id = p_user_id;
