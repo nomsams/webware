@@ -2572,8 +2572,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         reader.onload = function(e) {
             const res = Papa.parse(e.target.result, { header: true, skipEmptyLines: true });
             const presentColumns = new Set(res.meta.fields || []);
-            const items = normalizeItems(res.data);
-            if (!items.length) { showToast("No valid rows (need BTKnumber column).", "error"); return; }
+            const { rows: filledRows, autoAssignedCount } = assignMissingBTKs(res.data);
+            const items = normalizeItems(filledRows);
+            if (!items.length) { showToast("No valid rows found.", "error"); return; }
             const { deduped, dupes } = dedupeByBTK(items);
 
             const existingByBTK = new Map(globalInventory.map(i => [i.BTKnumber, i]));
@@ -2589,6 +2590,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             csvImportPendingNew = newItems;
             csvImportDupesReport = dupes;
             csvImportPresentColumns = presentColumns;
+            csvImportAutoAssignedCount = autoAssignedCount;
 
             if (conflicts.length === 0) { commitCSVImport(); return; }
 
@@ -5458,17 +5460,24 @@ th { background: #eee; }
     // image" button deletes outright, and two items silently sharing one URL means removing the
     // photo from the duplicate would also blow it away for the original. Re-uploading on the
     // duplicate (if wanted) is one tap away either way.
-    // BTK numbers are canonically BTK + a 6-digit zero-padded number (see decompressId) —
-    // duplicating finds the highest numeric BTK already in the loaded warehouse and mints the
-    // next one, rather than tacking a "-COPY" suffix onto the original's own number.
-    function generateUniqueBTK() {
+    // BTK numbers are canonically BTK + a 6-digit zero-padded number (see decompressId). Fills the
+    // lowest vacant number first (e.g. 1,2,3,5,7 exist -> next is 4, not 8) rather than always
+    // growing the range, so numbers freed up by Remove/Merge get reused instead of leaving
+    // permanent gaps; only once every number up to the current highest is taken does it grow past
+    // it. `reserved` is an optional Set<number> of numbers to also treat as taken but that aren't
+    // in globalInventory yet — used by CSV import to hand out several new numbers in one batch
+    // without them colliding with each other.
+    function generateUniqueBTK(reserved) {
+        const used = new Set(reserved || []);
         let maxN = 0;
         globalInventory.forEach(i => {
             const m = String(i.BTKnumber || '').trim().toUpperCase().match(/^BTK0*(\d+)$/);
-            if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+            if (m) { const n = parseInt(m[1], 10); used.add(n); maxN = Math.max(maxN, n); }
         });
+        used.forEach(n => { maxN = Math.max(maxN, n); });
+        for (let n = 1; n <= maxN; n++) { if (!used.has(n)) return 'BTK' + String(n).padStart(6, '0'); }
         let n = maxN + 1, candidate = 'BTK' + String(n).padStart(6, '0');
-        while (globalInventory.some(i => i.BTKnumber === candidate)) { n++; candidate = 'BTK' + String(n).padStart(6, '0'); }
+        while (used.has(n)) { n++; candidate = 'BTK' + String(n).padStart(6, '0'); }
         return candidate;
     }
     async function duplicateItem() {
@@ -5772,10 +5781,32 @@ th { background: #eee; }
     var csvImportPendingNew = [];   // brand-new (non-conflicting) rows, added as-is on commit
     var csvImportDupesReport = [];  // BTKs that collided within the CSV file itself
     var csvImportPresentColumns = new Set(); // header names actually present in the uploaded file
+    var csvImportAutoAssignedCount = 0; // rows that had no BTK at all and got one minted for them
 
     function resetCsvImportState() {
         csvImportQueue = []; csvImportIndex = 0; csvImportResolvedItems = [];
         csvImportPendingNew = []; csvImportDupesReport = []; csvImportPresentColumns = new Set();
+        csvImportAutoAssignedCount = 0;
+    }
+
+    // A row with no BTK number used to just be silently dropped by normalizeItems' filter — now it
+    // gets the next available one instead (generateUniqueBTK's vacant-number-first logic, so gaps
+    // left by Remove/Merge get reused), so a CSV of genuinely new stock doesn't need BTKs
+    // pre-assigned by hand. `reserved` is shared across the whole file so two blank rows in the
+    // same import don't get handed the same number before either is in globalInventory yet.
+    function assignMissingBTKs(rawRows) {
+        const reserved = new Set();
+        let autoAssignedCount = 0;
+        const rows = rawRows.map(r => {
+            if (!r) return r;
+            const has = r.BTKnumber && String(r.BTKnumber).trim() !== '' && r.BTKnumber !== 'None';
+            if (has) return r;
+            const assigned = generateUniqueBTK(reserved);
+            reserved.add(parseInt(assigned.slice(3), 10));
+            autoAssignedCount++;
+            return { ...r, BTKnumber: assigned };
+        });
+        return { rows, autoAssignedCount };
     }
 
     function openCSVConflictMergeView() {
@@ -5833,7 +5864,9 @@ th { background: #eee; }
         const conflictCount = csvImportResolvedItems.length;
         const newCount = csvImportPendingNew.length;
         const dupes = csvImportDupesReport;
+        const autoAssigned = csvImportAutoAssignedCount;
         let msg = `Imported ${newCount} new item(s)` + (conflictCount ? `, updated ${conflictCount} existing item(s)` : '') + '.';
+        if (autoAssigned) msg += ` ${autoAssigned} row(s) had no BTK number, so one was assigned automatically.`;
         if (dupes.length) {
             const preview = dupes.slice(0, 5).join(', ') + (dupes.length > 5 ? '…' : '');
             msg += ` ${dupes.length} duplicate BTK(s) within the file collapsed to their last row: ${preview}.`;
