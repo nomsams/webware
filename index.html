@@ -101,6 +101,7 @@
         button.success-btn { background-color: var(--success); color: white; }
         button.success-btn:hover { background-color: #059669; }
         button.full-width { width: 100%; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
 
         /* --- LIST VIEW & SELECTION --- */
         .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px; }
@@ -727,6 +728,10 @@
             <span class="zone-mode-toggle hidden" id="zone-mode-toggle" style="display:flex; gap:6px;">
                 <button class="secondary active" id="btn-zone-mode-draw" onclick="setZoneDesignerMode('draw')" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🖊️ Draw</button>
                 <button class="secondary" id="btn-zone-mode-manual" onclick="setZoneDesignerMode('manual')" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">⌨️ Manual</button>
+            </span>
+            <span class="hidden" id="zone-undo-redo-wrap" style="display:flex; gap:4px;">
+                <button class="secondary" id="btn-zone-undo" onclick="undoZoneChange()" title="Undo (Ctrl+Z)" style="padding:0.35rem 0.6rem; min-height:auto; font-size:0.95rem;">↶</button>
+                <button class="secondary" id="btn-zone-redo" onclick="redoZoneChange()" title="Redo (Ctrl+Shift+Z)" style="padding:0.35rem 0.6rem; min-height:auto; font-size:0.95rem;">↷</button>
             </span>
             <button class="secondary hidden" id="btn-save-zone-layout" onclick="saveZoneLayout()" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem; margin-left:auto;">💾 Save Layout</button>
         </div>
@@ -2928,7 +2933,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     var zoneDesignerMode = 'draw';
     var selectedZoneLetter = null;
     var zoneDrawStart = null;
+    var zoneDragMove = null;
     var globalRackImages = [];
+    var zoneHistory = [];
+    var zoneHistoryIndex = -1;
+    var zoneHistoryDebounce = null;
 
     async function openWarehouseView() {
         if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') return;
@@ -2936,10 +2945,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         renderWarehouseDetailInfo();
         document.getElementById('btn-edit-warehouse-view').classList.toggle('hidden', currentUserRole !== 'admin');
         document.getElementById('zone-mode-toggle').classList.toggle('hidden', currentUserRole !== 'admin');
+        document.getElementById('zone-undo-redo-wrap').classList.toggle('hidden', currentUserRole !== 'admin');
         document.getElementById('btn-save-zone-layout').classList.toggle('hidden', currentUserRole !== 'admin');
         document.getElementById('btn-add-zone-manual').classList.toggle('hidden', currentUserRole !== 'admin');
         selectedZoneLetter = null;
+        zoneHistory = [JSON.stringify(globalWarehouseZones)];
+        zoneHistoryIndex = 0;
         setZoneDesignerMode('draw');
+        updateUndoRedoButtons();
         if (!globalRackImages.length) await supabaseLoadRackImages(currentWarehouseId);
         renderRackImageForm();
         renderRackImageGallery();
@@ -2965,8 +2978,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('zone-draw-mode').classList.toggle('hidden', mode !== 'draw');
         document.getElementById('zone-manual-mode').classList.toggle('hidden', mode !== 'manual');
         document.getElementById('zone-designer-hint').textContent = mode === 'draw'
-            ? "Drag on the grid to draw a new zone — it's labeled automatically (A, B, C…). Click an existing zone to edit its levels/bins or delete it."
-            : "Type zone details directly. New rows get the next unused letter, but you can change it.";
+            ? "Drag empty space to draw a new zone — auto-labeled A, B, C… Drag an existing zone to move it, or double-click it to edit its levels/bins or delete it. Ctrl+Z / Ctrl+Shift+Z to undo/redo."
+            : "Type zone details directly. New rows get the next unused letter, but you can change it. Ctrl+Z / Ctrl+Shift+Z to undo/redo.";
         if (mode === 'draw') renderZoneDrawGrid(); else renderZoneManualRows();
     }
 
@@ -3000,8 +3013,21 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             block.style.width = ((z.max_aisle || 1) * ZONE_CELL_SIZE) + 'px';
             block.style.height = ((z.max_rack || 1) * ZONE_CELL_SIZE) + 'px';
             block.innerText = z.zone;
-            block.title = `Zone ${z.zone}${z.label ? ' — ' + z.label : ''} (${z.max_aisle || 1} aisles × ${z.max_rack || 1} racks)`;
-            block.onclick = (e) => { e.stopPropagation(); selectZoneBlock(z.zone); };
+            block.title = `Zone ${z.zone}${z.label ? ' — ' + z.label : ''} (${z.max_aisle || 1} aisles × ${z.max_rack || 1} racks) — drag to move, double-click to edit`;
+            block.ondblclick = (e) => { e.stopPropagation(); selectZoneBlock(z.zone); };
+            if (currentUserRole === 'admin') {
+                block.onmousedown = (e) => {
+                    e.stopPropagation(); // don't also trigger the grid's draw-new-zone handler
+                    zoneDragMove = {
+                        zone: z.zone, moved: false, el: block,
+                        startClientX: e.clientX, startClientY: e.clientY,
+                        origCol: z.grid_col, origRow: z.grid_row,
+                        pendingCol: z.grid_col, pendingRow: z.grid_row
+                    };
+                    window.addEventListener('mousemove', onZoneBlockDragMove);
+                    window.addEventListener('mouseup', onZoneBlockDragEnd);
+                };
+            }
             grid.appendChild(block);
         });
 
@@ -3058,6 +3084,41 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         selectedZoneLetter = zone;
         renderZoneDrawGrid();
         renderZoneInspector();
+        pushZoneHistory(true);
+    }
+
+    // Dragging an existing zone block moves it — snaps to the grid live so you see exactly where
+    // it'll land, without a full re-render on every mousemove (only the dragged block's own
+    // inline position updates; a clean re-render happens once, on drop).
+    function onZoneBlockDragMove(e) {
+        if (!zoneDragMove) return;
+        const dx = e.clientX - zoneDragMove.startClientX;
+        const dy = e.clientY - zoneDragMove.startClientY;
+        if (!zoneDragMove.moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) zoneDragMove.moved = true;
+        if (!zoneDragMove.moved) return;
+        const z = globalWarehouseZones.find(zz => zz.zone === zoneDragMove.zone);
+        if (!z) return;
+        const w = z.max_aisle || 1, h = z.max_rack || 1;
+        const col = Math.max(0, Math.min(ZONE_GRID_COLS - w, zoneDragMove.origCol + Math.round(dx / ZONE_CELL_SIZE)));
+        const row = Math.max(0, Math.min(ZONE_GRID_ROWS - h, zoneDragMove.origRow + Math.round(dy / ZONE_CELL_SIZE)));
+        zoneDragMove.pendingCol = col; zoneDragMove.pendingRow = row;
+        zoneDragMove.el.style.left = (col * ZONE_CELL_SIZE) + 'px';
+        zoneDragMove.el.style.top = (row * ZONE_CELL_SIZE) + 'px';
+    }
+
+    function onZoneBlockDragEnd() {
+        window.removeEventListener('mousemove', onZoneBlockDragMove);
+        window.removeEventListener('mouseup', onZoneBlockDragEnd);
+        if (!zoneDragMove) return;
+        const { zone, moved, pendingCol, pendingRow } = zoneDragMove;
+        zoneDragMove = null;
+        if (moved) {
+            const z = globalWarehouseZones.find(zz => zz.zone === zone);
+            if (z) { z.grid_col = pendingCol; z.grid_row = pendingRow; }
+            renderZoneDrawGrid(); // clean re-render — re-normalizes the DOM and reattaches handlers
+            pushZoneHistory(true);
+        }
+        // No movement at all (just a click) — leave it as-is; double-click is what opens the editor.
     }
 
     function selectZoneBlock(zone) {
@@ -3096,6 +3157,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const z = globalWarehouseZones.find(z => z.zone === selectedZoneLetter);
         if (!z) return;
         z[field] = (field === 'label') ? value : (parseInt(value, 10) || 1);
+        pushZoneHistory(false); // debounced — don't create an undo step per keystroke
     }
 
     function deleteSelectedZone() {
@@ -3106,6 +3168,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         renderZoneDrawGrid();
         renderZoneInspector();
         renderZoneManualRows();
+        pushZoneHistory(true);
     }
 
     // ── Manual mode: same globalWarehouseZones array, edited as a plain table instead of drawn. ──
@@ -3129,6 +3192,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!z) return;
         if (field === 'zone' || field === 'label') z[field] = value;
         else z[field] = parseInt(value, 10) || 1;
+        pushZoneHistory(false); // debounced — don't create an undo step per keystroke
     }
 
     function addManualZoneRow() {
@@ -3138,11 +3202,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const row = globalWarehouseZones.reduce((max, z) => Math.max(max, (z.grid_row || 0) + (z.max_rack || 1)), 0);
         globalWarehouseZones.push({ warehouse_id: currentWarehouseId, zone, label: '', max_aisle: 1, max_rack: 1, max_level: 1, max_bin: 1, grid_col: 0, grid_row: row });
         renderZoneManualRows();
+        pushZoneHistory(true);
     }
 
     function removeManualZoneRow(idx) {
         globalWarehouseZones.splice(idx, 1);
         renderZoneManualRows();
+        pushZoneHistory(true);
     }
 
     async function saveZoneLayout() {
@@ -3174,7 +3240,70 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         renderZoneInspector();
         renderZoneManualRows();
         renderRackImageForm();
+        pushZoneHistory(true); // checkpoint the just-persisted state — undo can still go further back
     }
+
+    // ── Undo/redo for the Layout Designer. Debounced pushes (typing in a field) collapse a burst
+    // of keystrokes into one step; discrete actions (draw, move, delete, add/remove row, save)
+    // commit immediately. Ctrl+Z / Ctrl+Shift+Z are wired globally but only act while the
+    // designer is open and focus isn't in a text field (so native input undo still works there —
+    // see the keydown listener near the bottom of the script). ──
+    function pushZoneHistory(immediate) {
+        const commit = () => {
+            const snapshot = JSON.stringify(globalWarehouseZones);
+            if (zoneHistory[zoneHistoryIndex] === snapshot) return; // nothing actually changed
+            zoneHistory = zoneHistory.slice(0, zoneHistoryIndex + 1);
+            zoneHistory.push(snapshot);
+            zoneHistoryIndex = zoneHistory.length - 1;
+            updateUndoRedoButtons();
+        };
+        clearTimeout(zoneHistoryDebounce);
+        if (immediate) commit(); else zoneHistoryDebounce = setTimeout(commit, 500);
+    }
+
+    function undoZoneChange() {
+        if (zoneHistoryIndex <= 0) return;
+        clearTimeout(zoneHistoryDebounce);
+        zoneHistoryIndex--;
+        globalWarehouseZones = JSON.parse(zoneHistory[zoneHistoryIndex]);
+        selectedZoneLetter = null;
+        refreshZoneDesigner();
+    }
+
+    function redoZoneChange() {
+        if (zoneHistoryIndex >= zoneHistory.length - 1) return;
+        clearTimeout(zoneHistoryDebounce);
+        zoneHistoryIndex++;
+        globalWarehouseZones = JSON.parse(zoneHistory[zoneHistoryIndex]);
+        selectedZoneLetter = null;
+        refreshZoneDesigner();
+    }
+
+    function refreshZoneDesigner() {
+        if (zoneDesignerMode === 'draw') { renderZoneDrawGrid(); renderZoneInspector(); }
+        else renderZoneManualRows();
+        updateUndoRedoButtons();
+    }
+
+    function updateUndoRedoButtons() {
+        const undoBtn = document.getElementById('btn-zone-undo');
+        if (!undoBtn) return;
+        undoBtn.disabled = zoneHistoryIndex <= 0;
+        document.getElementById('btn-zone-redo').disabled = zoneHistoryIndex >= zoneHistory.length - 1;
+    }
+
+    // Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) for the Layout Designer only — scoped to warehouse-view
+    // and skipped while focus is in a text input/textarea so the browser's own native undo still
+    // works there (e.g. mid-edit in the zone label field) instead of reverting the whole layout.
+    document.addEventListener('keydown', (e) => {
+        if (activeView !== 'warehouse-view') return;
+        const tag = document.activeElement && document.activeElement.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+        if (!(e.ctrlKey || e.metaKey)) return;
+        const key = e.key.toLowerCase();
+        if (key === 'z' && !e.shiftKey) { e.preventDefault(); undoZoneChange(); }
+        else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); redoZoneChange(); }
+    });
 
     // ── Rack / aisle photos (warehouse_rack_images) ──
     async function supabaseLoadRackImages(wid) {
