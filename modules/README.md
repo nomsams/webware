@@ -1,9 +1,10 @@
 # modules/
 
-Standalone JS building blocks for functionality discussed but not yet built into the app. None
-of this is imported by `index.html` — nothing here changes app behavior until a module is
-deliberately wired in. Each file has a `STATUS:` header comment with its intended integration
-point. Run all tests with:
+Standalone JS building blocks for functionality discussed for the app. Most of these aren't
+imported by `index.html` yet — nothing changes until a module is deliberately wired in — except
+**`perspective-warp.js`**, which actually is (via a small `<script type="module">` bridge near the
+end of `index.html`, since the rest of the app is one classic script). Each file has a `STATUS:`
+header comment saying which. Run all tests with:
 
 ```bash
 node --test modules/tests/*.test.js
@@ -63,6 +64,16 @@ node --test modules/tests/*.test.js
   deployed. See the function's doc comment for the Gmail app-password requirement and the Outlook
   basic-auth caveat (Microsoft has disabled it for most tenants since 2022–2023 — confirm yours
   still allows it before relying on that preset).
+
+- **`perspective-warp.js`** — **wired in** (see above), unlike everything else on this list. Straightens
+  a rack/aisle photo taken at an angle into a flat top-down rectangle — mark the 4 corners of the
+  rack face, and `solveHomography()` (a standard 4-point-correspondence DLT solve via Gaussian
+  elimination) + `warpImageToRect()` (inverse-mapped, bilinearly-sampled pixel warp, pure Canvas
+  2D — no WebGL, since a one-time still-image correction doesn't need GPU shaders) do the rest,
+  the same linear-algebra approach document-scanner apps use. Also includes an optional
+  measurement-calibration path (`distanceBetweenPoints`/`computeScale`/`pixelsToReal`): click two
+  points on the straightened photo and say what real-world distance they span, to convert other
+  pixel distances in that same photo into real units later.
 
 ## Security note: API keys in a static, client-only site
 

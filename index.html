@@ -222,6 +222,19 @@
         .rack-image-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
         .rack-image-card .rack-image-label { padding: 6px 8px; font-size: 0.78rem; color: var(--text-muted); }
         .rack-image-card .rack-image-remove { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: white; cursor: pointer; display: grid; place-items: center; }
+        .rack-image-card .rack-image-straighten { position: absolute; top: 6px; left: 6px; width: 26px; height: 26px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: white; cursor: pointer; display: grid; place-items: center; font-size: 0.85rem; }
+
+        /* --- RACK PHOTO PERSPECTIVE CORRECTION --- */
+        .rack-warp-handle {
+            position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%;
+            background: var(--primary); border: 3px solid white; box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+            cursor: grab; touch-action: none; z-index: 2;
+        }
+        .rack-warp-handle:active { cursor: grabbing; }
+        .rack-warp-measure-point {
+            position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+            background: var(--success); border: 2px solid white; box-shadow: 0 1px 4px rgba(0,0,0,0.5); z-index: 2;
+        }
 
         /* --- PREVIEW & LABELS (Screen) --- */
         .preview-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); margin-top: 1rem; background: #94a3b8; padding: 1.5rem; border-radius: 12px; overflow-x: auto; max-height: 60vh; overflow-y: auto; }
@@ -472,6 +485,46 @@
         <div class="modal-actions">
             <button class="secondary full-width" onclick="closeWarehouseEditModal()">Cancel</button>
             <button class="success-btn full-width" onclick="saveWarehouseEdit()">✔ Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- Straighten Rack Photo (perspective correction) -->
+<div class="modal-overlay" id="rack-warp-modal" onclick="handleRackWarpModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:680px;">
+        <h3>📐 Straighten Rack Photo</h3>
+        <p id="rack-warp-hint" style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem;"></p>
+
+        <div id="rack-warp-editor-wrap" style="text-align:center;">
+            <div id="rack-warp-corner-editor" style="position:relative; display:inline-block; max-width:100%; touch-action:none;">
+                <img id="rack-warp-source-img" style="display:block; max-width:100%; border-radius:8px; user-select:none;" draggable="false">
+                <svg id="rack-warp-outline" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"><polygon points="" fill="rgba(37,99,235,0.15)" stroke="var(--primary)" stroke-width="2"></polygon></svg>
+            </div>
+        </div>
+
+        <div id="rack-warp-preview-wrap" class="hidden" style="text-align:center; position:relative;">
+            <canvas id="rack-warp-preview-canvas" style="max-width:100%; border-radius:8px; cursor:default;"></canvas>
+        </div>
+
+        <div id="rack-warp-measure-form" class="hidden" style="margin-top:0.75rem;">
+            <label class="modal-label">Real-world distance between the two points you'll click on the straightened photo</label>
+            <div style="display:flex; gap:8px;">
+                <input type="number" id="rack-warp-measure-value" placeholder="e.g. 45" min="0" step="0.01" style="flex:1; margin:0;">
+                <select id="rack-warp-measure-unit" style="width:auto; margin:0;">
+                    <option value="cm">cm</option><option value="m">m</option><option value="in">in</option>
+                </select>
+                <button class="secondary" onclick="applyRackWarpMeasurement()" style="margin:0;">Set</button>
+            </div>
+            <p id="rack-warp-measure-status" style="color:var(--text-muted); font-size:0.8rem; margin-top:0.35rem;"></p>
+        </div>
+
+        <div class="modal-actions" style="flex-wrap:wrap;">
+            <button class="secondary" onclick="closeRackWarpModal()">Cancel</button>
+            <button class="secondary" id="btn-rack-warp-reset" onclick="resetRackWarpCorners()">↺ Reset Corners</button>
+            <button class="secondary hidden" id="btn-rack-warp-adjust" onclick="showRackWarpCornerEditor()">✏️ Adjust Corners</button>
+            <button class="secondary hidden" id="btn-rack-warp-measure" onclick="toggleRackWarpMeasure()">📏 Set Measurement</button>
+            <button class="success-btn" id="btn-rack-warp-straighten" onclick="straightenRackPhoto()">✅ Straighten</button>
+            <button class="success-btn hidden" id="btn-rack-warp-save" onclick="saveRackWarpResult()">💾 Save</button>
         </div>
     </div>
 </div>
@@ -3325,8 +3378,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         gallery.innerHTML = globalRackImages.map(img => `
             <div class="rack-image-card">
                 <img src="${img.image_url}" alt="Zone ${escapeHtml(img.zone)} Aisle ${img.aisle} Rack ${img.rack}" onclick="openLightbox('${img.image_url}')" style="cursor:pointer;">
-                <div class="rack-image-label">Zone ${escapeHtml(img.zone)} · Aisle ${img.aisle} · Rack ${img.rack}</div>
-                ${currentUserRole !== 'viewer' ? `<button class="rack-image-remove" onclick="removeRackImage(${img.id})" aria-label="Remove photo">✕</button>` : ''}
+                <div class="rack-image-label">Zone ${escapeHtml(img.zone)} · Aisle ${img.aisle} · Rack ${img.rack}${img.grid_overlay ? ' · <span title="Straightened">📐</span>' : ''}</div>
+                ${currentUserRole !== 'viewer' ? `
+                <button class="rack-image-straighten" onclick="openRackWarpEditor(${img.id})" title="Straighten photo" aria-label="Straighten photo">📐</button>
+                <button class="rack-image-remove" onclick="removeRackImage(${img.id})" aria-label="Remove photo">✕</button>` : ''}
             </div>`).join('');
     }
 
@@ -3374,6 +3429,268 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         } catch (e) {
             console.error("Rack image removal failed:", e);
             showToast("Could not remove photo: " + e.message, "error");
+        }
+    }
+
+    // ── Rack photo perspective correction (CamScanner-style: mark 4 corners, straighten) ──
+    // Math lives in modules/perspective-warp.js, bridged in via the `window.PerspectiveWarp`
+    // module-script tag near the end of the document (this classic script can't use `import`
+    // directly). See that module's header comment for the grid_overlay jsonb shape saved here.
+    var rackWarpState = null; // { imageId, naturalWidth, naturalHeight, displayScale, corners, rectifiedCanvas, measuring, measurePoints, pendingMeasurePixelDistance, calibration }
+
+    function openRackWarpEditor(id) {
+        const rec = globalRackImages.find(i => i.id === id);
+        if (!rec) return;
+        if (!window.PerspectiveWarp) { showToast("Still loading the perspective-correction module — try again in a moment.", "warning"); return; }
+        const imgEl = document.getElementById('rack-warp-source-img');
+        imgEl.crossOrigin = 'anonymous'; // needed to read pixels back out via canvas without tainting it
+        imgEl.onload = () => {
+            rackWarpState = {
+                imageId: id,
+                naturalWidth: imgEl.naturalWidth,
+                naturalHeight: imgEl.naturalHeight,
+                corners: (rec.grid_overlay && rec.grid_overlay.corners)
+                    ? rec.grid_overlay.corners.map(p => ({ ...p }))
+                    : defaultRackWarpCorners(imgEl.naturalWidth, imgEl.naturalHeight),
+                rectifiedCanvas: null, measuring: false, measurePoints: [], pendingMeasurePixelDistance: null,
+                calibration: (rec.grid_overlay && rec.grid_overlay.calibration) || null,
+            };
+            document.getElementById('rack-warp-modal').classList.add('open');
+            showRackWarpCornerEditor();
+        };
+        imgEl.onerror = () => showToast("Could not load the photo for editing.", "error");
+        imgEl.src = rec.image_url;
+    }
+
+    // Starting guess: inset 10% from each edge, so all 4 handles are visible and grabbable
+    // immediately rather than sitting exactly on the image's own border.
+    function defaultRackWarpCorners(w, h) {
+        const insetX = w * 0.1, insetY = h * 0.1;
+        return [
+            { x: insetX, y: insetY }, { x: w - insetX, y: insetY },
+            { x: w - insetX, y: h - insetY }, { x: insetX, y: h - insetY },
+        ];
+    }
+
+    function closeRackWarpModal() {
+        document.getElementById('rack-warp-modal').classList.remove('open');
+        document.getElementById('rack-warp-preview-canvas').onclick = null;
+        rackWarpState = null;
+    }
+    function handleRackWarpModalOverlayClick(e) { if (e.target === document.getElementById('rack-warp-modal')) closeRackWarpModal(); }
+
+    // Shown both on first opening the editor and when going back via "✏️ Adjust Corners" —
+    // corners are kept as-is either way, so re-entering just lets you fine-tune them.
+    function showRackWarpCornerEditor() {
+        document.getElementById('rack-warp-editor-wrap').classList.remove('hidden');
+        document.getElementById('rack-warp-preview-wrap').classList.add('hidden');
+        document.getElementById('rack-warp-measure-form').classList.add('hidden');
+        document.getElementById('btn-rack-warp-adjust').classList.add('hidden');
+        document.getElementById('btn-rack-warp-measure').classList.add('hidden');
+        document.getElementById('btn-rack-warp-save').classList.add('hidden');
+        document.getElementById('btn-rack-warp-reset').classList.remove('hidden');
+        document.getElementById('btn-rack-warp-straighten').classList.remove('hidden');
+        document.getElementById('rack-warp-hint').textContent = "Drag the 4 handles onto the corners of the rack face, then hit Straighten.";
+        renderRackWarpHandles();
+    }
+
+    // Handle positions are derived fresh from rackWarpState.corners on every call (including
+    // during a drag) rather than mutated in place — simpler, and cheap enough for 4 elements.
+    function renderRackWarpHandles() {
+        const container = document.getElementById('rack-warp-corner-editor');
+        const imgEl = document.getElementById('rack-warp-source-img');
+        container.querySelectorAll('.rack-warp-handle').forEach(h => h.remove());
+
+        const displayWidth = imgEl.clientWidth, displayHeight = imgEl.clientHeight;
+        const scale = displayWidth / rackWarpState.naturalWidth;
+        rackWarpState.displayScale = scale;
+
+        const svg = document.getElementById('rack-warp-outline');
+        svg.setAttribute('viewBox', `0 0 ${displayWidth} ${displayHeight}`);
+        svg.querySelector('polygon').setAttribute('points', rackWarpState.corners.map(p => `${p.x * scale},${p.y * scale}`).join(' '));
+
+        rackWarpState.corners.forEach((corner, i) => {
+            const handle = document.createElement('div');
+            handle.className = 'rack-warp-handle';
+            handle.style.left = (corner.x * scale) + 'px';
+            handle.style.top = (corner.y * scale) + 'px';
+            handle.setAttribute('aria-label', `Corner ${i + 1} of 4`);
+            handle.onmousedown = (e) => startRackWarpHandleDrag(e, i);
+            handle.addEventListener('touchstart', (e) => startRackWarpHandleDrag(e, i), { passive: false });
+            container.appendChild(handle);
+        });
+    }
+
+    function startRackWarpHandleDrag(startEvent, index) {
+        startEvent.preventDefault();
+        startEvent.stopPropagation();
+        const move = (e) => {
+            const point = e.touches ? e.touches[0] : e;
+            const container = document.getElementById('rack-warp-corner-editor');
+            const rect = container.getBoundingClientRect();
+            const scale = rackWarpState.displayScale;
+            const displayX = Math.max(0, Math.min(rect.width, point.clientX - rect.left));
+            const displayY = Math.max(0, Math.min(rect.height, point.clientY - rect.top));
+            rackWarpState.corners[index] = { x: displayX / scale, y: displayY / scale };
+            renderRackWarpHandles();
+        };
+        const up = () => {
+            window.removeEventListener('mousemove', move);
+            window.removeEventListener('mouseup', up);
+            window.removeEventListener('touchmove', move);
+            window.removeEventListener('touchend', up);
+        };
+        window.addEventListener('mousemove', move);
+        window.addEventListener('mouseup', up);
+        window.addEventListener('touchmove', move, { passive: false });
+        window.addEventListener('touchend', up);
+    }
+
+    function resetRackWarpCorners() {
+        if (!rackWarpState) return;
+        rackWarpState.corners = defaultRackWarpCorners(rackWarpState.naturalWidth, rackWarpState.naturalHeight);
+        renderRackWarpHandles();
+    }
+
+    // Output size: the average of the two opposite "width" edges and two opposite "height" edges
+    // of the marked quad, in the source photo's own pixel scale, capped at 1200px on the long
+    // side (plenty for a rack photo, and keeps the pixel-by-pixel warp loop fast).
+    function computeRackWarpOutputSize(corners) {
+        const { distanceBetweenPoints } = window.PerspectiveWarp;
+        const [tl, tr, br, bl] = corners;
+        const w = Math.round((distanceBetweenPoints(tl, tr) + distanceBetweenPoints(bl, br)) / 2);
+        const h = Math.round((distanceBetweenPoints(tl, bl) + distanceBetweenPoints(tr, br)) / 2);
+        const shrink = Math.min(1, 1200 / Math.max(w, h, 1));
+        return { width: Math.max(50, Math.round(w * shrink)), height: Math.max(50, Math.round(h * shrink)) };
+    }
+
+    async function straightenRackPhoto() {
+        if (!rackWarpState) return;
+        const imgEl = document.getElementById('rack-warp-source-img');
+        const { width, height } = computeRackWarpOutputSize(rackWarpState.corners);
+        try {
+            const canvas = await window.PerspectiveWarp.warpImageToRect(imgEl, rackWarpState.corners, width, height);
+            rackWarpState.rectifiedCanvas = canvas;
+            const previewCanvas = document.getElementById('rack-warp-preview-canvas');
+            previewCanvas.width = width; previewCanvas.height = height;
+            previewCanvas.getContext('2d').drawImage(canvas, 0, 0);
+
+            document.getElementById('rack-warp-editor-wrap').classList.add('hidden');
+            document.getElementById('rack-warp-preview-wrap').classList.remove('hidden');
+            document.getElementById('btn-rack-warp-reset').classList.add('hidden');
+            document.getElementById('btn-rack-warp-straighten').classList.add('hidden');
+            document.getElementById('btn-rack-warp-adjust').classList.remove('hidden');
+            document.getElementById('btn-rack-warp-measure').classList.remove('hidden');
+            document.getElementById('btn-rack-warp-save').classList.remove('hidden');
+            document.getElementById('rack-warp-hint').textContent = "Straightened. Go back and adjust the corners if it's not quite right, optionally set a measurement, then Save.";
+            if (rackWarpState.calibration) renderRackWarpMeasurePoints(); // redraw a previously-set calibration line
+        } catch (e) {
+            console.error("Perspective warp failed:", e);
+            showToast("Could not straighten photo: " + e.message, "error");
+        }
+    }
+
+    // ── Optional measurement calibration — draw a line of known real-world length on the
+    // straightened photo, so a future feature can convert other pixel distances in it to units. ──
+    function toggleRackWarpMeasure() {
+        if (!rackWarpState) return;
+        rackWarpState.measuring = !rackWarpState.measuring;
+        rackWarpState.measurePoints = [];
+        document.getElementById('rack-warp-measure-form').classList.add('hidden');
+        const canvas = document.getElementById('rack-warp-preview-canvas');
+        if (rackWarpState.measuring) {
+            document.getElementById('rack-warp-hint').textContent = "Click two points on the photo spanning a distance you know (e.g. a shelf's height).";
+            canvas.style.cursor = 'crosshair';
+            canvas.onclick = onRackWarpMeasureClick;
+        } else {
+            canvas.style.cursor = 'default';
+            canvas.onclick = null;
+            renderRackWarpMeasurePoints();
+        }
+    }
+
+    function onRackWarpMeasureClick(e) {
+        const canvas = document.getElementById('rack-warp-preview-canvas');
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+        rackWarpState.measurePoints.push({ x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY });
+        renderRackWarpMeasurePoints();
+        if (rackWarpState.measurePoints.length === 2) {
+            const { distanceBetweenPoints } = window.PerspectiveWarp;
+            rackWarpState.pendingMeasurePixelDistance = distanceBetweenPoints(rackWarpState.measurePoints[0], rackWarpState.measurePoints[1]);
+            document.getElementById('rack-warp-measure-form').classList.remove('hidden');
+            document.getElementById('rack-warp-measure-status').textContent = `${Math.round(rackWarpState.pendingMeasurePixelDistance)}px selected — enter the real distance and hit Set.`;
+        } else if (rackWarpState.measurePoints.length > 2) {
+            rackWarpState.measurePoints = [rackWarpState.measurePoints[2]]; // start over on a 3rd click
+        }
+    }
+
+    // Redraws the rectified image fresh, then the measurement dots/line on top — simpler than
+    // positioning separate DOM elements over a canvas whose displayed size can change (max-width:100%).
+    function renderRackWarpMeasurePoints() {
+        if (!rackWarpState || !rackWarpState.rectifiedCanvas) return;
+        const canvas = document.getElementById('rack-warp-preview-canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(rackWarpState.rectifiedCanvas, 0, 0);
+        const points = rackWarpState.measurePoints.length ? rackWarpState.measurePoints
+            : (rackWarpState.calibration ? [rackWarpState.calibration.p1, rackWarpState.calibration.p2] : []);
+        if (!points.length) return;
+        ctx.strokeStyle = '#10b981'; ctx.fillStyle = '#10b981'; ctx.lineWidth = 3;
+        if (points.length === 2) {
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            ctx.lineTo(points[1].x, points[1].y);
+            ctx.stroke();
+        }
+        points.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2); ctx.fill(); });
+    }
+
+    function applyRackWarpMeasurement() {
+        const value = parseFloat(document.getElementById('rack-warp-measure-value').value);
+        const unit = document.getElementById('rack-warp-measure-unit').value;
+        if (!(value > 0) || !rackWarpState.pendingMeasurePixelDistance) { showToast("Enter a positive distance first.", "error"); return; }
+        const { computeScale } = window.PerspectiveWarp;
+        rackWarpState.calibration = {
+            p1: rackWarpState.measurePoints[0], p2: rackWarpState.measurePoints[1],
+            realDistance: value, unit, unitsPerPixel: computeScale(rackWarpState.pendingMeasurePixelDistance, value),
+        };
+        rackWarpState.measuring = false;
+        const canvas = document.getElementById('rack-warp-preview-canvas');
+        canvas.style.cursor = 'default';
+        canvas.onclick = null;
+        document.getElementById('rack-warp-measure-status').textContent = `Set: ${Math.round(rackWarpState.pendingMeasurePixelDistance)}px = ${value}${unit}.`;
+        showToast("Measurement set.", "success");
+    }
+
+    async function saveRackWarpResult() {
+        if (!rackWarpState || !rackWarpState.rectifiedCanvas) return;
+        const rec = globalRackImages.find(i => i.id === rackWarpState.imageId);
+        if (!rec) return;
+        try {
+            const blob = await new Promise(resolve => rackWarpState.rectifiedCanvas.toBlob(resolve, 'image/jpeg', 0.9));
+            const path = `${rec.warehouse_id}/${rec.zone}-${rec.aisle}-${rec.rack}-rectified.jpg`;
+            const up = await sb.storage.from('rack-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+            if (up.error) throw up.error;
+            const rectifiedImageUrl = sb.storage.from('rack-images').getPublicUrl(path).data.publicUrl + '?v=' + Date.now();
+
+            const gridOverlay = {
+                corners: rackWarpState.corners,
+                rectifiedWidth: rackWarpState.rectifiedCanvas.width,
+                rectifiedHeight: rackWarpState.rectifiedCanvas.height,
+                rectifiedImageUrl,
+                calibration: rackWarpState.calibration || null,
+            };
+            const { data, error } = await sb.from('warehouse_rack_images').update({ grid_overlay: gridOverlay }).eq('id', rackWarpState.imageId).select().single();
+            if (error) throw error;
+
+            const idx = globalRackImages.findIndex(i => i.id === data.id);
+            if (idx >= 0) globalRackImages[idx] = data;
+            renderRackImageGallery();
+            closeRackWarpModal();
+            showToast("Straightened photo saved.", "success");
+        } catch (e) {
+            console.error("Saving straightened photo failed:", e);
+            showToast("Could not save: " + e.message, "error");
         }
     }
 
@@ -4758,6 +5075,15 @@ ${css}
         if (sb) { try { await sb.auth.signOut(); } catch (e) { console.error("Supabase sign-out failed:", e); } }
         window.location.href = window.location.pathname;
     }
+</script>
+
+<!-- Bridges modules/perspective-warp.js (an ES module, `export`/`import`) into the classic
+     script above, which can't use `import` directly — everything else in this app is deliberately
+     one big classic script so every top-level `function` stays reachable from inline onclick=""
+     handlers via the global object, which an ES module would not do. -->
+<script type="module">
+    import * as PerspectiveWarp from './modules/perspective-warp.js';
+    window.PerspectiveWarp = PerspectiveWarp;
 </script>
 </body>
 </html>
