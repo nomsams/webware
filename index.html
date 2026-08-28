@@ -597,6 +597,9 @@
         <button class="icon-btn hidden" id="btn-pack-order" onclick="openPackOrderView()" aria-label="View Pack Order" title="Pack Order" style="position:relative;">
             📦<span id="pack-order-badge" class="badge-count">0</span>
         </button>
+        <button class="icon-btn" id="btn-inventering" onclick="openInventeringSetup()" aria-label="Inventering" title="Inventering (stocktaking)">
+            📋
+        </button>
         <button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle Dark Mode" title="Toggle Theme">
             <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
         </button>
@@ -821,6 +824,44 @@
             </div>
             <div id="rack-image-gallery" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:10px;"></div>
         </div>
+    </section>
+
+    <!-- View 3e: Inventering setup — pick a rack area and/or a kit, then narrow with checkboxes
+         before starting the session. -->
+    <section id="inventering-setup-view" class="card hidden">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
+            <button class="secondary" onclick="showListView('items')">← Back</button>
+        </div>
+        <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">📋 Inventering</h1>
+        <p style="color:var(--text-muted); margin-bottom:1rem;">Set up a stocktaking session for <strong id="inventering-warehouse-name"></strong>.</p>
+
+        <label class="modal-label" for="inventering-area-select">Rack Area</label>
+        <select id="inventering-area-select" onchange="onInventeringAreaChange()"></select>
+
+        <label class="modal-label" for="inventering-kit-select">…or by Kit instead</label>
+        <select id="inventering-kit-select" onchange="onInventeringKitChange()">
+            <option value="">— Use the Rack Area above —</option>
+        </select>
+
+        <p id="inventering-picker-hint" style="color:var(--text-muted); font-size:0.85rem; margin:1rem 0 0.5rem;"></p>
+        <div style="display:flex; gap:10px; align-items:center; margin-bottom:0.5rem;">
+            <button class="secondary" onclick="setAllInventeringPicked(true)" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">Select All</button>
+            <button class="secondary" onclick="setAllInventeringPicked(false)" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">Select None</button>
+        </div>
+        <div id="inventering-item-picker"></div>
+
+        <button class="success-btn full-width" onclick="startInventering()" style="margin-top:1.5rem;">▶️ Start Inventering</button>
+    </section>
+
+    <!-- View 3f: Inventering session — the counting checklist itself -->
+    <section id="inventering-view" class="card hidden">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
+            <button class="secondary" onclick="closeInventeringView()">← Back</button>
+            <button class="secondary" onclick="clearInventeringSession()" style="color:var(--danger);">🗑️ Clear Session</button>
+        </div>
+        <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">📋 Inventering</h1>
+        <p id="inventering-progress" style="color:var(--text-muted); margin-bottom:1rem;"></p>
+        <div id="inventering-items"></div>
     </section>
 
     <!-- View 3d: Pack Order — a session-local pick list built by selecting items from anywhere
@@ -2137,7 +2178,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function switchView(viewId) {
-        ['auth-view','list-view','item-view','kit-view','manufacturer-view','warehouse-view','pack-order-view','preview-view','settings-view'].forEach(v => {
+        ['auth-view','list-view','item-view','kit-view','manufacturer-view','warehouse-view','pack-order-view','inventering-setup-view','inventering-view','preview-view','settings-view'].forEach(v => {
             document.getElementById(v).classList.add('hidden');
         });
         document.getElementById(viewId).classList.remove('hidden');
@@ -4143,6 +4184,168 @@ th { background: #eee; }
     }
 
     // ════════════════════════════════════════════════════════════════════════
+    //  INVENTERING (Swedish: stocktaking) — a dedicated counting-session mode.
+    //  Setup: seed a checklist from a rack area (or every item) or a kit, narrow it with
+    //  checkboxes ("all" vs "some specific"), then start. The session itself is a simple
+    //  done/not-done list sorted by bin location — session-local like Pack Order, not persisted.
+    //  Doesn't require edit permission: it never writes anything back, just a personal checklist.
+    // ════════════════════════════════════════════════════════════════════════
+    var inventeringCandidates = []; // BTKs currently offered in the setup picker
+    var inventeringPicked = new Set(); // subset of inventeringCandidates the user has checked
+    var inventeringItems = []; // [{btk, done}] — the active session, once started
+
+    function openInventeringSetup() {
+        if (!requireAuth()) return;
+        if (inventeringItems.length) { openInventeringView(); return; } // resume an active session instead
+        document.getElementById('inventering-warehouse-name').textContent = getWarehouseMeta(currentWarehouseId).name;
+
+        const areaSelect = document.getElementById('inventering-area-select');
+        const zones = getAvailableZones();
+        areaSelect.innerHTML = '<option value="">All areas</option>' + zones.map(z => `<option value="${escapeHtml(z)}">Zone ${escapeHtml(z)}</option>`).join('');
+
+        const kitSelect = document.getElementById('inventering-kit-select');
+        kitSelect.innerHTML = '<option value="">— Use the Rack Area above —</option>' +
+            globalKits.map((k, i) => `<option value="${i}">${escapeHtml(k.name)}</option>`).join('');
+
+        setInventeringCandidates(globalInventory.map(i => i.BTKnumber));
+        switchView('inventering-setup-view');
+    }
+
+    function onInventeringAreaChange() {
+        document.getElementById('inventering-kit-select').value = '';
+        const zone = document.getElementById('inventering-area-select').value;
+        const btks = globalInventory
+            .filter(i => !zone || (parseLocationCode(i.LocationCode) || {}).zone === zone)
+            .map(i => i.BTKnumber);
+        setInventeringCandidates(btks);
+    }
+
+    function onInventeringKitChange() {
+        const idx = document.getElementById('inventering-kit-select').value;
+        if (idx === '') { onInventeringAreaChange(); return; }
+        document.getElementById('inventering-area-select').value = '';
+        const kit = globalKits[Number(idx)];
+        setInventeringCandidates(kit ? Object.keys(kit.items) : []);
+    }
+
+    // Defaults to "all picked" — unchecking specific rows is how "some specific" happens.
+    function setInventeringCandidates(btks) {
+        inventeringCandidates = btks;
+        inventeringPicked = new Set(btks);
+        renderInventeringPicker();
+    }
+
+    function renderInventeringPicker() {
+        const container = document.getElementById('inventering-item-picker');
+        document.getElementById('inventering-picker-hint').textContent =
+            `${inventeringCandidates.length} item(s) found — ${inventeringPicked.size} selected. Uncheck any you don't want to include.`;
+        container.innerHTML = '';
+        if (!inventeringCandidates.length) {
+            container.innerHTML = `<p style="color:var(--text-muted); font-size:0.85rem;">No items match — try a different area.</p>`;
+            return;
+        }
+        const frag = document.createDocumentFragment();
+        inventeringCandidates.forEach(btk => {
+            const item = globalInventory.find(i => i.BTKnumber === btk);
+            if (!item) return;
+            const checked = inventeringPicked.has(btk);
+            const div = document.createElement('div');
+            div.className = 'item-row';
+            div.innerHTML = `
+                <div class="select-circle" role="checkbox" aria-checked="${checked}" tabindex="0"></div>
+                <div class="item-info">
+                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${escapeHtml(item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed')}</div>
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${escapeHtml(btk)}</div>
+                </div>`;
+            div.onclick = () => toggleInventeringPick(btk);
+            const circle = div.querySelector('.select-circle');
+            circle.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleInventeringPick(btk); } };
+            frag.appendChild(div);
+        });
+        container.appendChild(frag);
+    }
+
+    function toggleInventeringPick(btk) {
+        if (inventeringPicked.has(btk)) inventeringPicked.delete(btk); else inventeringPicked.add(btk);
+        renderInventeringPicker();
+    }
+
+    function setAllInventeringPicked(pick) {
+        inventeringPicked = pick ? new Set(inventeringCandidates) : new Set();
+        renderInventeringPicker();
+    }
+
+    function startInventering() {
+        if (!inventeringPicked.size) { showToast("Select at least one item first.", "warning"); return; }
+        inventeringItems = Array.from(inventeringPicked).map(btk => ({ btk, done: false }));
+        inventeringItems.sort((a, b) => {
+            const ia = globalInventory.find(i => i.BTKnumber === a.btk);
+            const ib = globalInventory.find(i => i.BTKnumber === b.btk);
+            return compareLocationCode(ia && ia.LocationCode, ib && ib.LocationCode);
+        });
+        openInventeringView();
+    }
+
+    function openInventeringView() {
+        switchView('inventering-view');
+        renderInventeringList();
+    }
+
+    function closeInventeringView() {
+        showListView('items');
+    }
+
+    function clearInventeringSession() {
+        if (!confirm("Clear this inventering session? This can't be undone.")) return;
+        inventeringItems = [];
+        openInventeringSetup();
+    }
+
+    function toggleInventeringDone(btk) {
+        const line = inventeringItems.find(o => o.btk === btk);
+        if (!line) return;
+        line.done = !line.done;
+        renderInventeringList();
+    }
+
+    // Clicking a row (not the Done button) opens that item's own detail view — Back returns here
+    // via backFromItem()'s 'inventering' branch, same pattern as Pack Order's rows.
+    function renderInventeringList() {
+        const container = document.getElementById('inventering-items');
+        const progressEl = document.getElementById('inventering-progress');
+        container.innerHTML = '';
+        if (!inventeringItems.length) {
+            progressEl.textContent = '';
+            container.innerHTML = `<div class="empty-state"><h3>No active session</h3><p>Go back and start one from a rack area or a kit.</p></div>`;
+            return;
+        }
+        const doneCount = inventeringItems.filter(o => o.done).length;
+        progressEl.textContent = `${doneCount} of ${inventeringItems.length} done`;
+        const frag = document.createDocumentFragment();
+        inventeringItems.forEach(line => {
+            const item = globalInventory.find(i => i.BTKnumber === line.btk);
+            const name = item ? (item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed') : 'Unknown item (not in the currently loaded warehouse)';
+            const num1 = (item && item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
+            const loc = item ? describeLocationCode(item.LocationCode) : null;
+            const qty = item ? item.Numberofitems : '?';
+            const div = document.createElement('div');
+            div.className = 'kit-row';
+            div.style.cursor = 'pointer';
+            div.innerHTML = `
+                <div class="pack-order-qty">${escapeHtml(String(qty))}</div>
+                <div class="kit-info">
+                    <div class="item-title" style="font-size:1.05rem;font-weight:800;${line.done ? 'text-decoration:line-through;opacity:0.6;' : ''}">${escapeHtml(name)}</div>
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${escapeHtml(line.btk)}${num1 ? ' · ' + escapeHtml(num1) : ''}${loc ? ' · 📍 ' + escapeHtml(loc) : ''}</div>
+                </div>
+                <button class="${line.done ? 'success-btn' : 'secondary'} pack-toggle-btn" data-role="toggle">${line.done ? '✅ Done' : '⬜ Not Done'}</button>`;
+            div.onclick = () => openItem(line.btk, { type: 'inventering' });
+            div.querySelector('[data-role="toggle"]').onclick = (e) => { e.stopPropagation(); toggleInventeringDone(line.btk); };
+            frag.appendChild(div);
+        });
+        container.appendChild(frag);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     //  ITEM DETAIL (with kit tags + sequential Next)
     // ════════════════════════════════════════════════════════════════════════
     function openItem(id, context) {
@@ -4554,6 +4757,8 @@ th { background: #eee; }
             showKitDetail(navigationContext.kitnumber, navigationContext.kitName);
         } else if (navigationContext && navigationContext.type === 'pack-order') {
             openPackOrderView();
+        } else if (navigationContext && navigationContext.type === 'inventering') {
+            openInventeringView();
         } else {
             showListView('items');
         }
