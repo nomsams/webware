@@ -408,6 +408,29 @@
     </div>
 </div>
 
+<div class="modal-overlay" id="warehouse-edit-modal" onclick="handleWarehouseModalOverlayClick(event)">
+    <div class="modal-box">
+        <h3>🏬 Edit Warehouse</h3>
+
+        <label class="modal-label" for="wh-edit-name">Name</label>
+        <input type="text" id="wh-edit-name" placeholder="e.g. Main Warehouse">
+
+        <label class="modal-label" for="wh-edit-address">Address</label>
+        <input type="text" id="wh-edit-address" placeholder="Optional">
+
+        <label class="modal-label" for="wh-edit-phone">Phone Number</label>
+        <input type="text" id="wh-edit-phone" placeholder="Optional">
+
+        <label class="modal-label" for="wh-edit-email">Contact Email</label>
+        <input type="email" id="wh-edit-email" placeholder="Optional">
+
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeWarehouseEditModal()">Cancel</button>
+            <button class="success-btn full-width" onclick="saveWarehouseEdit()">✔ Save</button>
+        </div>
+    </div>
+</div>
+
 <!-- Add/Edit Item Modal -->
 <div class="modal-overlay" id="add-item-modal" onclick="handleModalOverlayClick(event)">
     <div class="modal-box">
@@ -607,6 +630,17 @@
             <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Warehouse Locator Map</strong>
             <div class="warehouse-map" id="locator-map"></div>
             <p id="locator-map-caption" style="color:var(--text-muted); font-size:0.82rem; margin-top:0.5rem;"></p>
+        </div>
+
+        <div id="bin-map-section" class="hidden" style="margin-top: 2rem; margin-bottom: 1rem;">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Bin Location Map (Aisle × Rack)</strong>
+                <span id="bin-map-zone-select-wrap" class="hidden">
+                    <select id="bin-map-zone-select" onchange="onBinMapZoneChange()" style="width:auto; margin:0; padding:4px 8px; font-size:0.8rem;"></select>
+                </span>
+            </div>
+            <div class="warehouse-map" id="bin-location-map"></div>
+            <p id="bin-map-caption" style="color:var(--text-muted); font-size:0.82rem; margin-top:0.5rem;"></p>
         </div>
     </section>
 
@@ -1301,6 +1335,30 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         currentUserRole = profile.role;
         currentWarehouseId = wid;
         currentActiveKey = 'supabase-session'; // sentinel so requireAuth() passes
+        await supabaseLoadWarehouseMeta(wid);
+        await supabaseLoadWarehouseZones(wid);
+    }
+
+    // Warehouse name/address/phone/contact email for Supabase-mode warehouses are DB-driven (the
+    // `warehouses` table), not the hardcoded WAREHOUSES array entries static warehouses 2/3 keep
+    // using — merges the live row into that same array so getWarehouseMeta() stays the one place
+    // everything else reads from, and so "mode: 'supabase'" (set only in the hardcoded entry) and
+    // anything else on it survives the merge.
+    async function supabaseLoadWarehouseMeta(wid) {
+        const { data, error } = await sb.from('warehouses').select('*').eq('l', wid).single();
+        if (error) { console.error("Warehouse meta load failed:", error); return; }
+        const idx = WAREHOUSES.findIndex(w => w.l === wid);
+        const merged = { ...(idx >= 0 ? WAREHOUSES[idx] : { l: wid, mode: 'supabase' }), name: data.name, address: data.address || '', phone: data.phone || '', contactEmail: data.contact_email || '' };
+        if (idx >= 0) WAREHOUSES[idx] = merged; else WAREHOUSES.push(merged);
+    }
+
+    // Optional explicit per-zone bounds (warehouse_zones) — empty for most warehouses, which is
+    // fine: getZoneBounds() falls back to auto-detecting the same shape from items.location_code.
+    var globalWarehouseZones = [];
+    async function supabaseLoadWarehouseZones(wid) {
+        const { data, error } = await sb.from('warehouse_zones').select('*').eq('warehouse_id', wid);
+        if (error) { console.error("Warehouse zones load failed:", error); globalWarehouseZones = []; return; }
+        globalWarehouseZones = data || [];
     }
 
     // Kits are a normalized edge-list in Supabase (kits + kit_items), unlike static mode's
@@ -2313,7 +2371,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const meta = getWarehouseMeta(currentWarehouseId);
         document.getElementById('wh-meta-container').innerHTML =
             `<div class="wh-meta" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                <span>🏬 <strong>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address}</span>
+                <span>🏬 <strong>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address || '—'}${meta.phone ? ` &nbsp;·&nbsp; ${meta.phone}` : ''}${meta.contactEmail ? ` &nbsp;·&nbsp; ${meta.contactEmail}` : ''}</span>
+                ${meta.mode === 'supabase' && currentUserRole === 'admin' ? `<button class="secondary" onclick="openWarehouseEditModal()" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">✏️ Edit Warehouse</button>` : ''}
                 <label for="warehouse-switcher" style="margin:0; font-size:0.85rem; color:var(--text-muted);">Switch:</label>
                 <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" style="width:auto; min-width:160px; margin:0; padding:6px 10px; font-size:0.85rem;">${WAREHOUSES.map(w => `<option value="${w.l}" ${w.l === currentWarehouseId ? 'selected' : ''}>${w.name}</option>`).join('')}</select>
                 ${meta.mode === 'supabase' ? `<span style="font-size:0.8rem; color:var(--text-muted);">🔐 Signed in as <strong>${currentUserRole || '?'}</strong></span>` : ''}
@@ -2739,6 +2798,38 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         else if (listMode === 'manufacturers') renderManufacturersList();
     }
 
+    // ── WAREHOUSE EDIT (Supabase mode, admin only — name/address/phone/contact email) ──
+    function openWarehouseEditModal() {
+        if (currentUserRole !== 'admin') { showToast("Only admins can edit warehouse details.", "warning"); return; }
+        const meta = getWarehouseMeta(currentWarehouseId);
+        document.getElementById('wh-edit-name').value = meta.name || '';
+        document.getElementById('wh-edit-address').value = meta.address || '';
+        document.getElementById('wh-edit-phone').value = meta.phone || '';
+        document.getElementById('wh-edit-email').value = meta.contactEmail || '';
+        document.getElementById('warehouse-edit-modal').classList.add('open');
+    }
+    function closeWarehouseEditModal() { document.getElementById('warehouse-edit-modal').classList.remove('open'); }
+    function handleWarehouseModalOverlayClick(e) { if (e.target === document.getElementById('warehouse-edit-modal')) closeWarehouseEditModal(); }
+
+    async function saveWarehouseEdit() {
+        const name = document.getElementById('wh-edit-name').value.trim();
+        if (!name) { showToast("Name is required.", "error"); return; }
+        const row = {
+            name,
+            address: document.getElementById('wh-edit-address').value.trim() || null,
+            phone: document.getElementById('wh-edit-phone').value.trim() || null,
+            contact_email: document.getElementById('wh-edit-email').value.trim() || null
+        };
+        const { data, error } = await sb.from('warehouses').update(row).eq('l', currentWarehouseId).select().single();
+        if (error) { showToast("Save blocked: " + error.message, "error"); return; }
+
+        const idx = WAREHOUSES.findIndex(w => w.l === currentWarehouseId);
+        if (idx >= 0) WAREHOUSES[idx] = { ...WAREHOUSES[idx], name: data.name, address: data.address || '', phone: data.phone || '', contactEmail: data.contact_email || '' };
+        closeWarehouseEditModal();
+        showToast("Warehouse saved.", "success");
+        renderWarehouseMeta();
+    }
+
     async function handleManufacturerLogoUpload(event) {
         const file = event.target.files[0];
         event.target.value = '';
@@ -3150,6 +3241,7 @@ th { background: #eee; }
             selectedItems.clear(); selectedItems.add(id); generateLabelsPreview();
         };
         renderLocatorMap(item);
+        renderBinLocationMap(item);
     }
 
     // Read-only image gallery. In quick-edit mode each thumbnail gets a remove (✕) button.
@@ -3592,6 +3684,89 @@ th { background: #eee; }
         }
         if (!raw) caption.textContent = "No position set — add one via ✏️ Edit or double-click to quick-edit.";
         else if (activeIndex === null) caption.textContent = `"${raw}" isn't a valid grid position (use A1–F6).`;
+        else caption.textContent = '';
+    }
+
+    // ── BIN LOCATION MAP (Zone → Aisle × Rack grid) ──────────────────────────
+    // Unlike the fixed 6x6 MapPosition grid above, this is sized to whatever the warehouse
+    // actually uses: an explicit bound from warehouse_zones if one exists for the zone, otherwise
+    // auto-detected by scanning every item's location_code for the highest aisle/rack seen. Level
+    // and Bin aren't shown as grid axes (a 2D grid can't show all four) — Aisle/Rack place you in
+    // the room; Level/Bin (finer, within-rack detail) are already in describeLocationCode()'s text
+    // in the field list above.
+    var binMapSelectedZone = null;
+
+    function getAvailableZones() {
+        const zones = new Set(globalWarehouseZones.map(z => z.zone));
+        globalInventory.forEach(i => {
+            const p = parseLocationCode(i.LocationCode);
+            if (p) zones.add(p.zone);
+        });
+        return Array.from(zones).sort();
+    }
+
+    // Explicit warehouse_zones row wins when present; otherwise scan globalInventory for the
+    // highest aisle/rack actually in use for this zone. Returns null if the zone has no explicit
+    // row AND no located items (nothing to size a grid to).
+    function getZoneBounds(zone) {
+        const explicit = globalWarehouseZones.find(z => z.zone === zone);
+        if (explicit && explicit.max_aisle && explicit.max_rack) {
+            return { maxAisle: explicit.max_aisle, maxRack: explicit.max_rack };
+        }
+        let maxAisle = 0, maxRack = 0;
+        globalInventory.forEach(i => {
+            const p = parseLocationCode(i.LocationCode);
+            if (p && p.zone === zone) { maxAisle = Math.max(maxAisle, p.aisle); maxRack = Math.max(maxRack, p.rack); }
+        });
+        return (maxAisle && maxRack) ? { maxAisle, maxRack } : null;
+    }
+
+    function onBinMapZoneChange() {
+        binMapSelectedZone = document.getElementById('bin-map-zone-select').value;
+        const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+        if (item) renderBinLocationMap(item);
+    }
+
+    function renderBinLocationMap(item) {
+        const section = document.getElementById('bin-map-section');
+        const map = document.getElementById('bin-location-map');
+        const caption = document.getElementById('bin-map-caption');
+        const zoneSelectWrap = document.getElementById('bin-map-zone-select-wrap');
+        const zones = getAvailableZones();
+
+        if (!zones.length) { section.classList.add('hidden'); return; }
+        section.classList.remove('hidden');
+
+        const itemPos = parseLocationCode(item.LocationCode);
+        if (!binMapSelectedZone || !zones.includes(binMapSelectedZone)) {
+            binMapSelectedZone = (itemPos && zones.includes(itemPos.zone)) ? itemPos.zone : zones[0];
+        }
+
+        zoneSelectWrap.classList.toggle('hidden', zones.length < 2);
+        const select = document.getElementById('bin-map-zone-select');
+        select.innerHTML = zones.map(z => `<option value="${escapeHtml(z)}" ${z === binMapSelectedZone ? 'selected' : ''}>Zone ${escapeHtml(z)}</option>`).join('');
+
+        const bounds = getZoneBounds(binMapSelectedZone);
+        map.innerHTML = '';
+        if (!bounds) {
+            map.style.gridTemplateColumns = '';
+            caption.textContent = `No sized layout for Zone ${binMapSelectedZone} yet.`;
+            return;
+        }
+        map.style.gridTemplateColumns = `repeat(${bounds.maxAisle}, 1fr)`;
+        for (let rack = 1; rack <= bounds.maxRack; rack++) {
+            for (let aisle = 1; aisle <= bounds.maxAisle; aisle++) {
+                const isActive = itemPos && itemPos.zone === binMapSelectedZone && itemPos.aisle === aisle && itemPos.rack === rack;
+                const cell = document.createElement('div');
+                cell.className = 'map-cell' + (isActive ? ' active' : '');
+                cell.title = `Aisle ${aisle} · Rack ${rack}`;
+                cell.innerText = isActive ? `${aisle}·${rack}` : '';
+                map.appendChild(cell);
+            }
+        }
+        if (!item.LocationCode || item.LocationCode === 'None') caption.textContent = "No bin location set — add one via ✏️ Edit or double-click to quick-edit.";
+        else if (!itemPos) caption.textContent = `"${item.LocationCode}" isn't a valid bin location code.`;
+        else if (itemPos.zone !== binMapSelectedZone) caption.textContent = `This item is in Zone ${itemPos.zone}, not shown here.`;
         else caption.textContent = '';
     }
 
