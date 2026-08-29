@@ -477,6 +477,10 @@
         <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.5rem;">Supabase warehouses:</p>
         <div id="warehouses-list-container">Loading…</div>
         <div id="add-warehouse-form" class="hidden" style="margin-top:1rem; border-top:1px solid var(--border); padding-top:1rem;">
+            <label class="modal-label" for="new-wh-type">Warehouse Type</label>
+            <select id="new-wh-type" disabled title="Static (offline encrypted vault) warehouses aren't created this way — see Warehouse Page docs">
+                <option value="database" selected>🗄️ Database (Supabase)</option>
+            </select>
             <label class="modal-label" for="new-wh-id">Warehouse ID</label>
             <input type="text" id="new-wh-id">
             <label class="modal-label" for="new-wh-name">Name</label>
@@ -1236,8 +1240,12 @@
     // while still reachable directly (a saved key, a QR link) and still shown if it's the one
     // currently open. Per-device only (localStorage), not a server-side setting.
     var staticWarehousesEnabled = localStorage.getItem('staticWarehousesEnabled') === 'true';
+    // `active === false` means an admin removed it (see removeWarehouse) — a soft flag on the
+    // warehouses row, not a delete, so it never touches that warehouse's own items. Missing/
+    // undefined `active` (static warehouses, or a Supabase warehouse row from before this column
+    // existed) is treated as active — only an explicit false hides it.
     function visibleWarehouses() {
-        return WAREHOUSES.filter(w => w.mode === 'supabase' || staticWarehousesEnabled || w.l === currentWarehouseId);
+        return WAREHOUSES.filter(w => ((w.mode === 'supabase' || staticWarehousesEnabled) && w.active !== false) || w.l === currentWarehouseId);
     }
     function toggleStaticWarehouses(enabled) {
         staticWarehousesEnabled = enabled;
@@ -1685,10 +1693,42 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         container.innerHTML = 'Loading…';
         await supabaseLoadAllWarehouses();
         const supaWarehouses = WAREHOUSES.filter(w => w.mode === 'supabase');
-        container.innerHTML = supaWarehouses.map(w => `
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);">
-                <span><strong>${escapeHtml(w.name)}</strong> <span style="color:var(--text-muted); font-size:0.85rem;">— ID ${escapeHtml(w.l)}${w.address ? ' · ' + escapeHtml(w.address) : ''}</span></span>
-            </div>`).join('') || '<p style="color:var(--text-muted); font-size:0.85rem;">No Supabase warehouses yet.</p>';
+        container.innerHTML = supaWarehouses.map(w => {
+            const removed = w.active === false;
+            const actionBtn = removed
+                ? `<button class="secondary" onclick="restoreWarehouse('${w.l}', ${JSON.stringify(w.name)})" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">↩️ Restore</button>`
+                : `<button class="secondary" onclick="confirmRemoveWarehouse('${w.l}', ${JSON.stringify(w.name)})" style="padding:4px 10px; min-height:auto; font-size:0.78rem; color:var(--danger);">🗑️ Remove</button>`;
+            return `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); ${removed ? 'opacity:0.55;' : ''}">
+                <span><strong>${escapeHtml(w.name)}</strong> <span style="color:var(--text-muted); font-size:0.85rem;">— ID ${escapeHtml(w.l)}${w.address ? ' · ' + escapeHtml(w.address) : ''}${removed ? ' · Removed' : ''}</span></span>
+                ${actionBtn}
+            </div>`;
+        }).join('') || '<p style="color:var(--text-muted); font-size:0.85rem;">No Supabase warehouses yet.</p>';
+    }
+
+    // Soft remove only (warehouses.active = false) — never touches that warehouse's own items/kits/
+    // etc, and its own data stays fully intact for as long as it's inactive. Restorable any time
+    // from this same list. Confirmed first since it immediately drops out of everyone's switcher.
+    function confirmRemoveWarehouse(l, name) {
+        showConfirmModal({
+            title: `Remove "${name}"?`,
+            body: `This hides "${name}" (ID ${l}) from the switcher for everyone. Its items, kits, and everything else stay exactly as they are — nothing is deleted, and you can restore it from this same list at any time.`,
+            confirmLabel: '🗑️ Remove',
+            onConfirm: () => removeWarehouse(l, name)
+        });
+    }
+    async function removeWarehouse(l, name) {
+        const { error } = await sb.from('warehouses').update({ active: false }).eq('l', l);
+        if (error) return showToast("Could not remove warehouse: " + error.message, "error");
+        showToast(`"${name}" removed.`, "success");
+        renderManageWarehousesList();
+        if (l === currentWarehouseId) renderWarehouseMeta(); // stays open in this session, just drops out of the switcher list for next time
+    }
+    async function restoreWarehouse(l, name) {
+        const { error } = await sb.from('warehouses').update({ active: true }).eq('l', l);
+        if (error) return showToast("Could not restore warehouse: " + error.message, "error");
+        showToast(`"${name}" restored.`, "success");
+        renderManageWarehousesList();
+        renderWarehouseMeta();
     }
 
     // Suggests the lowest integer not already used by any known warehouse (Supabase or static) —
@@ -1715,7 +1755,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const address = document.getElementById('new-wh-address').value.trim();
         if (!l || !name) { showToast("Warehouse ID and name are required.", "error"); return; }
         if (WAREHOUSES.some(w => w.l === l)) { showToast(`Warehouse ID "${l}" is already in use.`, "error"); return; }
-        const { error } = await sb.from('warehouses').insert({ l, name, address: address || null });
+        const { error } = await sb.from('warehouses').insert({ l, name, address: address || null, type: 'database' });
         if (error) { showToast("Could not create warehouse: " + error.message, "error"); return; }
         showToast(`Warehouse "${name}" created. It's visible to everyone now — grant yourself or others access via Manage Users if you're not already an admin there.`, "success", 8000);
         closeAddWarehouseForm();
@@ -1773,7 +1813,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (error) { console.error("Could not load warehouse list:", error); return; }
         (data || []).forEach(row => {
             const idx = WAREHOUSES.findIndex(w => w.l === row.l);
-            const merged = { ...(idx >= 0 ? WAREHOUSES[idx] : {}), l: row.l, mode: 'supabase', name: row.name, address: row.address || '', phone: row.phone || '', contactEmail: row.contact_email || '' };
+            const merged = {
+                ...(idx >= 0 ? WAREHOUSES[idx] : {}), l: row.l, mode: 'supabase', name: row.name,
+                address: row.address || '', phone: row.phone || '', contactEmail: row.contact_email || '',
+                active: row.active, type: row.type || 'database'
+            };
             if (idx >= 0) WAREHOUSES[idx] = merged; else WAREHOUSES.push(merged);
         });
     }
@@ -1812,7 +1856,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const { data, error } = await sb.from('warehouses').select('*').eq('l', wid).single();
         if (error) { console.error("Warehouse meta load failed:", error); return; }
         const idx = WAREHOUSES.findIndex(w => w.l === wid);
-        const merged = { ...(idx >= 0 ? WAREHOUSES[idx] : { l: wid, mode: 'supabase' }), name: data.name, address: data.address || '', phone: data.phone || '', contactEmail: data.contact_email || '' };
+        const merged = { ...(idx >= 0 ? WAREHOUSES[idx] : { l: wid, mode: 'supabase' }), name: data.name, address: data.address || '', phone: data.phone || '', contactEmail: data.contact_email || '', active: data.active, type: data.type || 'database' };
         if (idx >= 0) WAREHOUSES[idx] = merged; else WAREHOUSES.push(merged);
     }
 
