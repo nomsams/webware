@@ -404,6 +404,19 @@
         }
         #ai-fab:hover { transform: scale(1.06); }
         .ai-fab-badge { position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--danger); border: 2px solid var(--card-bg); }
+        /* Second, bigger-than-necessary voice button beside the main bubble — only shown while the
+           panel is open. Warehouses/construction sites are loud and hands are often full or gloved,
+           so voice needs a large, obvious, thumb-reachable target of its own, not just the small
+           icon inside the input row. */
+        #ai-fab-mic {
+            position: fixed; bottom: 20px; right: 84px; width: 48px; height: 48px; border-radius: 50%;
+            background: #6b7280; color: #fff; border: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.35);
+            font-size: 1.25rem; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
+            transition: transform 0.15s;
+        }
+        #ai-fab-mic:hover { transform: scale(1.06); }
+        #ai-fab-mic.hidden { display: none; }
+        #ai-fab-mic.recording { background: var(--danger); animation: aiPulse 1s ease-in-out infinite; }
         #ai-panel {
             position: fixed; bottom: 88px; right: 20px; width: 360px; max-width: calc(100vw - 2rem);
             max-height: min(70vh, 640px); background: var(--card-bg); border: 1px solid var(--border);
@@ -424,6 +437,7 @@
         .ai-action-card .ai-action-buttons { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
         .ai-action-card button { flex: 1; min-height: 34px; padding: 0.4rem 0.6rem; font-size: 0.82rem; border-radius: 8px; }
         .ai-action-card.low-confidence { border-color: #f59e0b; }
+        .ai-action-card .ai-action-link { background: none; border: none; color: var(--primary); text-decoration: underline; font-size: 0.8rem; padding: 0.15rem 0; cursor: pointer; text-align: left; flex: none; align-self: flex-start; min-height: unset; }
         .ai-highlight-pulse { animation: aiPulse 1.4s ease-in-out 2; }
         @keyframes aiPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.55); } 50% { box-shadow: 0 0 0 6px rgba(99,102,241,0); } }
         .ai-suggestions { display: flex; flex-wrap: wrap; gap: 6px; align-self: stretch; }
@@ -440,6 +454,7 @@
 <div id="toast-container" aria-live="polite"></div>
 
 <button id="ai-fab" onclick="toggleAiAssistant()" aria-label="Open AI Assistant" title="AI Assistant">🤖<span id="ai-fab-badge" class="ai-fab-badge hidden"></span></button>
+<button id="ai-fab-mic" class="hidden" onclick="aiChatToggleRecording()" aria-label="Speak to the AI Assistant" title="Voice input">🎤</button>
 <script>if (!localStorage.getItem('ai-assistant-seen')) { var _aifb = document.getElementById('ai-fab-badge'); if (_aifb) _aifb.classList.remove('hidden'); }</script>
 <div id="ai-panel" class="hidden">
     <div class="ai-panel-header">
@@ -7250,6 +7265,8 @@ ${css}
         const panel = document.getElementById('ai-panel');
         const opening = panel.classList.contains('hidden');
         panel.classList.toggle('hidden');
+        document.getElementById('ai-fab-mic').classList.toggle('hidden', !opening);
+        if (!opening && aiIsRecording) aiStopRecordingManually(); // closing mid-recording shouldn't leave it running
         if (opening) {
             localStorage.setItem('ai-assistant-seen', '1');
             document.getElementById('ai-fab-badge')?.classList.add('hidden');
@@ -7418,6 +7435,7 @@ Respond with ONLY the JSON object, nothing else.`;
 
         const built = aiBuildPendingAction(reply);
         if (!built) { aiAppendMessage('assistant', aiFallbackReasonMessage(reply)); return; }
+        if (aiPendingAction) aiRemoveLastActionCard(); // an unresolved older card is superseded, not left dangling
         aiPendingAction = built;
         aiRenderActionCard(built);
     }
@@ -7486,20 +7504,30 @@ Respond with ONLY the JSON object, nothing else.`;
         if (reply.action === 'search_item') {
             const match = aiFuzzyFindItem(reply.query || '');
             if (!match) return null;
-            const displayName = match.item['itemname(english)'] || match.item.BTKnumber;
+            const item = match.item;
+            const displayName = item['itemname(english)'] || item.BTKnumber;
+            const manufacturer = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : null;
+            const location = (item.LocationCode && item.LocationCode !== 'None') ? item.LocationCode
+                : (item.Inventorylocation && item.Inventorylocation !== 'None') ? item.Inventorylocation : null;
             return {
-                type: 'search_item', btk: match.item.BTKnumber, name: displayName, lowConfidence: !match.confident,
-                summary: match.confident ? `Open "${displayName}" (${match.item.BTKnumber})` : `Did you mean "${displayName}" (${match.item.BTKnumber})?`,
+                type: 'search_item', btk: item.BTKnumber, name: displayName, lowConfidence: !match.confident,
+                manufacturer, location, quantity: item.Numberofitems,
+                summary: match.confident ? `Open "${displayName}" (${item.BTKnumber})` : `Did you mean "${displayName}" (${item.BTKnumber})?`,
             };
         }
         if (reply.action === 'pack_kit') {
             const match = aiFuzzyFindKit(reply.query || '');
             if (!match) return null;
             const kit = match.kit;
-            const count = Object.keys(kit.items || {}).filter(b => kit.items[b] > 0).length;
-            const desc = `kit "${kit.name}" (${count} item${count === 1 ? '' : 's'})`;
+            const btks = Object.keys(kit.items || {}).filter(b => kit.items[b] > 0);
+            const sampleNames = btks.slice(0, 3).map(b => {
+                const it = globalInventory.find(i => i.BTKnumber === b);
+                return it ? (it['itemname(english)'] || b) : b;
+            });
+            const desc = `kit "${kit.name}" (${btks.length} item${btks.length === 1 ? '' : 's'})`;
             return {
                 type: 'pack_kit', kitnumber: kit.kitnumber, kitName: kit.name, lowConfidence: !match.confident,
+                sampleNames, itemCount: btks.length,
                 summary: match.confident ? `Start a Pack Order from ${desc}` : `Did you mean ${desc}?`,
             };
         }
@@ -7519,14 +7547,30 @@ Respond with ONLY the JSON object, nothing else.`;
     function aiRenderActionCard(action) {
         const card = document.createElement('div');
         card.className = 'ai-action-card' + (action.lowConfidence ? ' low-confidence' : '');
-        const diffHtml = action.type === 'edit_field'
-            ? `<div class="ai-action-diff">"${escapeHtml(action.oldValue || '(empty)')}" → "${escapeHtml(action.newValue || '(empty)')}"</div>`
-            : '';
+        let infoHtml = '';
+        if (action.type === 'edit_field') {
+            infoHtml = `<div class="ai-action-diff">"${escapeHtml(action.oldValue || '(empty)')}" → "${escapeHtml(action.newValue || '(empty)')}"</div>`;
+        } else if (action.type === 'search_item') {
+            const bits = [];
+            if (action.manufacturer) bits.push(escapeHtml(action.manufacturer));
+            if (action.quantity !== undefined && action.quantity !== null && action.quantity !== '') bits.push(`Stock: ${escapeHtml(String(action.quantity))}`);
+            if (action.location) bits.push(`📍 ${escapeHtml(action.location)}`);
+            infoHtml = (bits.length ? `<div class="ai-action-diff">${bits.join(' · ')}</div>` : '')
+                + `<button type="button" class="ai-action-link" onclick="aiPeekPendingItem()">👁️ View item — I'll come right back here</button>`;
+        } else if (action.type === 'pack_kit') {
+            const bits = [];
+            if (action.sampleNames && action.sampleNames.length) {
+                const more = action.itemCount > action.sampleNames.length ? ` +${action.itemCount - action.sampleNames.length} more` : '';
+                bits.push(`${action.sampleNames.map(n => escapeHtml(n)).join(', ')}${more}`);
+            }
+            infoHtml = (bits.length ? `<div class="ai-action-diff">${bits.join(' · ')}</div>` : '')
+                + `<button type="button" class="ai-action-link" onclick="aiPeekPendingKit()">👁️ View kit — I'll come right back here</button>`;
+        }
         const confirmLabel = action.lowConfidence ? "Yes, that one ✓" : "We'll do this ✓";
         const cancelLabel = action.lowConfidence ? "No, not that" : "Cancel";
         card.innerHTML = `
             <div class="ai-action-title">${action.lowConfidence ? '🤔 ' : ''}${escapeHtml(action.summary)}</div>
-            ${diffHtml}
+            ${infoHtml}
             <div class="ai-action-buttons">
                 <button class="secondary" onclick="aiCancelAction()">${cancelLabel}</button>
                 <button onclick="aiConfirmAction()">${confirmLabel}</button>
@@ -7553,6 +7597,19 @@ Respond with ONLY the JSON object, nothing else.`;
             if (el) { el.value = action.oldValue; el.classList.remove('ai-highlight-pulse'); }
         }
         aiAppendMessage('system', 'Cancelled.');
+    }
+
+    // Lets someone actually look at the item/kit a card is proposing before committing to it — the
+    // panel floats above the page and stays open/untouched while doing this, and the pending
+    // action/card are left alone, so navigating there and using the page's own "← Back" is enough
+    // to return; nothing about the pending confirmation is affected either way.
+    function aiPeekPendingItem() {
+        if (!aiPendingAction || aiPendingAction.type !== 'search_item') return;
+        openItem(aiPendingAction.btk, { type: 'global' });
+    }
+    function aiPeekPendingKit() {
+        if (!aiPendingAction || aiPendingAction.type !== 'pack_kit') return;
+        showKitDetail(aiPendingAction.kitnumber, aiPendingAction.kitName);
     }
 
     async function aiConfirmAction() {
@@ -7680,6 +7737,7 @@ Respond with ONLY the JSON object, nothing else.`;
         aiIsRecording = true;
         aiRecordingStartedAt = Date.now();
         document.getElementById('ai-chat-mic-btn').classList.add('recording');
+        document.getElementById('ai-fab-mic').classList.add('recording');
         const statusEl = document.getElementById('ai-recording-status');
         statusEl.classList.remove('hidden');
         document.getElementById('ai-recording-timer').textContent = '0:00';
@@ -7699,6 +7757,7 @@ Respond with ONLY the JSON object, nothing else.`;
         clearInterval(aiRecordingTimerId);
         aiRecordingTimerId = null;
         document.getElementById('ai-chat-mic-btn').classList.remove('recording');
+        document.getElementById('ai-fab-mic').classList.remove('recording');
         document.getElementById('ai-recording-status').classList.add('hidden');
     }
 
