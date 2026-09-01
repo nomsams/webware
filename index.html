@@ -512,6 +512,18 @@
     </div>
 </div>
 
+<!-- Backorder Report (editor/maintainer/admin, Supabase mode only) -->
+<div class="modal-overlay" id="backorder-report-modal" onclick="handleBackorderReportModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:640px;">
+        <h3>📋 Backorder Report</h3>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">Every saved order in this warehouse with an outstanding backorder on at least one line.</p>
+        <div id="backorder-report-list-container" style="max-height:55vh; overflow-y:auto;">Loading…</div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeBackorderReportModal()">Close</button>
+        </div>
+    </div>
+</div>
+
 <!-- Manufacturer Edit Modal -->
 <div class="modal-overlay" id="manufacturer-edit-modal" onclick="handleManufacturerModalOverlayClick(event)">
     <div class="modal-box">
@@ -638,6 +650,9 @@
 
         <label class="modal-label" for="ai-qty">Quantity</label>
         <input type="text" id="ai-qty" placeholder="e.g. 5">
+
+        <label class="modal-label" for="ai-reorder-threshold">Reorder Threshold (optional)</label>
+        <input type="number" min="0" id="ai-reorder-threshold" placeholder="Flags Low stock below this — leave blank to use the app-wide Settings default">
 
         <label class="modal-label" for="ai-location">Inventory Location</label>
         <input type="text" id="ai-location" placeholder="e.g. Best">
@@ -1029,6 +1044,7 @@
 
         <button class="full-width hidden" id="btn-save-pack-order" onclick="savePackOrder()" style="margin-top:0.5rem;">💾 Save Order</button>
         <p id="pack-order-saved-note" class="hidden" style="color:var(--success); font-weight:600; margin-top:0.75rem;"></p>
+        <button class="success-btn full-width hidden" id="btn-finalize-pack-order" onclick="confirmFinalizePackOrder()" style="margin-top:0.75rem;">✅ Finalize Order (Deduct Stock)</button>
     </section>
 
     <!-- View 4: Label Preview & Generation -->
@@ -1175,6 +1191,7 @@
         <button class="secondary full-width hidden" id="btn-manage-users" onclick="openManageUsersModal()" style="margin-bottom:1rem;">👥 Manage Users</button>
         <button class="secondary full-width hidden" id="btn-manage-warehouses" onclick="openManageWarehousesModal()" style="margin-bottom:1rem;">🏬 Manage Warehouses</button>
         <button class="secondary full-width hidden" id="btn-activity-log" onclick="openActivityLogModal()" style="margin-bottom:1rem;">📜 Activity Log</button>
+        <button class="secondary full-width hidden" id="btn-backorder-report" onclick="openBackorderReportModal()" style="margin-bottom:1rem;">📋 Backorder Report</button>
 
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>
         <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
@@ -1592,7 +1609,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             Comments: row.comments || 'None',
             images: row.images || '', // legacy static-mode field, unused for Supabase-mode items now
             imageFullUrl: row.image_full_url || '',
-            imageThumbUrl: row.image_thumb_url || ''
+            imageThumbUrl: row.image_thumb_url || '',
+            ReorderThreshold: (row.reorder_threshold === null || row.reorder_threshold === undefined) ? '' : String(row.reorder_threshold)
         };
     }
 
@@ -1878,6 +1896,50 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         showToast("Reverted.", "success");
         await supabaseLoadList(currentWarehouseId);
         renderActivityLogList();
+    }
+
+    // ── Backorder Report — every saved order (orders.items is a jsonb snapshot of the pack order's
+    // lines, [{btk, qty, packed, backorder}], not a separate join table — see README) with at least
+    // one line where backorder > 0. Filtered client-side after one fetch rather than a jsonb query,
+    // simplest given the report is a small, infrequent, admin/editor-facing read.
+    function openBackorderReportModal() {
+        if (!canEditItems()) { showToast("Editor or admin only.", "warning"); return; }
+        document.getElementById('backorder-report-modal').classList.add('open');
+        renderBackorderReport();
+    }
+    function closeBackorderReportModal() { document.getElementById('backorder-report-modal').classList.remove('open'); }
+    function handleBackorderReportModalOverlayClick(e) { if (e.target === document.getElementById('backorder-report-modal')) closeBackorderReportModal(); }
+
+    async function renderBackorderReport() {
+        const container = document.getElementById('backorder-report-list-container');
+        container.innerHTML = 'Loading…';
+        const { data, error } = await sb.from('orders')
+            .select('*')
+            .eq('warehouse_id', currentWarehouseId)
+            .order('created_at', { ascending: false });
+        if (error) { container.innerHTML = `<p style="color:var(--danger);">Could not load orders: ${escapeHtml(error.message)}</p>`; return; }
+
+        const withBackorders = (data || [])
+            .map(order => ({ order, lines: (order.items || []).filter(l => (l.backorder || 0) > 0) }))
+            .filter(o => o.lines.length > 0);
+
+        if (!withBackorders.length) { container.innerHTML = `<p style="color:var(--text-muted);">No outstanding backorders.</p>`; return; }
+
+        container.innerHTML = withBackorders.map(({ order, lines }) => {
+            const rows = lines.map(line => {
+                const item = globalInventory.find(i => i.BTKnumber === line.btk);
+                const name = item ? (item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed') : 'Unknown item';
+                return `<div style="display:flex; justify-content:space-between; gap:10px; padding:4px 0; font-size:0.88rem;">
+                    <span>${escapeHtml(name)} <span style="color:var(--text-muted);">(${escapeHtml(line.btk)})</span></span>
+                    <span style="color:var(--danger); font-weight:700; flex-shrink:0;">⚠ ${line.backorder} backordered</span>
+                </div>`;
+            }).join('');
+            return `<div style="padding:10px 0; border-bottom:1px solid var(--border);">
+                <div style="font-weight:700;">${escapeHtml(order.order_number)}${order.status === 'fulfilled' ? ' <span style="color:var(--success); font-weight:600; font-size:0.78rem;">· Fulfilled</span>' : ''}</div>
+                <div style="color:var(--text-muted); font-size:0.8rem; margin-bottom:4px;">${order.recipient_name ? escapeHtml(order.recipient_name) + ' · ' : ''}${new Date(order.created_at).toLocaleDateString()}</div>
+                ${rows}
+            </div>`;
+        }).join('');
     }
 
     // "Last updated by" — resolves via get_display_name() (their own chosen name, or their
@@ -3169,7 +3231,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const rNum2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
             const rNums = [rNum1, rNum2].filter(Boolean).join(' · ') || id;
             const rMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
-            const lowStockBadge = isLowStock(item) ? `<span class="low-stock-badge" title="Below your Settings threshold of ${lowStockThreshold}">⚠️ Low stock</span>` : '';
+            const lowStockBadge = isLowStock(item) ? `<span class="low-stock-badge" title="${lowStockTooltip(item)}">⚠️ Low stock</span>` : '';
             // Admin-only: the plain item list doesn't otherwise show stock count at a glance (only
             // the item's own page does) — 0 in italic so an empty row reads differently from a
             // real, populated one at a scan.
@@ -4444,6 +4506,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const canSaveOrder = getWarehouseMeta(currentWarehouseId).mode === 'supabase' && canEditItems();
         document.getElementById('pack-order-recipient-section').classList.toggle('hidden', !canSaveOrder);
         document.getElementById('btn-save-pack-order').classList.toggle('hidden', !canSaveOrder);
+        document.getElementById('btn-finalize-pack-order').classList.toggle('hidden', !canEditItems() || packOrder.length === 0);
     }
 
     function closePackOrderView() { switchView(packOrderPreviousView || 'list-view'); }
@@ -4535,6 +4598,49 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         showToast(`Order saved as ${data.order_number}.`, "success", 6000);
     }
 
+    // ── Finalize — deducts every line's quantity from stock and (if the order was saved) marks it
+    // fulfilled. Requires every line packed first, so this can't run ahead of the actual physical
+    // pack. Each deduction is its own activity_log entry (Supabase mode), individually revertible.
+    function confirmFinalizePackOrder() {
+        if (!packOrder.length) return;
+        if (!packOrder.every(o => o.packed)) { showToast("Mark every item as packed before finalizing.", "warning"); return; }
+        showConfirmModal({
+            title: 'Finalize this order?',
+            body: `This deducts ${packOrder.length} item(s)' quantities from stock` +
+                (packOrderSavedNumber ? ` and marks ${packOrderSavedNumber} as fulfilled.` : '.') +
+                ' Each deduction is logged individually and can be reverted from the Activity Log if needed.',
+            confirmLabel: '✅ Finalize',
+            onConfirm: finalizePackOrder
+        });
+    }
+    async function finalizePackOrder() {
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        let failures = 0;
+        for (const line of packOrder) {
+            const item = globalInventory.find(i => i.BTKnumber === line.btk);
+            if (!item) { failures++; continue; }
+            if (isSupa) {
+                const beforeRow = await itemToSupabaseRow(item);
+                const { data: next, error } = await sb.rpc('adjust_item_stock', { p_btk: line.btk, p_delta: -line.qty });
+                if (error) { failures++; console.error(`Could not deduct stock for ${line.btk}:`, error); continue; }
+                item.Numberofitems = String(next);
+                const afterRow = { ...beforeRow, numberofitems: next };
+                logActivity('update', line.btk, beforeRow, afterRow, `Pack order fulfilled: ${summarizeItemChange('update', line.btk, beforeRow, afterRow)}`);
+            } else {
+                const current = parseInt(item.Numberofitems, 10) || 0;
+                item.Numberofitems = String(Math.max(0, current - line.qty));
+            }
+        }
+        if (!isSupa) saveDraft(currentWarehouseId);
+        if (isSupa && packOrderSavedNumber) {
+            const { error } = await sb.from('orders').update({ status: 'fulfilled' }).eq('order_number', packOrderSavedNumber);
+            if (error) console.error("Could not mark order fulfilled:", error);
+        }
+        showToast(`Order finalized.${failures ? ` ${failures} item(s) failed — see console.` : ''}`, failures ? 'warning' : 'success', 7000);
+        renderPackOrderItems();
+        if (isSupa) await supabaseLoadList(currentWarehouseId);
+    }
+
     function togglePacked(btk) {
         const line = packOrder.find(o => o.btk === btk);
         if (!line) return;
@@ -4557,6 +4663,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const progressEl = document.getElementById('pack-order-progress');
         const editBtn = document.getElementById('btn-pack-order-edit');
         editBtn.textContent = packOrderEditMode ? '✔ Done Editing' : '✏️ Edit Order';
+        document.getElementById('btn-finalize-pack-order').classList.toggle('hidden', !canEditItems() || packOrder.length === 0);
         container.innerHTML = '';
         if (!packOrder.length) {
             progressEl.textContent = '';
@@ -4708,8 +4815,32 @@ th { background: #eee; }
     var inventeringPicked = new Set(); // subset of inventeringCandidates the user has checked
     var inventeringItems = []; // [{btk, done}] — the active session, once started
 
+    // Session state used to live in inventeringItems alone — a refresh, an accidental back-swipe,
+    // or a crash mid-walk lost the entire "which items are counted" checklist with no way back
+    // (the last_inventoried_* write for an item already marked Done survives in the DB regardless,
+    // only the session UI itself was unrecoverable). Persisted to localStorage per warehouse —
+    // device-local, not synced across devices/users, but a refresh no longer loses the walk.
+    function inventeringStorageKey() { return `inventering-session-${currentWarehouseId}`; }
+    function saveInventeringSession() {
+        try {
+            if (inventeringItems.length) localStorage.setItem(inventeringStorageKey(), JSON.stringify(inventeringItems));
+            else localStorage.removeItem(inventeringStorageKey());
+        } catch (e) { console.error("Could not save stocktaking session:", e); }
+    }
+    function loadInventeringSession() {
+        try {
+            const raw = localStorage.getItem(inventeringStorageKey());
+            if (!raw) return false;
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed) || !parsed.length) return false;
+            inventeringItems = parsed;
+            return true;
+        } catch (e) { console.error("Could not load stocktaking session:", e); return false; }
+    }
+
     function openInventeringSetup() {
         if (!requireAuth()) return;
+        if (!inventeringItems.length) loadInventeringSession();
         if (inventeringItems.length) { openInventeringView(); return; } // resume an active session instead
         document.getElementById('inventering-warehouse-name').textContent = getWarehouseMeta(currentWarehouseId).name;
 
@@ -4797,6 +4928,7 @@ th { background: #eee; }
             const ib = globalInventory.find(i => i.BTKnumber === b.btk);
             return compareLocationCode(ia && ia.LocationCode, ib && ib.LocationCode);
         });
+        saveInventeringSession();
         openInventeringView();
     }
 
@@ -4812,6 +4944,7 @@ th { background: #eee; }
     function clearInventeringSession() {
         if (!confirm("Clear this inventering session? This can't be undone.")) return;
         inventeringItems = [];
+        saveInventeringSession();
         openInventeringSetup();
     }
 
@@ -4824,6 +4957,7 @@ th { background: #eee; }
         if (!line) return;
         const markingDone = !line.done;
         line.done = markingDone;
+        saveInventeringSession();
         renderInventeringList();
 
         if (!markingDone || getWarehouseMeta(currentWarehouseId).mode !== 'supabase') return;
@@ -5137,7 +5271,7 @@ th { background: #eee; }
                 <span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Stock (Number of items):</span>
                 <span>${getStr(item.Numberofitems)}</span>
                 <span id="cross-warehouse-total"></span>
-                ${isLowStock(item) ? `<span class="low-stock-badge" title="Below your Settings threshold of ${lowStockThreshold}">⚠️ Low stock</span>` : ''}
+                ${isLowStock(item) ? `<span class="low-stock-badge" title="${lowStockTooltip(item)}">⚠️ Low stock</span>` : ''}
                 ${canEditItems() ? `<span style="display:flex;gap:6px;margin-left:auto;">
                     <button class="secondary" style="min-width:34px;min-height:34px;padding:0;" onclick="adjustStock(-1)" aria-label="Decrease stock">−</button>
                     <button class="secondary" style="min-width:34px;min-height:34px;padding:0;" onclick="adjustStock(1)" aria-label="Increase stock">+</button>
@@ -5214,21 +5348,24 @@ th { background: #eee; }
     async function adjustStock(delta) {
         const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
         if (!item || !canEditItems()) return;
-        const current = parseInt(item.Numberofitems, 10) || 0;
-        const next = Math.max(0, current + delta);
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
             // Full row snapshot, not just the changed column — revert_activity_log_entry() restores
             // every column from before_data when undoing an 'update', so a partial snapshot would
             // null out everything else on this item if this particular change ever got reverted.
             const beforeRow = await itemToSupabaseRow(item);
-            const { error } = await sb.from('items').update({ numberofitems: next }).eq('btk', currentItemBTK);
+            // adjust_item_stock() does `numberofitems = numberofitems + delta` in one atomic UPDATE
+            // server-side, rather than this client reading the current value, computing next, and
+            // writing that back — two people adjusting the same item within the same round-trip
+            // would otherwise silently lose whichever write landed first.
+            const { data: next, error } = await sb.rpc('adjust_item_stock', { p_btk: currentItemBTK, p_delta: delta });
             if (error) { showToast("Could not update stock: " + error.message, "error"); return; }
             item.Numberofitems = String(next);
             const afterRow = { ...beforeRow, numberofitems: next };
             logActivity('update', currentItemBTK, beforeRow, afterRow, summarizeItemChange('update', currentItemBTK, beforeRow, afterRow));
         } else {
-            item.Numberofitems = String(next);
+            const current = parseInt(item.Numberofitems, 10) || 0;
+            item.Numberofitems = String(Math.max(0, current + delta));
             saveDraft(currentWarehouseId);
         }
         renderItemFields(item, currentItemBTK);
@@ -5269,6 +5406,8 @@ th { background: #eee; }
             <input type="text" id="qe-itemnumber3" value="${escapeHtml(val(item.itemnumber3))}">
             <label class="modal-label" for="qe-qty">Stock (Number of items)</label>
             <input type="text" id="qe-qty" value="${escapeHtml(val(item.Numberofitems))}">
+            <label class="modal-label" for="qe-reorder-threshold">Reorder Threshold (optional)</label>
+            <input type="number" min="0" id="qe-reorder-threshold" value="${escapeHtml(item.ReorderThreshold || '')}" placeholder="Flags Low stock below this — leave blank to use the app-wide Settings default">
             <label class="modal-label" for="qe-location">Inventory Location</label>
             <input type="text" id="qe-location" value="${escapeHtml(val(item.Inventorylocation))}">
             <label class="modal-label" for="qe-mapposition">Map Position (locator grid, A1–F6)</label>
@@ -5301,6 +5440,7 @@ th { background: #eee; }
             itemnumber2: document.getElementById('qe-itemnumber2').value.trim(),
             itemnumber3: document.getElementById('qe-itemnumber3').value.trim(),
             Numberofitems: document.getElementById('qe-qty').value.trim(),
+            ReorderThreshold: document.getElementById('qe-reorder-threshold').value.trim(),
             Inventorylocation: document.getElementById('qe-location').value.trim(),
             MapPosition: document.getElementById('qe-mapposition').value.trim().toUpperCase(),
             LocationCode: document.getElementById('qe-locationcode').value.trim().toUpperCase(),
@@ -5361,6 +5501,7 @@ th { background: #eee; }
             itemnumber2: fields.itemnumber2 || 'None',
             itemnumber3: fields.itemnumber3 || 'None',
             Numberofitems: fields.Numberofitems || '0',
+            ReorderThreshold: fields.ReorderThreshold || '',
             Inventorylocation: fields.Inventorylocation || 'None',
             MapPosition: fields.MapPosition || 'None',
             LocationCode: fields.LocationCode || 'None',
@@ -5380,6 +5521,7 @@ th { background: #eee; }
                 itemname_en: updated['itemname(english)'], itemname_sv: updated['itemname(swedish)'],
                 itemnumber2: updated.itemnumber2, itemnumber3: updated.itemnumber3,
                 numberofitems: parseInt(updated.Numberofitems) || 0,
+                reorder_threshold: updated.ReorderThreshold === '' ? null : parseInt(updated.ReorderThreshold, 10),
                 inventorylocation: updated.Inventorylocation, map_position: updated.MapPosition === 'None' ? null : updated.MapPosition,
                 location_code: updated.LocationCode === 'None' ? null : updated.LocationCode, comments: updated.Comments
             };
@@ -5913,7 +6055,7 @@ th { background: #eee; }
         document.getElementById('modal-title').innerText = '➕ Add New Item';
         document.getElementById('modal-notice').style.display = 'block';
         document.getElementById('ai-btknumber').readOnly = false;
-        ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-location','ai-mapposition','ai-locationcode','ai-comments']
+        ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-reorder-threshold','ai-location','ai-mapposition','ai-locationcode','ai-comments']
             .forEach(id => { document.getElementById(id).value = ''; });
         populateLocationCodePicker('ai', '');
         document.getElementById('add-item-modal').classList.add('open');
@@ -5941,6 +6083,7 @@ th { background: #eee; }
         document.getElementById('ai-num2').value = item.itemnumber2 === 'None' ? '' : item.itemnumber2;
         document.getElementById('ai-num3').value = item.itemnumber3 === 'None' ? '' : item.itemnumber3;
         document.getElementById('ai-qty').value = item.Numberofitems === 'None' ? '' : item.Numberofitems;
+        document.getElementById('ai-reorder-threshold').value = item.ReorderThreshold || '';
         document.getElementById('ai-location').value = item.Inventorylocation === 'None' ? '' : item.Inventorylocation;
         document.getElementById('ai-mapposition').value = item.MapPosition === 'None' ? '' : item.MapPosition;
         document.getElementById('ai-locationcode').value = item.LocationCode === 'None' ? '' : item.LocationCode;
@@ -6017,17 +6160,7 @@ th { background: #eee; }
         const newBTK = generateUniqueBTK();
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
-            const mfr = await resolveManufacturer(original.Manufacturer);
-            const row = {
-                manufacturer: mfr.name, manufacturer_id: mfr.id, itemnumber: original.itemnumber,
-                itemname_en: original['itemname(english)'], itemname_sv: original['itemname(swedish)'],
-                itemnumber2: original.itemnumber2, itemnumber3: original.itemnumber3,
-                numberofitems: parseInt(original.Numberofitems, 10) || 0,
-                inventorylocation: original.Inventorylocation === 'None' ? null : original.Inventorylocation,
-                map_position: original.MapPosition === 'None' ? null : original.MapPosition,
-                location_code: original.LocationCode === 'None' ? null : original.LocationCode,
-                comments: original.Comments === 'None' ? null : original.Comments
-            };
+            const row = await itemToSupabaseRow(original);
             const { error } = await sb.from('items').insert({ ...row, btk: newBTK, warehouse_id: currentWarehouseId, images: '' });
             if (error) return showToast("Could not duplicate: " + error.message, "error");
             logActivity('create', newBTK, null, row, `Duplicated ${currentItemBTK} as ${summarizeItemChange('create', newBTK, null, row)}`);
@@ -6349,6 +6482,9 @@ th { background: #eee; }
                 itemname_en: mergedItem['itemname(english)'], itemname_sv: mergedItem['itemname(swedish)'],
                 itemnumber2: mergedItem.itemnumber2, itemnumber3: mergedItem.itemnumber3,
                 numberofitems: finalQty,
+                // Not one of the merge grid's pickable fields (it's a config value, not really
+                // "the same kind of fact" as a name/manufacturer/etc.) — the survivor keeps its own.
+                reorder_threshold: (survivor.ReorderThreshold === undefined || survivor.ReorderThreshold === '') ? null : parseInt(survivor.ReorderThreshold, 10),
                 inventorylocation: mergedItem.Inventorylocation === 'None' ? null : mergedItem.Inventorylocation,
                 map_position: mergedItem.MapPosition === 'None' ? null : mergedItem.MapPosition,
                 location_code: mergedItem.LocationCode === 'None' ? null : mergedItem.LocationCode,
@@ -6475,6 +6611,7 @@ th { background: #eee; }
             itemname_en: item['itemname(english)'], itemname_sv: item['itemname(swedish)'],
             itemnumber2: item.itemnumber2, itemnumber3: item.itemnumber3,
             numberofitems: parseInt(item.Numberofitems, 10) || 0,
+            reorder_threshold: (item.ReorderThreshold === undefined || item.ReorderThreshold === '' || item.ReorderThreshold === null) ? null : parseInt(item.ReorderThreshold, 10),
             inventorylocation: item.Inventorylocation === 'None' ? null : item.Inventorylocation,
             map_position: item.MapPosition === 'None' ? null : item.MapPosition,
             location_code: item.LocationCode === 'None' ? null : item.LocationCode,
@@ -6587,6 +6724,7 @@ th { background: #eee; }
             'itemnumber2':       document.getElementById('ai-num2').value.trim() || 'None',
             'itemnumber3':       document.getElementById('ai-num3').value.trim() || 'None',
             'Numberofitems':     document.getElementById('ai-qty').value.trim() || '0',
+            'ReorderThreshold':  document.getElementById('ai-reorder-threshold').value.trim(),
             'Inventorylocation': document.getElementById('ai-location').value.trim() || 'None',
             'MapPosition':       document.getElementById('ai-mapposition').value.trim().toUpperCase() || 'None',
             'LocationCode':      document.getElementById('ai-locationcode').value.trim().toUpperCase() || 'None',
@@ -6601,6 +6739,7 @@ th { background: #eee; }
                 itemname_en: newItem['itemname(english)'], itemname_sv: newItem['itemname(swedish)'],
                 itemnumber2: newItem.itemnumber2, itemnumber3: newItem.itemnumber3,
                 numberofitems: parseInt(newItem.Numberofitems) || 0,
+                reorder_threshold: newItem.ReorderThreshold === '' ? null : parseInt(newItem.ReorderThreshold, 10),
                 inventorylocation: newItem.Inventorylocation, map_position: newItem.MapPosition === 'None' ? null : newItem.MapPosition,
                 location_code: newItem.LocationCode === 'None' ? null : newItem.LocationCode, comments: newItem.Comments
             };
@@ -6641,8 +6780,12 @@ th { background: #eee; }
         }
 
         const existing = globalInventory.findIndex(i => i.BTKnumber === btk);
-        if (existing >= 0) globalInventory[existing] = newItem;
-        else globalInventory.push(newItem);
+        // A new item (or a rename) landing on a BTK some OTHER item already has used to silently
+        // overwrite it with no warning — Supabase mode already rejects this via the primary key
+        // (the old entry above was already removed if this is a same-item rename, so `existing`
+        // here can only mean a genuinely different item).
+        if (existing >= 0) { showToast(`BTK "${btk}" is already used by another item — pick a different number.`, "error"); return; }
+        globalInventory.push(newItem);
 
         saveDraft(currentWarehouseId);
         closeAddItemModal();
@@ -6942,10 +7085,20 @@ ${css}
     function onLowStockSettingChange() {
         document.getElementById('lowstock-threshold-row').classList.toggle('hidden', !document.getElementById('lowstock-enabled').checked);
     }
+    // A per-item ReorderThreshold (set via Add/Edit or quick-edit) always applies, regardless of
+    // the global Settings toggle — setting one deliberately on a specific item is a stronger signal
+    // than the app-wide default. No per-item threshold set -> falls back to the global one.
     function isLowStock(item) {
-        if (!lowStockEnabled) return false;
         const qty = parseInt(item.Numberofitems, 10);
-        return !isNaN(qty) && qty < lowStockThreshold;
+        if (isNaN(qty)) return false;
+        const itemThreshold = parseInt(item.ReorderThreshold, 10);
+        if (!isNaN(itemThreshold)) return qty < itemThreshold;
+        if (!lowStockEnabled) return false;
+        return qty < lowStockThreshold;
+    }
+    function lowStockTooltip(item) {
+        const itemThreshold = parseInt(item.ReorderThreshold, 10);
+        return isNaN(itemThreshold) ? `Below your Settings threshold of ${lowStockThreshold}` : `Below this item's own reorder threshold of ${itemThreshold}`;
     }
     function syncSettingsVisibility() {
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
@@ -6953,6 +7106,7 @@ ${css}
         document.getElementById('btn-manage-users').classList.toggle('hidden', !(isSupa && isAdmin));
         document.getElementById('btn-manage-warehouses').classList.toggle('hidden', !(isSupa && isAdmin));
         document.getElementById('btn-activity-log').classList.toggle('hidden', !(isSupa && isAdmin));
+        document.getElementById('btn-backorder-report').classList.toggle('hidden', !(isSupa && canEditItems()));
         document.getElementById('display-name-row').classList.toggle('hidden', !isSupa);
         // Storage/database usage stats are admin-only — editors/maintainers/viewers don't need
         // (or, per the requested role model, shouldn't see) account-wide quota info.
