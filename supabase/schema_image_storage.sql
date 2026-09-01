@@ -7,9 +7,14 @@
 alter table public.items add column if not exists image_full_url text;
 alter table public.items add column if not exists image_thumb_url text;
 
+-- do update (not do nothing) — a bucket created by hand via the dashboard before this ever ran
+-- defaults to private, and `do nothing` would leave it that way forever even though every upload
+-- afterward would still "succeed" and still produce a public URL that just never actually loads
+-- (see schema_image_storage_fix_bucket_public.sql for the standalone fix if you're hitting this
+-- on an already-provisioned project).
 insert into storage.buckets (id, name, public)
 values ('item-images', 'item-images', true)
-on conflict (id) do nothing;
+on conflict (id) do update set public = true;
 
 create policy "Public read item-images" on storage.objects for select
   using (bucket_id = 'item-images');

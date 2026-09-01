@@ -671,6 +671,22 @@
     </div>
 </div>
 
+<!-- Bin detail — the "zoom in on this specific shelf" view opened by tapping the active cell in
+     the Bin Location Map (see openBinDetailModal()). -->
+<div class="modal-overlay" id="bin-detail-modal" onclick="handleBinDetailModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:480px;">
+        <h3 id="bin-detail-title" style="margin-top:0; margin-bottom:0.15rem;"></h3>
+        <p id="bin-detail-subtitle" style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;"></p>
+        <p style="color:var(--text-muted); font-size:0.8rem; margin-bottom:0.5rem;">Facing the shelf, bins run left to right:</p>
+        <div class="warehouse-map" id="bin-detail-shelf" style="margin-bottom:0.5rem;"></div>
+        <p id="bin-detail-shelf-note" style="color:var(--text-muted); font-size:0.82rem; margin-bottom:0.75rem;"></p>
+        <div id="bin-detail-row-note" class="hidden"></div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeBinDetailModal()">Close</button>
+        </div>
+    </div>
+</div>
+
 <header>
     <div class="logo-container">
         <img src="logo.png" alt="Company Logo" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzI1NjNlYiIgcng9IjIwIi8+PHRleHQgeD0iNTAiIHk9IjU4IiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjQ0IiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSIjZmZmZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5XVzwvdGV4dD48L3N2Zz4='" />
@@ -802,12 +818,6 @@
 
         <div id="detail-content" onmousedown="if(event.detail > 1) event.preventDefault()" ondblclick="enterQuickEdit()" style="margin-top: 1rem; line-height: 1.8; font-size: 1.05rem;"></div>
 
-        <div style="margin-top: 2rem; margin-bottom: 1rem;">
-            <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Warehouse Locator Map</strong>
-            <div class="warehouse-map" id="locator-map"></div>
-            <p id="locator-map-caption" style="color:var(--text-muted); font-size:0.82rem; margin-top:0.5rem;"></p>
-        </div>
-
         <div id="bin-map-section" class="hidden" style="margin-top: 2rem; margin-bottom: 1rem;">
             <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                 <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Bin Location Map (Rack Depth × Level)</strong>
@@ -839,6 +849,10 @@
         </div>
         <h1 id="kit-detail-name" style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.5rem;">Kit Name</h1>
         <div id="kit-detail-sub" class="wh-meta" style="margin-bottom:1rem;"></div>
+        <div class="search-wrapper" id="kit-detail-search-container">
+            <input type="text" id="kit-detail-search-box" aria-label="Search this kit's items" placeholder="Search name, number, BTK, manufacturer..." oninput="filterKitDetailItems()">
+            <button class="search-clear" onclick="clearKitDetailSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
+        </div>
         <div id="kit-detail-items"></div>
     </section>
 
@@ -1488,12 +1502,16 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ═════════════════════════════════════════════════════════════════════════
     //  ID COMPRESSION (BTK000024 -> 24,  24 -> BTK000024)
     // ════════════════════════════════════════════════════════════════════════
+    // A BTK can carry a trailing warehouse tag (e.g. BTK000004W01 — see generateUniqueBTK) that
+    // has to survive the round trip through the compressed QR/URL fragment. parseInt() alone would
+    // silently stop at the first non-digit and drop it (parseInt('000004W01', 10) === 4), so the
+    // numeric run and whatever comes after it are split and carried separately instead.
     function compressId(btk) {
         if (!btk) return '';
         const s = String(btk).trim().toUpperCase();
         if (s.startsWith('BTK')) {
-            const n = parseInt(s.slice(3), 10);
-            return isNaN(n) ? s : String(n);
+            const m = s.slice(3).match(/^0*(\d+)(.*)$/);
+            return m ? m[1] + m[2] : s;
         }
         if (/^\d+$/.test(s)) return s;
         return s;
@@ -1501,9 +1519,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function decompressId(s) {
         if (!s) return '';
         const str = String(s).trim();
-        if (/^\d+$/.test(str)) {
-            return 'BTK' + String(parseInt(str, 10)).padStart(6, '0');
-        }
+        const m = str.match(/^(\d+)(.*)$/);
+        if (m) return 'BTK' + m[1].padStart(6, '0') + m[2].toUpperCase();
         const upper = str.toUpperCase();
         if (upper.startsWith('BTK')) return upper;
         return str;
@@ -3053,13 +3070,21 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const rNums = [rNum1, rNum2].filter(Boolean).join(' · ') || id;
             const rMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
             const lowStockBadge = isLowStock(item) ? `<span class="low-stock-badge" title="Below your Settings threshold of ${lowStockThreshold}">⚠️ Low stock</span>` : '';
+            // Admin-only: the plain item list doesn't otherwise show stock count at a glance (only
+            // the item's own page does) — 0 in italic so an empty row reads differently from a
+            // real, populated one at a scan.
+            const qtyHtml = (currentUserRole === 'admin') ? (() => {
+                const qtyNum = parseInt(item.Numberofitems, 10) || 0;
+                return `<div style="margin-left:auto; padding-left:10px; flex-shrink:0; text-align:right; font-size:1.1rem; ${qtyNum === 0 ? 'font-style:italic;color:var(--text-muted);' : 'font-weight:800;color:var(--text-main);'}" title="Stock quantity">${qtyNum}</div>`;
+            })() : '';
             div.innerHTML = `
                 <div class="select-circle" role="checkbox" aria-checked="${isChecked}" data-id="${id}" aria-label="Select for label" tabindex="0"></div>
                 <div class="item-info">
                     <div class="item-title" style="font-size:1.05rem;font-weight:800;">${item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed'} ${lowStockBadge}</div>
                     ${rNums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${rNums}</div>` : ''}
                     <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${rMfr ? rMfr + ' ' : ''}${id}</div>
-                </div>`;
+                </div>
+                ${qtyHtml}`;
             div.onclick = () => openItem(id, { type: 'global' });
             div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); div.click(); } };
             const circle = div.querySelector('.select-circle');
@@ -3128,10 +3153,31 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         container.appendChild(frag);
     }
 
+    var currentKitDetailNumber = null;
+    var currentKitDetailName = null;
+
+    // Re-renders the currently open kit's item list from whatever's currently typed in the search
+    // box — same debounce-free re-render-on-input pattern the item list itself doesn't need since
+    // a kit's item count is small; unlike that list, the search box itself isn't rebuilt each call
+    // so focus/typing is unaffected.
+    function filterKitDetailItems() {
+        const wrapper = document.getElementById('kit-detail-search-container');
+        const val = document.getElementById('kit-detail-search-box').value;
+        val.length > 0 ? wrapper.classList.add('has-text') : wrapper.classList.remove('has-text');
+        showKitDetail(currentKitDetailNumber, currentKitDetailName);
+    }
+    function clearKitDetailSearch() {
+        document.getElementById('kit-detail-search-box').value = '';
+        document.getElementById('kit-detail-search-container').classList.remove('has-text');
+        showKitDetail(currentKitDetailNumber, currentKitDetailName);
+    }
+
     function showKitDetail(kitnumber, kitName) {
         // kitnumber alone isn't a safe key — several kits share kitnumber 'None'; match name too.
         const kit = globalKits.find(k => k.kitnumber === kitnumber && k.name === kitName);
         if (!kit) return showToast("Kit not found", "error");
+        currentKitDetailNumber = kitnumber;
+        currentKitDetailName = kitName;
         switchView('kit-view');
         document.getElementById('kit-detail-name').innerText = kit.name || 'Unnamed Kit';
         const count = Object.keys(kit.items || {}).length;
@@ -3140,9 +3186,19 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
         const container = document.getElementById('kit-detail-items');
         container.innerHTML = '';
-        const btks = Object.keys(kit.items).filter(b => kit.items[b] > 0);
+        let btks = Object.keys(kit.items).filter(b => kit.items[b] > 0);
+        const query = document.getElementById('kit-detail-search-box').value.toLowerCase().trim();
+        if (query) {
+            btks = btks.filter(btk => {
+                const item = globalInventory.find(i => i.BTKnumber === btk);
+                const fields = [btk, item && item['itemname(english)'], item && item['itemname(swedish)'], item && item.itemnumber, item && item.itemnumber2, item && item.itemnumber3, item && item.Manufacturer];
+                return fields.some(f => f && f.toString().toLowerCase().includes(query));
+            });
+        }
         if (btks.length === 0) {
-            container.innerHTML = `<div class="empty-state"><p>This kit has no item quantities defined.</p></div>`;
+            container.innerHTML = query
+                ? `<div class="empty-state"><p>No items in this kit match "${escapeHtml(document.getElementById('kit-detail-search-box').value)}".</p></div>`
+                : `<div class="empty-state"><p>This kit has no item quantities defined.</p></div>`;
             return;
         }
         const frag = document.createDocumentFragment();
@@ -4814,7 +4870,6 @@ th { background: #eee; }
         document.getElementById('btn-single-label').onclick = () => {
             selectedItems.clear(); selectedItems.add(id); generateLabelsPreview();
         };
-        renderLocatorMap(item);
         renderBinLocationMap(item);
     }
 
@@ -4941,6 +4996,23 @@ th { background: #eee; }
     }
 
     // Read-only field display — the default view, and what quick-edit reverts to on save/cancel.
+    // Same real-world product listed more than once — different BTKs, but one entry's Item #1/#2/#3
+    // matches another's in any position (not just #1-to-#1), since which slot a number ended up in
+    // is inconsistent across entries. Purely a display aid on the item page, same idea as "Present
+    // in other warehouses" but within the current warehouse and by item number instead of
+    // manufacturer+itemnumber.
+    function findRelatedItems(item, excludeId) {
+        const myNumbers = [item.itemnumber, item.itemnumber2, item.itemnumber3]
+            .filter(v => v && v !== 'None').map(v => v.trim().toLowerCase());
+        if (!myNumbers.length) return [];
+        const mySet = new Set(myNumbers);
+        return globalInventory.filter(i => {
+            if (i.BTKnumber === excludeId) return false;
+            const theirs = [i.itemnumber, i.itemnumber2, i.itemnumber3].filter(v => v && v !== 'None').map(v => v.trim().toLowerCase());
+            return theirs.some(v => mySet.has(v));
+        });
+    }
+
     function renderItemFields(item, id) {
         const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
         const dMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
@@ -4975,6 +5047,14 @@ th { background: #eee; }
             <div id="cross-warehouse-breakdown"></div>
             ${field('Map Position', item.MapPosition)}
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Bin Location:</span><span>${getStr(item.LocationCode)}${describeLocationCode(item.LocationCode) ? ` <span style="color:var(--text-muted);">(${describeLocationCode(item.LocationCode)})</span>` : ''}</span></div>
+            ${(() => {
+                const related = findRelatedItems(item, id);
+                if (!related.length) return '';
+                return `<div style="margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Related Items:</span>
+                    <span style="display:flex;gap:6px;flex-wrap:wrap;">
+                        ${related.map(r => `<span class="kit-tag" data-related-btk="${escapeHtml(r.BTKnumber)}" role="button" tabindex="0" title="Shares an item number with this one">${escapeHtml(r['itemname(english)'] || r['itemname(swedish)'] || 'Unnamed')} · ${escapeHtml(r.BTKnumber)}</span>`).join('')}
+                    </span></div>`;
+            })()}
             <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;"><span style="font-weight:600;color:var(--text-muted);">Comments:</span><div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div></div>
             ${field('Images', item.images)}
             ${item.updatedAt ? `<p style="color:var(--text-muted);font-size:0.8rem;margin-top:0.5rem;">Last updated: ${new Date(item.updatedAt).toLocaleString()}<span id="last-updated-by"></span></p>` : ''}
@@ -5018,6 +5098,11 @@ th { background: #eee; }
         });
         document.getElementById('detail-content').querySelectorAll('[data-manufacturer-nav]').forEach(el => {
             el.onclick = () => openManufacturer(item.manufacturerId);
+            el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } };
+        });
+        document.getElementById('detail-content').querySelectorAll('[data-related-btk]').forEach(el => {
+            const btk = el.dataset.relatedBtk;
+            el.onclick = () => { if (confirmDiscardIfDirty()) openItem(btk, { type: 'global' }); };
             el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } };
         });
 
@@ -5274,17 +5359,6 @@ th { background: #eee; }
     function openLightbox(src) { document.getElementById('lightbox-img').src = src; document.getElementById('lightbox').classList.add('open'); }
     function closeLightbox(e) { if (!e || e.target !== document.getElementById('lightbox-img')) document.getElementById('lightbox').classList.remove('open'); }
 
-    // ─── WAREHOUSE LOCATOR MAP ─────────────────────────────────────────────
-    // 6x6 grid, columns A-F left-to-right, rows 1-6 top-to-bottom — parses the item's real
-    // MapPosition field (e.g. "A3", set via quick-edit or the Add/Edit modal), not a hash.
-    function parseMapPosition(pos) {
-        const m = String(pos || '').trim().match(/^([A-Fa-f])([1-6])$/);
-        if (!m) return null;
-        const col = m[1].toUpperCase().charCodeAt(0) - 65;
-        const row = parseInt(m[2], 10) - 1;
-        return row * 6 + col;
-    }
-
     // Bin location code: Zone+Depth-Level-Bin, e.g. "A1-4-07" — Zone A, Depth 1 (the front rack;
     // 2 would be the back rack of a back-to-back pair — see the rack area's drawn depth in the
     // Layout Designer), Level 4, Bin 7. See the "Bin Location Codes" section in README.md for the
@@ -5451,25 +5525,6 @@ th { background: #eee; }
         );
     }
 
-    function renderLocatorMap(item) {
-        const map = document.getElementById('locator-map');
-        const caption = document.getElementById('locator-map-caption');
-        map.innerHTML = '';
-        const raw = (item.MapPosition && item.MapPosition !== 'None') ? item.MapPosition.trim() : '';
-        const activeIndex = parseMapPosition(raw);
-        for (let i = 0; i < 36; i++) {
-            const cell = document.createElement('div');
-            cell.className = 'map-cell' + (i === activeIndex ? ' active' : '');
-            const col = String.fromCharCode(65 + (i % 6));
-            const row = Math.floor(i / 6) + 1;
-            cell.innerText = i === activeIndex ? `${col}${row}` : '';
-            map.appendChild(cell);
-        }
-        if (!raw) caption.textContent = "No position set — add one via ✏️ Edit or double-click to quick-edit.";
-        else if (activeIndex === null) caption.textContent = `"${raw}" isn't a valid grid position (use A1–F6).`;
-        else caption.textContent = '';
-    }
-
     // ── BIN LOCATION MAP (Zone → Depth × Level grid) ─────────────────────────
     // Unlike the fixed 6x6 MapPosition grid above, this is sized to whatever the warehouse
     // actually uses: an explicit bound from warehouse_zones if one exists for the zone (max_rack
@@ -5495,14 +5550,14 @@ th { background: #eee; }
     function getZoneBounds(zone) {
         const explicit = globalWarehouseZones.find(z => z.zone === zone);
         if (explicit && explicit.max_rack && explicit.max_level) {
-            return { maxDepth: explicit.max_rack, maxLevel: explicit.max_level };
+            return { maxDepth: explicit.max_rack, maxLevel: explicit.max_level, maxBin: explicit.max_bin || null };
         }
-        let maxDepth = 0, maxLevel = 0;
+        let maxDepth = 0, maxLevel = 0, maxBin = 0;
         globalInventory.forEach(i => {
             const p = parseLocationCode(i.LocationCode);
-            if (p && p.zone === zone) { maxDepth = Math.max(maxDepth, p.depth); maxLevel = Math.max(maxLevel, p.level); }
+            if (p && p.zone === zone) { maxDepth = Math.max(maxDepth, p.depth); maxLevel = Math.max(maxLevel, p.level); maxBin = Math.max(maxBin, p.bin); }
         });
-        return (maxDepth && maxLevel) ? { maxDepth, maxLevel } : null;
+        return (maxDepth && maxLevel) ? { maxDepth, maxLevel, maxBin: maxBin || null } : null;
     }
 
     function onBinMapZoneChange() {
@@ -5544,17 +5599,68 @@ th { background: #eee; }
             for (let depth = 1; depth <= bounds.maxDepth; depth++) {
                 const isActive = itemPos && itemPos.zone === binMapSelectedZone && itemPos.depth === depth && itemPos.level === level;
                 const cell = document.createElement('div');
-                cell.className = 'map-cell' + (isActive ? ' active' : '');
-                cell.title = `Rack ${depth} · Level ${level}`;
+                cell.className = 'map-cell' + (isActive ? ' active clickable' : '');
+                const depthLabel = depth === 1 ? ' (front)' : depth === 2 ? ' (back)' : '';
+                cell.title = isActive ? `${describeLocationCode(item.LocationCode)} — tap for the detailed shelf view` : `Rack ${depth}${depthLabel} · Level ${level}`;
                 cell.innerText = isActive ? `${depth}·${level}` : '';
+                if (isActive) cell.onclick = () => openBinDetailModal(item);
                 map.appendChild(cell);
             }
         }
+        // Full breakdown (Zone/Depth/Level/Bin, and Row if the shelf is more than one bin deep at
+        // that spot) instead of just the terse Depth·Level the grid cell itself can show — a 2D
+        // grid only has two axes, so Bin/Row were previously only visible in the raw code up in the
+        // field list, easy to miss.
         if (!item.LocationCode || item.LocationCode === 'None') caption.textContent = "No bin location set — add one via ✏️ Edit or double-click to quick-edit.";
         else if (!itemPos) caption.textContent = `"${item.LocationCode}" isn't a valid bin location code.`;
         else if (itemPos.zone !== binMapSelectedZone) caption.textContent = `This item is in Zone ${itemPos.zone}, not shown here.`;
-        else caption.textContent = '';
+        else caption.textContent = describeLocationCode(item.LocationCode) + ' — tap the highlighted cell above for the detailed shelf view.';
     }
+
+    // "Detailed graphical representation" drill-down from the coarse Depth×Level grid: the grid
+    // itself can only show two axes, so this zooms into the specific shelf (Zone+Depth+Level) the
+    // active cell represents and draws it as it actually reads left-to-right — Bin position along
+    // the shelf, and (for a shelf spot that's more than one bin deep) Row as how far back from the
+    // front that particular bin sits. Sized by warehouse_zones.max_bin when set (Layout Designer),
+    // otherwise just wide enough to include the item's own bin with a note that the shelf's real
+    // width isn't configured.
+    function openBinDetailModal(item) {
+        const pos = parseLocationCode(item.LocationCode);
+        if (!pos) return;
+        const bounds = getZoneBounds(pos.zone) || {};
+        const width = bounds.maxBin || pos.bin;
+        const depthLabel = pos.depth === 1 ? 'front rack' : pos.depth === 2 ? 'back rack' : `rack ${pos.depth}`;
+
+        document.getElementById('bin-detail-title').textContent = `📍 ${item['itemname(english)'] || item['itemname(swedish)'] || 'Item'}`;
+        document.getElementById('bin-detail-subtitle').textContent = describeLocationCode(item.LocationCode);
+
+        const shelf = document.getElementById('bin-detail-shelf');
+        shelf.innerHTML = '';
+        shelf.style.gridTemplateColumns = `repeat(${width}, 1fr)`;
+        for (let bin = 1; bin <= width; bin++) {
+            const cell = document.createElement('div');
+            cell.className = 'map-cell' + (bin === pos.bin ? ' active' : '');
+            cell.title = `Bin ${bin}`;
+            cell.innerText = bin === pos.bin ? String(bin) : '';
+            shelf.appendChild(cell);
+        }
+        document.getElementById('bin-detail-shelf-note').textContent = bounds.maxBin
+            ? `Zone ${pos.zone}, ${depthLabel}, Level ${pos.level} — ${width} bin${width > 1 ? 's' : ''} across, left to right.`
+            : `Zone ${pos.zone}, ${depthLabel}, Level ${pos.level} — this zone's bin count per shelf isn't configured yet, so only bins up to this item's own are shown.`;
+
+        const rowNote = document.getElementById('bin-detail-row-note');
+        if (pos.binRow > 1) {
+            rowNote.classList.remove('hidden');
+            rowNote.innerHTML = `<div class="merge-custom-note">↕️ This bin is <strong>${pos.binRow - 1}</strong> bin${pos.binRow > 2 ? 's' : ''} back from the front — the shelf is deep enough here to hold more than one, front-to-back.</div>`;
+        } else {
+            rowNote.classList.add('hidden');
+            rowNote.innerHTML = '';
+        }
+
+        document.getElementById('bin-detail-modal').classList.add('open');
+    }
+    function closeBinDetailModal() { document.getElementById('bin-detail-modal').classList.remove('open'); }
+    function handleBinDetailModalOverlayClick(e) { if (e.target === document.getElementById('bin-detail-modal')) closeBinDetailModal(); }
 
     // ════════════════════════════════════════════════════════════════════════
     //  ADD / EDIT ITEM MODAL
@@ -5636,18 +5742,26 @@ th { background: #eee; }
     // it. `reserved` is an optional Set<number> of numbers to also treat as taken but that aren't
     // in globalInventory yet — used by CSV import to hand out several new numbers in one batch
     // without them colliding with each other.
+    // Newly minted BTKs carry a "W##" warehouse tag (e.g. BTK000004W01 in warehouse 1) so which
+    // warehouse a BTK belongs to is readable off the number itself — compressId()/decompressId()
+    // (ID COMPRESSION section) preserve this suffix through the QR/URL fragment rather than
+    // silently truncating it. This is warehouse-tagging only, not a shared "same product across
+    // warehouses" identity — the vacant-number scan below still only looks at globalInventory
+    // (the currently loaded warehouse), so two different warehouses picking the same base number
+    // for two unrelated new items is expected and fine; nothing implies they're the same product.
     function generateUniqueBTK(reserved) {
         const used = new Set(reserved || []);
         let maxN = 0;
         globalInventory.forEach(i => {
-            const m = String(i.BTKnumber || '').trim().toUpperCase().match(/^BTK0*(\d+)$/);
+            const m = String(i.BTKnumber || '').trim().toUpperCase().match(/^BTK0*(\d+)(?:W\d+)?$/);
             if (m) { const n = parseInt(m[1], 10); used.add(n); maxN = Math.max(maxN, n); }
         });
         used.forEach(n => { maxN = Math.max(maxN, n); });
-        for (let n = 1; n <= maxN; n++) { if (!used.has(n)) return 'BTK' + String(n).padStart(6, '0'); }
-        let n = maxN + 1, candidate = 'BTK' + String(n).padStart(6, '0');
-        while (used.has(n)) { n++; candidate = 'BTK' + String(n).padStart(6, '0'); }
-        return candidate;
+        const suffix = 'W' + String(currentWarehouseId).padStart(2, '0');
+        for (let n = 1; n <= maxN; n++) { if (!used.has(n)) return 'BTK' + String(n).padStart(6, '0') + suffix; }
+        let n = maxN + 1;
+        while (used.has(n)) n++;
+        return 'BTK' + String(n).padStart(6, '0') + suffix;
     }
     async function duplicateItem() {
         if (!canEditItems() || !currentItemBTK) return;
@@ -6192,19 +6306,26 @@ th { background: #eee; }
                 inventorylocation: newItem.Inventorylocation, map_position: newItem.MapPosition === 'None' ? null : newItem.MapPosition,
                 location_code: newItem.LocationCode === 'None' ? null : newItem.LocationCode, comments: newItem.Comments
             };
-            const req = (modalMode === 'edit')
+            const wasEdit = modalMode === 'edit';
+            const req = wasEdit
                 ? sb.from('items').update(row).eq('btk', editTargetBTK)
                 : sb.from('items').insert({ ...row, btk, warehouse_id: currentWarehouseId, images: '' });
-            req.then(({ error }) => {
+            req.then(async ({ error }) => {
                 if (error) return showToast("Save blocked: " + error.message, "error");
                 closeAddItemModal();
                 showToast("Saved to Supabase.", "success");
-                supabaseLoadList(currentWarehouseId);
+                // Reload data without the full-list view switch supabaseLoadList() would force —
+                // editing used to always dump you back on the item list even if you opened Edit
+                // from the item's own page. Adding a new item still lands on the list (there's no
+                // item page to return to yet); editing returns to that same item, refreshed.
+                try { await supabaseFetchData(currentWarehouseId); } catch (e) { return; }
+                if (wasEdit) openItem(btk, navigationContext); else showListView('items');
             });
             return;
         }
 
-        if (modalMode === 'edit' && editTargetBTK && editTargetBTK !== btk) {
+        const wasEdit = modalMode === 'edit';
+        if (wasEdit && editTargetBTK && editTargetBTK !== btk) {
             // BTKnumber changed — remove old entry
             globalInventory = globalInventory.filter(i => i.BTKnumber !== editTargetBTK);
         }
@@ -6215,9 +6336,9 @@ th { background: #eee; }
 
         saveDraft(currentWarehouseId);
         closeAddItemModal();
-        if (listMode === 'items') filterList(false);
-        showToast(modalMode === 'edit' ? "Item updated (draft autosaved)." : "Item added (draft autosaved).", "success", 5000);
-        console.log(`Item ${modalMode === 'edit' ? 'edited' : 'added'}: ${btk}`);
+        showToast(wasEdit ? "Item updated (draft autosaved)." : "Item added (draft autosaved).", "success", 5000);
+        console.log(`Item ${wasEdit ? 'edited' : 'added'}: ${btk}`);
+        if (wasEdit) openItem(btk, navigationContext); else if (listMode === 'items') filterList(false);
     }
 
     // ════════════════════════════════════════════════════════════════════════
