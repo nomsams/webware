@@ -207,6 +207,7 @@
         .map-cell.active { background: var(--primary); color: white; box-shadow: 0 0 12px rgba(37, 99, 235, 0.6); transform: scale(1.1); z-index: 2; }
         .map-cell.clickable { cursor: pointer; }
         .map-cell.clickable:hover { background: var(--primary-light); }
+        .map-cell.has-items { background: var(--primary-light); color: var(--primary); font-weight: 700; }
         .loc-picker-grid { max-width: 260px; }
         .loc-picker-grid .map-cell { font-size: 0.7rem; }
 
@@ -775,6 +776,7 @@
                 <select id="manufacturer-filter" onchange="onManufacturerFilterChange()" style="margin: 0; width: auto; padding: 6px 10px; min-height: unset; font-size: 0.8rem;">
                     <option value="">Manufacturers</option>
                 </select>
+                <button class="secondary" onclick="openBinLocatorView()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📍 Bin Locator</button>
                 <div class="select-all-banner" style="margin-left: auto; margin-bottom: 0; padding: 6px 12px; min-height: unset;" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
                     <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 8px; pointer-events: none;" aria-hidden="true">
                     <span style="font-weight: 600; font-size: 0.85rem;">Select All</span>
@@ -1088,6 +1090,32 @@
         <div class="modal-actions" style="margin-top:1.5rem;">
             <button class="secondary full-width" onclick="cancelMergeFlow()">Cancel</button>
             <button class="danger full-width" id="btn-merge-confirm">🔀 Merge & Delete the Rest</button>
+        </div>
+    </section>
+
+    <!-- View: Bin Locator — browse a warehouse spatially instead of by list: pick a Depth × Level
+         cell (a shelf), see what's actually stored there laid out left-to-right by Bin. The
+         inverse of the single-item Bin Location Map (which answers "where is this item" — this
+         answers "what's at this spot"). -->
+    <section id="bin-locator-view" class="card hidden">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
+            <button class="secondary" onclick="showListView('items')">← Back</button>
+        </div>
+        <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">📍 Bin Locator</h1>
+        <p style="color:var(--text-muted); margin-bottom:1rem; font-size:0.9rem;">Tap a cell below to see what's stored on that shelf. The number in a cell is how many items are there.</p>
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:0.75rem;">
+            <label for="bin-locator-zone-select" style="margin:0; font-size:0.85rem; color:var(--text-muted);">Zone:</label>
+            <select id="bin-locator-zone-select" onchange="onBinLocatorZoneChange()" style="width:auto; margin:0; padding:6px 10px; font-size:0.85rem;"></select>
+        </div>
+        <div class="warehouse-map" id="bin-locator-grid"></div>
+        <p id="bin-locator-grid-caption" style="color:var(--text-muted); font-size:0.82rem; margin-top:0.5rem;"></p>
+
+        <div id="bin-locator-detail" class="hidden" style="margin-top:1.5rem; border-top:1px solid var(--border); padding-top:1rem;">
+            <h3 id="bin-locator-detail-title" style="margin-top:0;"></h3>
+            <p style="color:var(--text-muted); font-size:0.8rem; margin-bottom:0.5rem;">Facing the shelf, bins run left to right — tap one below or in the list to jump to that item:</p>
+            <div class="warehouse-map" id="bin-locator-shelf" style="margin-bottom:0.5rem;"></div>
+            <p id="bin-locator-shelf-note" style="color:var(--text-muted); font-size:0.82rem; margin-bottom:1rem;"></p>
+            <div id="bin-locator-items-list"></div>
         </div>
     </section>
 
@@ -2506,7 +2534,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function switchView(viewId) {
-        ['auth-view','list-view','item-view','kit-view','manufacturer-view','warehouse-view','pack-order-view','inventering-setup-view','inventering-view','preview-view','settings-view','merge-view'].forEach(v => {
+        ['auth-view','list-view','item-view','kit-view','manufacturer-view','warehouse-view','pack-order-view','inventering-setup-view','inventering-view','preview-view','settings-view','merge-view','bin-locator-view'].forEach(v => {
             document.getElementById(v).classList.add('hidden');
         });
         document.getElementById(viewId).classList.remove('hidden');
@@ -5661,6 +5689,132 @@ th { background: #eee; }
     }
     function closeBinDetailModal() { document.getElementById('bin-detail-modal').classList.remove('open'); }
     function handleBinDetailModalOverlayClick(e) { if (e.target === document.getElementById('bin-detail-modal')) closeBinDetailModal(); }
+
+    // ── BIN LOCATOR — browse the warehouse spatially, the inverse of the item-page Bin Location
+    // Map. That one answers "where is this item"; this answers "what's at this spot" — pick a
+    // Depth × Level cell (a shelf) and see everything stored there laid out left-to-right by Bin,
+    // same shelf-strip visualization openBinDetailModal() uses for a single item.
+    var binLocatorZone = null;
+    var binLocatorSelectedDepth = null;
+    var binLocatorSelectedLevel = null;
+
+    function openBinLocatorView() {
+        if (!requireAuth()) return;
+        const zones = getAvailableZones();
+        if (!zones.length) { showToast("No bin locations set up in this warehouse yet.", "warning"); return; }
+        if (!binLocatorZone || !zones.includes(binLocatorZone)) binLocatorZone = zones[0];
+        binLocatorSelectedDepth = null;
+        binLocatorSelectedLevel = null;
+        switchView('bin-locator-view');
+        const select = document.getElementById('bin-locator-zone-select');
+        select.innerHTML = zones.map(z => `<option value="${escapeHtml(z)}" ${z === binLocatorZone ? 'selected' : ''}>Zone ${escapeHtml(z)}</option>`).join('');
+        document.getElementById('bin-locator-detail').classList.add('hidden');
+        renderBinLocatorGrid();
+    }
+    function onBinLocatorZoneChange() {
+        binLocatorZone = document.getElementById('bin-locator-zone-select').value;
+        binLocatorSelectedDepth = null;
+        binLocatorSelectedLevel = null;
+        document.getElementById('bin-locator-detail').classList.add('hidden');
+        renderBinLocatorGrid();
+    }
+
+    function itemsAtLocation(zone, depth, level) {
+        return globalInventory.filter(i => {
+            const p = parseLocationCode(i.LocationCode);
+            return p && p.zone === zone && p.depth === depth && p.level === level;
+        });
+    }
+
+    function renderBinLocatorGrid() {
+        const grid = document.getElementById('bin-locator-grid');
+        const caption = document.getElementById('bin-locator-grid-caption');
+        const bounds = getZoneBounds(binLocatorZone);
+        grid.innerHTML = '';
+        if (!bounds) {
+            grid.style.gridTemplateColumns = '';
+            caption.textContent = `No sized layout for Zone ${binLocatorZone} yet.`;
+            return;
+        }
+        grid.style.gridTemplateColumns = `repeat(${bounds.maxDepth}, 1fr)`;
+        for (let level = bounds.maxLevel; level >= 1; level--) {
+            for (let depth = 1; depth <= bounds.maxDepth; depth++) {
+                const count = itemsAtLocation(binLocatorZone, depth, level).length;
+                const isSelected = binLocatorSelectedDepth === depth && binLocatorSelectedLevel === level;
+                const depthLabel = depth === 1 ? ' (front)' : depth === 2 ? ' (back)' : '';
+                const cell = document.createElement('div');
+                cell.className = 'map-cell clickable' + (isSelected ? ' active' : '') + (count > 0 && !isSelected ? ' has-items' : '');
+                cell.title = `Rack ${depth}${depthLabel} · Level ${level}` + (count ? ` — ${count} item(s)` : ' — empty');
+                cell.innerText = count > 0 ? String(count) : '';
+                cell.onclick = () => selectBinLocatorCell(depth, level);
+                grid.appendChild(cell);
+            }
+        }
+        caption.textContent = `Zone ${binLocatorZone} — each cell is one shelf (Rack × Level); the number is how many items are stored there.`;
+    }
+
+    function selectBinLocatorCell(depth, level) {
+        binLocatorSelectedDepth = depth;
+        binLocatorSelectedLevel = level;
+        renderBinLocatorGrid();
+        renderBinLocatorShelf(depth, level);
+    }
+
+    function renderBinLocatorShelf(depth, level) {
+        const bounds = getZoneBounds(binLocatorZone) || {};
+        const itemsHere = itemsAtLocation(binLocatorZone, depth, level);
+        const maxBinSeen = itemsHere.reduce((max, i) => Math.max(max, (parseLocationCode(i.LocationCode) || {}).bin || 0), 0);
+        const width = bounds.maxBin || maxBinSeen || 1;
+        const depthLabel = depth === 1 ? 'front rack' : depth === 2 ? 'back rack' : `rack ${depth}`;
+
+        document.getElementById('bin-locator-detail-title').textContent = `📍 Zone ${binLocatorZone} · ${depthLabel} · Level ${level}`;
+
+        const shelf = document.getElementById('bin-locator-shelf');
+        shelf.innerHTML = '';
+        shelf.style.gridTemplateColumns = `repeat(${width}, 1fr)`;
+        for (let bin = 1; bin <= width; bin++) {
+            const itemsInBin = itemsHere.filter(i => (parseLocationCode(i.LocationCode) || {}).bin === bin);
+            const cell = document.createElement('div');
+            cell.className = 'map-cell' + (itemsInBin.length ? ' active clickable' : '');
+            cell.title = itemsInBin.length
+                ? itemsInBin.map(i => i['itemname(english)'] || i['itemname(swedish)'] || i.BTKnumber).join(', ')
+                : `Bin ${bin} — empty`;
+            cell.innerText = itemsInBin.length ? String(bin) : '';
+            if (itemsInBin.length === 1) cell.onclick = () => openItem(itemsInBin[0].BTKnumber, { type: 'global' });
+            else if (itemsInBin.length > 1) cell.onclick = () => document.getElementById(`bin-locator-row-${bin}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            shelf.appendChild(cell);
+        }
+        document.getElementById('bin-locator-shelf-note').textContent = bounds.maxBin
+            ? `${width} bin${width > 1 ? 's' : ''} across, left to right.`
+            : `This zone's bin count per shelf isn't configured yet — showing up to the highest bin actually in use here.`;
+
+        const listEl = document.getElementById('bin-locator-items-list');
+        if (!itemsHere.length) {
+            listEl.innerHTML = `<div class="empty-state"><p>Nothing stored here yet.</p></div>`;
+        } else {
+            const sorted = itemsHere.slice().sort((a, b) => compareLocationCode(a.LocationCode, b.LocationCode));
+            listEl.innerHTML = sorted.map(item => {
+                const p = parseLocationCode(item.LocationCode);
+                const num1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
+                const num2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
+                const nums = [num1, num2].filter(Boolean).join(' · ');
+                const mfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
+                return `<div class="kit-row" id="bin-locator-row-${p ? p.bin : 0}" data-locator-btk="${escapeHtml(item.BTKnumber)}" role="button" tabindex="0">
+                    <div class="kit-info">
+                        <div class="item-title" style="font-size:1.05rem;font-weight:800;">${escapeHtml(item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed')}</div>
+                        ${nums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${escapeHtml(nums)}</div>` : ''}
+                        <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${mfr ? escapeHtml(mfr) + ' · ' : ''}${escapeHtml(item.BTKnumber)}${p ? ` · Bin ${p.bin}${p.binRow > 1 ? ` (Row ${p.binRow})` : ''}` : ''}</div>
+                    </div>
+                </div>`;
+            }).join('');
+            listEl.querySelectorAll('[data-locator-btk]').forEach(el => {
+                const btk = el.dataset.locatorBtk;
+                el.onclick = () => openItem(btk, { type: 'global' });
+                el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } };
+            });
+        }
+        document.getElementById('bin-locator-detail').classList.remove('hidden');
+    }
 
     // ════════════════════════════════════════════════════════════════════════
     //  ADD / EDIT ITEM MODAL
