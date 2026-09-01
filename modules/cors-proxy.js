@@ -1,7 +1,9 @@
 // Browser-side CORS-proxy client for fetching pages that don't send permissive CORS headers
 // (used by web-search.js to reach DuckDuckGo and search-result pages).
 //
-// STATUS: standalone, not wired into index.html yet.
+// STATUS: wired into index.html — configureCorsProxy() is called once from the module bridge near
+// the end of the page, so window.duckySearch/window.crawly (web-search.js) route through
+// webware's own cors-proxy Edge Function rather than the public fallbacks below.
 //
 // Default path calls webware's own cors-proxy Supabase Edge Function
 // (supabase/functions/cors-proxy) — deploy it and call configureCorsProxy() once (same

@@ -394,11 +394,59 @@
             .l-nums, .l-name, .l-mfr, .l-btk { color: black !important; }
             .no-print { display: none !important; }
         }
+
+        /* ── AI Assistant (chat bubble) ── */
+        #ai-fab {
+            position: fixed; bottom: 20px; right: 20px; width: 56px; height: 56px; border-radius: 50%;
+            background: var(--primary); color: #fff; border: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.35);
+            font-size: 1.5rem; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
+            transition: transform 0.15s;
+        }
+        #ai-fab:hover { transform: scale(1.06); }
+        #ai-panel {
+            position: fixed; bottom: 88px; right: 20px; width: 360px; max-width: calc(100vw - 2rem);
+            max-height: min(70vh, 640px); background: var(--card-bg); border: 1px solid var(--border);
+            border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.4); z-index: 4000;
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+        #ai-panel.hidden { display: none; }
+        .ai-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); font-weight: 700; }
+        .ai-panel-header button { min-height: auto; padding: 0.2rem 0.5rem; background: none; border: none; font-size: 1.1rem; cursor: pointer; color: var(--text-muted); }
+        .ai-panel-messages { flex: 1; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem; min-height: 120px; }
+        .ai-msg { max-width: 90%; padding: 0.55rem 0.75rem; border-radius: 12px; font-size: 0.88rem; line-height: 1.4; white-space: pre-wrap; }
+        .ai-msg-user { align-self: flex-end; background: var(--primary); color: #fff; border-bottom-right-radius: 4px; }
+        .ai-msg-assistant { align-self: flex-start; background: var(--border); color: var(--text-main); border-bottom-left-radius: 4px; }
+        .ai-msg-system { align-self: center; color: var(--text-muted); font-size: 0.78rem; text-align: center; }
+        .ai-action-card { align-self: stretch; background: var(--card-bg); border: 1px solid var(--primary); border-radius: 12px; padding: 0.65rem 0.75rem; font-size: 0.85rem; }
+        .ai-action-card .ai-action-title { font-weight: 700; margin-bottom: 0.35rem; }
+        .ai-action-card .ai-action-diff { background: rgba(127,127,127,0.14); border-radius: 8px; padding: 0.4rem 0.5rem; margin: 0.35rem 0; font-size: 0.82rem; word-break: break-word; }
+        .ai-action-card .ai-action-buttons { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+        .ai-action-card button { flex: 1; min-height: 34px; padding: 0.4rem 0.6rem; font-size: 0.82rem; border-radius: 8px; }
+        .ai-highlight-pulse { animation: aiPulse 1.4s ease-in-out 2; }
+        @keyframes aiPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.55); } 50% { box-shadow: 0 0 0 6px rgba(99,102,241,0); } }
+        .ai-panel-input-row { display: flex; gap: 0.5rem; padding: 0.65rem; border-top: 1px solid var(--border); }
+        .ai-panel-input-row input { flex: 1; margin: 0; min-height: 38px; }
+        .ai-panel-input-row button { min-height: 38px; min-width: 38px; padding: 0 0.6rem; }
+        #ai-chat-mic-btn.recording { background: var(--danger); color: #fff; animation: aiPulse 1s ease-in-out infinite; }
     </style>
 </head>
 <body>
 
 <div id="toast-container" aria-live="polite"></div>
+
+<button id="ai-fab" onclick="toggleAiAssistant()" aria-label="Open AI Assistant" title="AI Assistant">🤖</button>
+<div id="ai-panel" class="hidden">
+    <div class="ai-panel-header">
+        <span>🤖 Assistant</span>
+        <button onclick="toggleAiAssistant()" aria-label="Close AI Assistant">✕</button>
+    </div>
+    <div class="ai-panel-messages" id="ai-panel-messages"></div>
+    <div class="ai-panel-input-row">
+        <button id="ai-chat-mic-btn" onclick="aiChatToggleRecording()" aria-label="Record voice instruction" title="Voice input">🎤</button>
+        <input type="text" id="ai-chat-input" placeholder="Ask or instruct…" onkeydown="if(event.key==='Enter') aiChatSendText()">
+        <button onclick="aiChatSendText()" aria-label="Send">➤</button>
+    </div>
+</div>
 <datalist id="manufacturer-datalist"></datalist>
 
 <!-- Lightbox -->
@@ -1193,6 +1241,16 @@
         <button class="secondary full-width hidden" id="btn-activity-log" onclick="openActivityLogModal()" style="margin-bottom:1rem;">📜 Activity Log</button>
         <button class="secondary full-width hidden" id="btn-backorder-report" onclick="openBackorderReportModal()" style="margin-bottom:1rem;">📋 Backorder Report</button>
 
+        <div class="setting-row">
+            <label>🤖 AI Assistant (Groq API Key)</label>
+            <p class="setting-desc" id="ai-key-status-text">Checking…</p>
+            <div style="display:flex; gap:8px; margin-top:0.5rem;">
+                <input type="password" id="ai-key-input" placeholder="gsk_..." style="flex:1; margin:0;" autocomplete="off">
+                <button class="secondary" onclick="submitAiApiKey()" style="min-height:auto; padding:0 1rem;">Add Key</button>
+            </div>
+            <p class="setting-desc">Stored once, shared by everyone using this app — never shown again after saving. Add a backup key any time; the assistant falls back to it if the first one hits a rate limit.</p>
+        </div>
+
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>
         <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
     </section>
@@ -1273,6 +1331,14 @@
     var globalManufacturers = []; // Supabase-mode only — global (not warehouse-scoped) entity list
     var currentManufacturerId = null;
     var selectedItemsQty = {}; // btk -> requested qty (set when selected from a kit's item list)
+
+    // ── AI Assistant state ──
+    var aiAssistantReady = false;
+    var aiHasApiKey = null; // null = not checked yet
+    var aiPendingAction = null;
+    var aiMediaRecorder = null;
+    var aiRecordedChunks = [];
+    var aiIsRecording = false;
     var packOrder = []; // [{btk, qty, packed}] — session-local pick list, never persisted
     var packOrderPreviousView = 'list-view';
     var packOrderEditMode = false;
@@ -1331,6 +1397,12 @@
     const SUPABASE_URL = 'https://qagdbkvcgxurnqowlokx.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFhZ2Ria3ZjZ3h1cm5xb3dsb2t4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4MTY0MDEsImV4cCI6MjEwMzM5MjQwMX0.tteGQHJTQ775oB0IllbS0oOIPlshngD9yqy_elVl5NU'; // safe to publish — RLS enforces access
     const sb = (typeof window.supabase !== 'undefined') ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+    // Exposed on window (not just as top-level const) so the ES-module bridge near the end of the
+    // page — a separate <script type="module">, which can't see a classic script's const bindings —
+    // can reach these without duplicating them.
+    window.SUPABASE_URL = SUPABASE_URL;
+    window.SUPABASE_ANON_KEY = SUPABASE_ANON_KEY;
+    window.getSupabaseAccessToken = async () => sb ? (await sb.auth.getSession()).data.session?.access_token : null;
     var currentUserRole = null; // 'viewer' | 'editor' | 'admin' — kept in memory only, never persisted
 
     // Item photos live in Supabase Storage now (one full + one thumbnail per item, flat filenames
@@ -7113,6 +7185,7 @@ ${css}
         document.getElementById('storage-usage-row').classList.toggle('hidden', !(isSupa && isAdmin));
         if (isSupa && isAdmin) refreshStorageUsage();
         if (isSupa) loadMyDisplayName();
+        refreshAiKeySettingsUI();
     }
     function toggleSettings() {
         if (activeView === 'settings-view') { switchView(previousView); }
@@ -7151,15 +7224,421 @@ ${css}
         if (sb) { try { await sb.auth.signOut(); } catch (e) { console.error("Supabase sign-out failed:", e); } }
         window.location.href = window.location.pathname;
     }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  AI ASSISTANT — chat bubble (voice + text), backed by Groq via the
+    //  groq-proxy Edge Function. The key itself is never fetched here — only
+    //  has_llm_api_key()/count_llm_api_keys() booleans/counts, per RLS on
+    //  llm_api_keys (see supabase/schema_llm_assistant.sql). window.aiGroq,
+    //  window.duckySearch, window.crawly come from the ES-module bridge below
+    //  (modules/groq-client.js, modules/web-search.js).
+    // ════════════════════════════════════════════════════════════════════════
+
+    async function toggleAiAssistant() {
+        const panel = document.getElementById('ai-panel');
+        const opening = panel.classList.contains('hidden');
+        panel.classList.toggle('hidden');
+        if (opening) {
+            if (!aiAssistantReady) {
+                aiAssistantReady = true;
+                await aiRefreshKeyStatus();
+                aiAppendMessage('system', aiHasApiKey
+                    ? "Ask me to find an item, start a pack order from a kit, or (with an item open) change one of its fields."
+                    : (sb ? "No Groq API key is configured yet. Add one in Settings → AI Assistant." : "Sign in to a Supabase-connected warehouse first."));
+            }
+            document.getElementById('ai-chat-input').focus();
+        }
+    }
+
+    async function aiRefreshKeyStatus() {
+        if (!sb) { aiHasApiKey = false; return false; }
+        try {
+            const { data, error } = await sb.rpc('has_llm_api_key');
+            aiHasApiKey = !error && !!data;
+        } catch (e) { aiHasApiKey = false; }
+        return aiHasApiKey;
+    }
+
+    function aiAppendMessage(role, text) {
+        const el = document.createElement('div');
+        el.className = role === 'user' ? 'ai-msg ai-msg-user' : role === 'assistant' ? 'ai-msg ai-msg-assistant' : 'ai-msg ai-msg-system';
+        el.textContent = text;
+        const list = document.getElementById('ai-panel-messages');
+        list.appendChild(el);
+        el.scrollIntoView({ block: 'end' });
+        return el;
+    }
+
+    function aiRemoveLastActionCard() {
+        const cards = document.querySelectorAll('#ai-panel-messages .ai-action-card');
+        if (cards.length) cards[cards.length - 1].remove();
+    }
+
+    async function aiChatSendText() {
+        const input = document.getElementById('ai-chat-input');
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        await aiHandleUtterance(text);
+    }
+
+    // Every field the assistant is allowed to change via "edit_field" — mapped to the existing
+    // Quick Edit form's own input ids (index.html:renderQuickEditFields), and to the matching key
+    // on the in-memory item object, so a preview can show the real current value.
+    const AI_FIELD_MAP = {
+        name_en: { elId: 'qe-name-en', itemKey: 'itemname(english)', label: 'Item Name (English)' },
+        name_sv: { elId: 'qe-name-sv', itemKey: 'itemname(swedish)', label: 'Item Name (Swedish)' },
+        manufacturer: { elId: 'qe-manufacturer', itemKey: 'Manufacturer', label: 'Manufacturer' },
+        itemnumber: { elId: 'qe-itemnumber', itemKey: 'itemnumber', label: 'Item Number' },
+        itemnumber2: { elId: 'qe-itemnumber2', itemKey: 'itemnumber2', label: 'Item Number 2' },
+        itemnumber3: { elId: 'qe-itemnumber3', itemKey: 'itemnumber3', label: 'Item Number 3' },
+        quantity: { elId: 'qe-qty', itemKey: 'Numberofitems', label: 'Quantity' },
+        reorder_threshold: { elId: 'qe-reorder-threshold', itemKey: 'ReorderThreshold', label: 'Reorder Threshold' },
+        location: { elId: 'qe-location', itemKey: 'Inventorylocation', label: 'Location' },
+        map_position: { elId: 'qe-mapposition', itemKey: 'MapPosition', label: 'Map Position' },
+        location_code: { elId: 'qe-locationcode', itemKey: 'LocationCode', label: 'Bin Location Code' },
+        comments: { elId: 'qe-comments', itemKey: 'Comments', label: 'Comments' },
+    };
+
+    const AI_SYSTEM_PROMPT = `You are an assistant embedded in a warehouse inventory app. The user gives a short instruction (voice-transcribed or typed), possibly in English, Swedish, or Finnish. Classify it into EXACTLY ONE JSON object, no prose, matching one of:
+{"action":"search_item","query":string}
+{"action":"pack_kit","query":string}
+{"action":"edit_field","field":"name_en"|"name_sv"|"manufacturer"|"itemnumber"|"itemnumber2"|"itemnumber3"|"quantity"|"reorder_threshold"|"location"|"map_position"|"location_code"|"comments","value":string}
+{"action":"web_search","query":string}
+{"action":"chat","reply":string}
+Rules:
+- "search_item": user wants to find/open an item by name, number, or manufacturer.
+- "pack_kit": user wants to start/pack an order from a kit by name or number (e.g. "pack the kit for HANY IC310").
+- "edit_field": ONLY when clearly asking to change one specific field's value on the item that's currently open (e.g. "change the item name to Grease sticks" -> field "name_en", value "Grease sticks").
+- "web_search": user asks a factual question that needs looking something up on the web.
+- "chat": anything else — answer briefly yourself (or say you can't do that yet) in "reply".
+Respond with ONLY the JSON object, nothing else.`;
+
+    function aiBuildContextLine() {
+        const item = currentItemBTK ? globalInventory.find(i => i.BTKnumber === currentItemBTK) : null;
+        return `Context: view=${activeView}${item ? `, item open: "${item['itemname(english)'] || ''}" (${item.BTKnumber})` : ', no item open'}.`;
+    }
+
+    async function aiHandleUtterance(text) {
+        aiAppendMessage('user', text);
+        if (aiHasApiKey === null) await aiRefreshKeyStatus();
+        if (!aiHasApiKey) {
+            aiAppendMessage('system', sb ? "No Groq API key configured. Add one in Settings → AI Assistant first." : "Sign in to a Supabase-connected warehouse first.");
+            return;
+        }
+        const thinking = aiAppendMessage('system', 'Thinking…');
+        let reply;
+        try {
+            const raw = await window.aiGroq.chat({
+                model: window.GROQ_MODELS.TEXT,
+                reasoningEffort: 'low',
+                messages: [
+                    { role: 'system', content: AI_SYSTEM_PROMPT },
+                    { role: 'user', content: `${aiBuildContextLine()}\n\nInstruction: ${text}` },
+                ],
+            });
+            const match = raw.match(/\{[\s\S]*\}/);
+            if (!match) throw new Error('unexpected reply shape');
+            reply = JSON.parse(match[0]);
+        } catch (e) {
+            thinking.remove();
+            aiAppendMessage('assistant', "Sorry, I couldn't process that: " + e.message);
+            return;
+        }
+        thinking.remove();
+
+        if (reply.action === 'web_search') { await aiHandleWebSearch(reply.query); return; }
+        if (reply.action === 'chat' || !reply.action) { aiAppendMessage('assistant', reply.reply || "I'm not sure how to help with that yet."); return; }
+
+        const built = aiBuildPendingAction(reply);
+        if (!built) { aiAppendMessage('assistant', "I couldn't find what you're referring to — could you be more specific?"); return; }
+        aiPendingAction = built;
+        aiRenderActionCard(built);
+    }
+
+    function aiWordOverlapScore(a, b) {
+        if (!a || !b) return 0;
+        a = a.toLowerCase().trim(); b = b.toLowerCase().trim();
+        if (a === b) return 1;
+        if (b.includes(a) || a.includes(b)) return 0.8;
+        const aTok = new Set(a.split(/\s+/).filter(Boolean));
+        const bTok = new Set(b.split(/\s+/).filter(Boolean));
+        if (!aTok.size || !bTok.size) return 0;
+        let overlap = 0;
+        aTok.forEach(t => { if (bTok.has(t)) overlap++; });
+        return overlap / Math.max(aTok.size, bTok.size);
+    }
+
+    function aiFuzzyFindItem(query) {
+        if (!query || !query.trim()) return null;
+        const q = query.trim().toLowerCase();
+        const exactBtk = globalInventory.find(i => i.BTKnumber && i.BTKnumber.toLowerCase() === q);
+        if (exactBtk) return exactBtk;
+        let best = null, bestScore = 0;
+        globalInventory.forEach(item => {
+            const fields = [item['itemname(english)'], item['itemname(swedish)'], item.itemnumber, item.itemnumber2, item.itemnumber3, item.Manufacturer, item.BTKnumber];
+            const score = Math.max(...fields.map(f => aiWordOverlapScore(q, (f || '').toString())));
+            if (score > bestScore) { bestScore = score; best = item; }
+        });
+        return bestScore >= 0.35 ? best : null;
+    }
+
+    function aiFuzzyFindKit(query) {
+        if (!query || !query.trim()) return null;
+        const q = query.trim().toLowerCase();
+        let best = null, bestScore = 0;
+        globalKits.forEach(kit => {
+            const fields = [kit.name, kit.kitnumber];
+            const score = Math.max(...fields.map(f => aiWordOverlapScore(q, (f || '').toString())));
+            if (score > bestScore) { bestScore = score; best = kit; }
+        });
+        return bestScore >= 0.35 ? best : null;
+    }
+
+    function aiBuildPendingAction(reply) {
+        if (reply.action === 'search_item') {
+            const match = aiFuzzyFindItem(reply.query || '');
+            if (!match) return null;
+            return { type: 'search_item', btk: match.BTKnumber, name: match['itemname(english)'], summary: `Open "${match['itemname(english)'] || match.BTKnumber}" (${match.BTKnumber})` };
+        }
+        if (reply.action === 'pack_kit') {
+            const kit = aiFuzzyFindKit(reply.query || '');
+            if (!kit) return null;
+            const count = Object.keys(kit.items || {}).filter(b => kit.items[b] > 0).length;
+            return { type: 'pack_kit', kitnumber: kit.kitnumber, kitName: kit.name, summary: `Start a Pack Order from kit "${kit.name}" (${count} item${count === 1 ? '' : 's'})` };
+        }
+        if (reply.action === 'edit_field') {
+            if (activeView !== 'item-view' || !currentItemBTK) return null;
+            const fieldMeta = AI_FIELD_MAP[reply.field];
+            if (!fieldMeta) return null;
+            if (!canEditItems()) return null;
+            const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+            if (!item) return null;
+            const oldValue = (item[fieldMeta.itemKey] && item[fieldMeta.itemKey] !== 'None') ? item[fieldMeta.itemKey] : '';
+            return { type: 'edit_field', field: reply.field, elId: fieldMeta.elId, label: fieldMeta.label, oldValue, newValue: reply.value ?? '', summary: `Change ${fieldMeta.label} on "${item['itemname(english)'] || currentItemBTK}"` };
+        }
+        return null;
+    }
+
+    function aiRenderActionCard(action) {
+        const card = document.createElement('div');
+        card.className = 'ai-action-card';
+        const diffHtml = action.type === 'edit_field'
+            ? `<div class="ai-action-diff">"${escapeHtml(action.oldValue || '(empty)')}" → "${escapeHtml(action.newValue || '(empty)')}"</div>`
+            : '';
+        card.innerHTML = `
+            <div class="ai-action-title">${escapeHtml(action.summary)}</div>
+            ${diffHtml}
+            <div class="ai-action-buttons">
+                <button class="secondary" onclick="aiCancelAction()">Cancel</button>
+                <button onclick="aiConfirmAction()">We'll do this ✓</button>
+            </div>`;
+        document.getElementById('ai-panel-messages').appendChild(card);
+        card.scrollIntoView({ block: 'end' });
+        if (action.type === 'edit_field') {
+            if (!quickEditMode) enterQuickEdit();
+            const el = document.getElementById(action.elId);
+            if (el) {
+                el.value = action.newValue;
+                el.classList.add('ai-highlight-pulse');
+                el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
+        }
+    }
+
+    function aiCancelAction() {
+        const action = aiPendingAction;
+        aiPendingAction = null;
+        aiRemoveLastActionCard();
+        if (action && action.type === 'edit_field') {
+            const el = document.getElementById(action.elId);
+            if (el) { el.value = action.oldValue; el.classList.remove('ai-highlight-pulse'); }
+        }
+        aiAppendMessage('system', 'Cancelled.');
+    }
+
+    async function aiConfirmAction() {
+        const action = aiPendingAction;
+        if (!action) return;
+        aiPendingAction = null;
+        aiRemoveLastActionCard();
+        try {
+            if (action.type === 'search_item') {
+                openItem(action.btk, { type: 'global' });
+                aiAppendMessage('assistant', `Opened ${action.name || action.btk}.`);
+            } else if (action.type === 'pack_kit') {
+                aiStartPackOrderFromKit(action);
+                aiAppendMessage('assistant', `Started a Pack Order from "${action.kitName}".`);
+            } else if (action.type === 'edit_field') {
+                const el = document.getElementById(action.elId);
+                if (el) { el.value = action.newValue; el.classList.remove('ai-highlight-pulse'); }
+                await saveQuickEdit();
+                aiAppendMessage('assistant', `Updated ${action.label}.`);
+            }
+        } catch (e) {
+            aiAppendMessage('assistant', "That didn't work: " + e.message);
+        }
+    }
+
+    // Mirrors addSelectionToPackOrder's push logic directly against the kit's own recipe
+    // quantities, without routing through the selectedItems/selectedItemsQty selection state.
+    function aiStartPackOrderFromKit(action) {
+        const kit = globalKits.find(k => k.kitnumber === action.kitnumber && k.name === action.kitName);
+        if (!kit) { showToast('Kit not found', 'error'); return; }
+        Object.keys(kit.items || {}).forEach(btk => {
+            const qty = kit.items[btk];
+            if (!qty || qty <= 0) return;
+            const existing = packOrder.find(o => o.btk === btk);
+            if (existing) existing.qty = qty;
+            else packOrder.push({ btk, qty, packed: false });
+        });
+        updatePackOrderBadge();
+        openPackOrderView();
+    }
+
+    // Bounded per the app's own policy: webSearch() fetches exactly one DuckDuckGo results page (no
+    // pagination), and only the single top result's page is fetched here — no recursive crawling.
+    async function aiHandleWebSearch(query) {
+        if (!query || !query.trim()) { aiAppendMessage('assistant', "What should I search for?"); return; }
+        const thinking = aiAppendMessage('system', `Searching the web for "${query}"…`);
+        try {
+            const results = await window.duckySearch(query, { limit: 3 });
+            if (!results.length) { thinking.remove(); aiAppendMessage('assistant', "No results found."); return; }
+            const top = results[0];
+            let pageText = '';
+            try { pageText = await window.crawly(top.url, { maxChars: 3000 }); } catch (e) { /* fall back to the search snippet */ }
+            const answer = await window.aiGroq.chat({
+                model: window.GROQ_MODELS.TEXT,
+                reasoningEffort: 'low',
+                messages: [
+                    { role: 'system', content: 'Answer the user briefly (2-4 sentences) using only the page content given.' },
+                    { role: 'user', content: `Question: ${query}\n\nSource: ${top.url}\n${pageText || top.snippet}` },
+                ],
+            });
+            thinking.remove();
+            aiAppendMessage('assistant', `${answer}\n\nSource: ${top.url}`);
+        } catch (e) {
+            thinking.remove();
+            aiAppendMessage('assistant', "Web search failed: " + e.message);
+        }
+    }
+
+    async function aiTranscribeAudio(blob) {
+        const accessToken = await getSupabaseAccessToken();
+        if (!accessToken) throw new Error('Sign in first.');
+        const endpoint = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/groq-proxy`;
+        const form = new FormData();
+        form.append('file', blob, 'speech.webm');
+        form.append('model', 'whisper-large-v3-turbo');
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': SUPABASE_ANON_KEY },
+            body: form,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+        return data.text || '';
+    }
+
+    async function aiChatToggleRecording() {
+        if (aiIsRecording) { if (aiMediaRecorder && aiMediaRecorder.state !== 'inactive') aiMediaRecorder.stop(); return; }
+        if (!navigator.mediaDevices || !window.MediaRecorder) { showToast("Voice input isn't supported in this browser.", "error"); return; }
+        let stream;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (e) {
+            showToast("Microphone access denied.", "error");
+            return;
+        }
+        aiRecordedChunks = [];
+        aiMediaRecorder = new MediaRecorder(stream);
+        aiMediaRecorder.ondataavailable = e => { if (e.data.size > 0) aiRecordedChunks.push(e.data); };
+        aiMediaRecorder.onstop = async () => {
+            stream.getTracks().forEach(t => t.stop());
+            document.getElementById('ai-chat-mic-btn').classList.remove('recording');
+            aiIsRecording = false;
+            const blob = new Blob(aiRecordedChunks, { type: aiMediaRecorder.mimeType || 'audio/webm' });
+            if (blob.size < 500) return; // too short to be real speech
+            const thinking = aiAppendMessage('system', 'Transcribing…');
+            try {
+                const text = await aiTranscribeAudio(blob);
+                thinking.remove();
+                if (text && text.trim()) await aiHandleUtterance(text.trim());
+                else aiAppendMessage('system', "Didn't catch that — try again?");
+            } catch (e) {
+                thinking.remove();
+                aiAppendMessage('assistant', "Transcription failed: " + e.message);
+            }
+        };
+        aiMediaRecorder.start();
+        aiIsRecording = true;
+        document.getElementById('ai-chat-mic-btn').classList.add('recording');
+    }
+
+    // ── Settings → AI Assistant key management ──
+    async function refreshAiKeySettingsUI() {
+        const textEl = document.getElementById('ai-key-status-text');
+        if (!textEl) return;
+        if (!sb) { textEl.textContent = "Unavailable — this app isn't connected to Supabase."; return; }
+        textEl.textContent = "Checking…";
+        await aiRefreshKeyStatus();
+        if (aiHasApiKey) {
+            let msg = "A Groq API key is configured and shared by everyone using this app.";
+            if (currentUserRole === 'admin') {
+                try {
+                    const { data: count } = await sb.rpc('count_llm_api_keys');
+                    msg += ` (${count ?? '?'} key${count === 1 ? '' : 's'} on file, including backups.)`;
+                } catch (e) { /* count is a nice-to-have, not required */ }
+            }
+            textEl.textContent = msg;
+        } else {
+            textEl.textContent = "No key configured yet — the AI Assistant won't work until one is added below.";
+        }
+    }
+
+    async function submitAiApiKey() {
+        if (!requireAuth()) return;
+        if (!sb) { showToast("This app isn't connected to Supabase.", "error"); return; }
+        const input = document.getElementById('ai-key-input');
+        const key = input.value.trim();
+        if (!key) { showToast("Enter a key first.", "warning"); return; }
+        try {
+            const { data: userData } = await sb.auth.getUser();
+            const { error } = await sb.from('llm_api_keys').insert({ provider: 'groq', api_key: key, added_by: userData?.user?.id || null });
+            if (error) throw error;
+            input.value = '';
+            showToast("Key added.", "success");
+            await refreshAiKeySettingsUI();
+        } catch (e) {
+            showToast("Couldn't add key: " + e.message, "error");
+        }
+    }
 </script>
 
-<!-- Bridges modules/perspective-warp.js (an ES module, `export`/`import`) into the classic
-     script above, which can't use `import` directly — everything else in this app is deliberately
-     one big classic script so every top-level `function` stays reachable from inline onclick=""
-     handlers via the global object, which an ES module would not do. -->
+<!-- Bridges ES modules (`export`/`import`) into the classic script above, which can't use
+     `import` directly — everything else in this app is deliberately one big classic script so
+     every top-level `function` stays reachable from inline onclick="" handlers via the global
+     object, which an ES module would not do. -->
 <script type="module">
     import * as PerspectiveWarp from './modules/perspective-warp.js';
     window.PerspectiveWarp = PerspectiveWarp;
+
+    import { createGroqClient, GROQ_MODELS } from './modules/groq-client.js';
+    import { configureCorsProxy } from './modules/cors-proxy.js';
+    import { webSearch, fetchPageText } from './modules/web-search.js';
+    window.GROQ_MODELS = GROQ_MODELS;
+    window.aiGroq = createGroqClient({
+        supabaseUrl: window.SUPABASE_URL,
+        supabaseAnonKey: window.SUPABASE_ANON_KEY,
+        getAccessToken: window.getSupabaseAccessToken,
+    });
+    configureCorsProxy({
+        supabaseUrl: window.SUPABASE_URL,
+        supabaseAnonKey: window.SUPABASE_ANON_KEY,
+        getAccessToken: window.getSupabaseAccessToken,
+    });
+    window.duckySearch = webSearch;
+    window.crawly = fetchPageText;
 </script>
 </body>
 </html>

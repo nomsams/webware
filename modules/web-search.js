@@ -6,8 +6,12 @@
 // itself takes explicit URLs, not a search query, and only does the Readability-based page
 // cleanup step (mirrored here in fetchPageText/extractWithReadability).
 //
-// STATUS: standalone, not wired into index.html yet. Depends on modules/cors-proxy.js for the
-// actual network calls (DuckDuckGo doesn't send CORS headers for direct browser fetches).
+// STATUS: wired into index.html as window.duckySearch (webSearch) / window.crawly
+// (fetchPageText), backing the AI Assistant's web-search action — see the AI ASSISTANT section of
+// the classic script. Both calls are deliberately bounded to a single page each (one DuckDuckGo
+// results page, one fetched target page, no pagination or recursive crawling) per the app's own
+// policy for this feature. Depends on modules/cors-proxy.js for the actual network calls
+// (DuckDuckGo doesn't send CORS headers for direct browser fetches).
 //
 // Optional progressive enhancement: if a `Readability` global is present (load
 // https://cdn.jsdelivr.net/npm/@mozilla/readability/Readability.js via a <script> tag, same as

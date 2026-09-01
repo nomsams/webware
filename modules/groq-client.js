@@ -2,9 +2,11 @@
 // Function (supabase/functions/groq-proxy) — the GROQ_API_KEY secret lives only in Supabase's
 // function secrets and never reaches the browser.
 //
-// STATUS: standalone, not wired into index.html yet. Requires groq-proxy to be deployed
-// (`supabase functions deploy groq-proxy`) with GROQ_API_KEY set
-// (`supabase secrets set GROQ_API_KEY=gsk_...`) before it will actually work.
+// STATUS: wired into index.html (bridged via the <script type="module"> block near the end of
+// the page, as window.aiGroq — see the AI ASSISTANT section of the classic script). Requires
+// groq-proxy to be deployed (`supabase functions deploy groq-proxy`) and at least one Groq key
+// added via Settings → AI Assistant (stored in the llm_api_keys table, not a function secret —
+// see supabase/schema_llm_assistant.sql) before it will actually work.
 //
 // Usage:
 //   import { createGroqClient, GROQ_MODELS } from './groq-client.js';

@@ -2,9 +2,11 @@
 
 Standalone JS building blocks for functionality discussed for the app. Most of these aren't
 imported by `index.html` yet — nothing changes until a module is deliberately wired in — except
-**`perspective-warp.js`**, which actually is (via a small `<script type="module">` bridge near the
-end of `index.html`, since the rest of the app is one classic script). Each file has a `STATUS:`
-header comment saying which. Run all tests with:
+**`perspective-warp.js`**, **`groq-client.js`**, **`cors-proxy.js`**, and **`web-search.js`**,
+which are (via the `<script type="module">` bridge near the end of `index.html`, since the rest of
+the app is one classic script) — they back the 🤖 AI Assistant chat bubble (see the README's
+Features list). `order-parser.js`, `img-square.js`, `contacts.js`, and `email-sender.js` remain
+unwired. Each file has a `STATUS:` header comment saying which. Run all tests with:
 
 ```bash
 node --test modules/tests/*.test.js
@@ -13,16 +15,23 @@ node --test modules/tests/*.test.js
 ## What's here
 
 - **`groq-client.js`** + **`../supabase/functions/groq-proxy/index.ts`** — chat with Groq-hosted
-  models (model + reasoning-effort selectable, streaming supported), with the API key held
-  server-side in a Supabase Edge Function's secrets rather than in the browser. Deploy the
-  function and `supabase secrets set GROQ_API_KEY=...` before this does anything real.
+  models (model + reasoning-effort selectable, streaming supported) and Whisper audio
+  transcription, with the API key held server-side — not in the browser, and not even in the Edge
+  Function's own secrets, but in the `llm_api_keys` table (`supabase/schema_llm_assistant.sql`),
+  shared across every app user with optional backup keys the function falls through to on a rate
+  limit. RLS has no `select` policy on that table at all, so no client can ever read a key back.
+  Deploy the function (`supabase functions deploy groq-proxy` — no secrets to set) and add at least
+  one key from Settings → AI Assistant before this does anything real. Backs the 🤖 AI Assistant
+  chat bubble's classification/reply calls and voice transcription.
 - **`cors-proxy.js`** + **`../supabase/functions/cors-proxy/index.ts`** — CORS-proxy fetch client,
-  used by `web-search.js`. Defaults to webware's own `cors-proxy` Edge Function once configured
-  (deploy it, then call `configureCorsProxy(...)`), falling back to public proxies and finally a
+  used by `web-search.js`. Configured once from the module bridge in `index.html`, so it calls
+  webware's own `cors-proxy` Edge Function first, falling back to public proxies and finally a
   direct fetch. See the `chikibriki` note below.
 - **`web-search.js`** — DuckDuckGo search + page-text extraction, ported from
   `github.com/nomsams/timeline` (the search) with a cleanup approach mirroring
-  `github.com/nomsams/crawly` (the text extraction). Depends on `cors-proxy.js`.
+  `github.com/nomsams/crawly` (the text extraction). Depends on `cors-proxy.js`. Backs the AI
+  Assistant's web-search action, as `window.duckySearch`/`window.crawly` — bounded to one search
+  page and one page fetch each, no pagination or recursive crawling.
 - **`order-parser.js`** — the actual feature behind "a box where we can write or paste something
   like 'plocka item 1 and item 2...'": turns free text into a structured
   `{ items, recipient, from }` pack-order draft via `groq-client.js`. Each item reference is
@@ -80,9 +89,11 @@ node --test modules/tests/*.test.js
 `index.html` is served as-is from GitHub Pages — anything written into it, including an API key,
 is visible to anyone who views page source. That's why none of `groq-client.js`, `cors-proxy.js`,
 or `email-sender.js` hold a real credential themselves: each calls a Supabase Edge Function that
-holds the actual secret (`GROQ_API_KEY`, `SMTP_PASSWORD`, etc.) server-side and only accepts
-requests from signed-in app users. Prefer this shape for any future proxy/key this app adds over
-a client-embedded one.
+holds the actual secret server-side and only accepts requests from signed-in app users. `groq-proxy`
+reads its key(s) from the `llm_api_keys` table via the function's service-role credentials (see
+above) rather than a function secret; `send-email` still uses a function secret (`SMTP_PASSWORD`,
+etc.) — either shape keeps the credential off the client, which is the part that actually matters.
+Prefer one of these over a client-embedded key for any future proxy this app adds.
 
 `cors-proxy.js`'s `chikibriki` default is a different case, worth understanding separately: crawly
 and timeline (two of the reference repos this was ported from) hardcode a fallback proxy key,
