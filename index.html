@@ -500,6 +500,18 @@
     </div>
 </div>
 
+<!-- Activity Log Modal (admin only, Supabase mode only — "who did this" needs a real account) -->
+<div class="modal-overlay" id="activity-log-modal" onclick="handleActivityLogModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:680px;">
+        <h3>📜 Activity Log</h3>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">Most recent 100 changes in this warehouse. Reverting restores the item to how it was right before that entry — including bringing back a deleted item — and the revert itself is logged too.</p>
+        <div id="activity-log-list-container" style="max-height:55vh; overflow-y:auto;">Loading…</div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeActivityLogModal()">Close</button>
+        </div>
+    </div>
+</div>
+
 <!-- Manufacturer Edit Modal -->
 <div class="modal-overlay" id="manufacturer-edit-modal" onclick="handleManufacturerModalOverlayClick(event)">
     <div class="modal-box">
@@ -1162,6 +1174,7 @@
 
         <button class="secondary full-width hidden" id="btn-manage-users" onclick="openManageUsersModal()" style="margin-bottom:1rem;">👥 Manage Users</button>
         <button class="secondary full-width hidden" id="btn-manage-warehouses" onclick="openManageWarehousesModal()" style="margin-bottom:1rem;">🏬 Manage Warehouses</button>
+        <button class="secondary full-width hidden" id="btn-activity-log" onclick="openActivityLogModal()" style="margin-bottom:1rem;">📜 Activity Log</button>
 
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>
         <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
@@ -1806,6 +1819,65 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         closeAddWarehouseForm();
         renderManageWarehousesList();
         renderWarehouseMeta();
+    }
+
+    // ── Activity Log (admin only) — read-only display + revert, both gated server-side too
+    // (RLS on select, revert_activity_log_entry() checks admin itself) so this UI gate is
+    // convenience, not the actual security boundary.
+    function openActivityLogModal() {
+        if (currentUserRole !== 'admin') { showToast("Admin only.", "warning"); return; }
+        document.getElementById('activity-log-modal').classList.add('open');
+        renderActivityLogList();
+    }
+    function closeActivityLogModal() { document.getElementById('activity-log-modal').classList.remove('open'); }
+    function handleActivityLogModalOverlayClick(e) { if (e.target === document.getElementById('activity-log-modal')) closeActivityLogModal(); }
+
+    async function renderActivityLogList() {
+        const container = document.getElementById('activity-log-list-container');
+        container.innerHTML = 'Loading…';
+        const { data, error } = await sb.from('activity_log')
+            .select('*')
+            .eq('warehouse_id', currentWarehouseId)
+            .order('created_at', { ascending: false })
+            .limit(100);
+        if (error) { container.innerHTML = `<p style="color:var(--danger);">Could not load activity log: ${escapeHtml(error.message)}</p>`; return; }
+        if (!data || !data.length) { container.innerHTML = `<p style="color:var(--text-muted);">No activity yet.</p>`; return; }
+
+        const userIds = Array.from(new Set(data.map(e => e.user_id).filter(Boolean)));
+        const names = {};
+        await Promise.all(userIds.map(async id => { names[id] = await resolveDisplayName(id); }));
+
+        const actionIcon = { create: '➕', update: '✏️', delete: '🗑️', revert: '↩️' };
+        container.innerHTML = data.map(entry => {
+            const who = entry.user_id ? (names[entry.user_id] || 'Someone') : 'System';
+            const when = new Date(entry.created_at).toLocaleString();
+            const revertable = !entry.reverted_at;
+            return `<div style="padding:10px 0; border-bottom:1px solid var(--border);">
+                <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start; flex-wrap:wrap;">
+                    <div>
+                        <div>${actionIcon[entry.action] || '•'} ${escapeHtml(entry.summary)}</div>
+                        <div style="color:var(--text-muted); font-size:0.78rem; margin-top:2px;">${escapeHtml(who)} · ${when}${entry.reverted_at ? ' · <span style="color:var(--danger);">Reverted</span>' : ''}</div>
+                    </div>
+                    ${revertable ? `<button class="secondary" onclick="confirmRevertActivityLog(${entry.id})" style="padding:4px 10px; min-height:auto; font-size:0.78rem; flex-shrink:0;">↩️ Revert</button>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function confirmRevertActivityLog(logId) {
+        showConfirmModal({
+            title: 'Revert this change?',
+            body: "This restores the item to how it was right before this entry — including bringing back a deleted item, or undoing an update. The revert itself is logged too, and can be undone the same way.",
+            confirmLabel: '↩️ Revert',
+            onConfirm: () => revertActivityLog(logId)
+        });
+    }
+    async function revertActivityLog(logId) {
+        const { error } = await sb.rpc('revert_activity_log_entry', { p_log_id: logId });
+        if (error) return showToast("Could not revert: " + error.message, "error");
+        showToast("Reverted.", "success");
+        await supabaseLoadList(currentWarehouseId);
+        renderActivityLogList();
     }
 
     // "Last updated by" — resolves via get_display_name() (their own chosen name, or their
@@ -5144,12 +5216,19 @@ th { background: #eee; }
         if (!item || !canEditItems()) return;
         const current = parseInt(item.Numberofitems, 10) || 0;
         const next = Math.max(0, current + delta);
-        item.Numberofitems = String(next);
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            // Full row snapshot, not just the changed column — revert_activity_log_entry() restores
+            // every column from before_data when undoing an 'update', so a partial snapshot would
+            // null out everything else on this item if this particular change ever got reverted.
+            const beforeRow = await itemToSupabaseRow(item);
             const { error } = await sb.from('items').update({ numberofitems: next }).eq('btk', currentItemBTK);
-            if (error) { item.Numberofitems = String(current); showToast("Could not update stock: " + error.message, "error"); return; }
+            if (error) { showToast("Could not update stock: " + error.message, "error"); return; }
+            item.Numberofitems = String(next);
+            const afterRow = { ...beforeRow, numberofitems: next };
+            logActivity('update', currentItemBTK, beforeRow, afterRow, summarizeItemChange('update', currentItemBTK, beforeRow, afterRow));
         } else {
+            item.Numberofitems = String(next);
             saveDraft(currentWarehouseId);
         }
         renderItemFields(item, currentItemBTK);
@@ -5268,7 +5347,11 @@ th { background: #eee; }
         const fields = readQuickEditFields();
         if (!fields['itemname(english)']) { showToast("English name is required.", "error"); return; }
         const btk = currentItemBTK;
-        const existingImages = (globalInventory.find(i => i.BTKnumber === btk) || {}).images || '';
+        const existingItem = globalInventory.find(i => i.BTKnumber === btk) || {};
+        // Quick Edit's own fields never included the photo (it's managed separately, via the Add/
+        // Take Picture buttons) — carrying imageFullUrl/imageThumbUrl over explicitly, since this
+        // function patches globalInventory by hand instead of reloading from Supabase afterward,
+        // and a plain object replace would otherwise silently drop them from the item view.
         const updated = {
             Manufacturer: fields.Manufacturer || 'None',
             BTKnumber: btk,
@@ -5282,10 +5365,13 @@ th { background: #eee; }
             MapPosition: fields.MapPosition || 'None',
             LocationCode: fields.LocationCode || 'None',
             Comments: fields.Comments || 'None',
-            images: existingImages
+            images: existingItem.images || '',
+            imageFullUrl: existingItem.imageFullUrl,
+            imageThumbUrl: existingItem.imageThumbUrl
         };
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const beforeRow = await itemToSupabaseRow(globalInventory.find(i => i.BTKnumber === btk) || {});
             const mfr = await resolveManufacturer(updated.Manufacturer);
             updated.Manufacturer = mfr.name;
             updated.manufacturerId = mfr.id;
@@ -5302,6 +5388,7 @@ th { background: #eee; }
             const idx = globalInventory.findIndex(i => i.BTKnumber === btk);
             if (idx >= 0) globalInventory[idx] = updated;
             showToast("Saved to Supabase.", "success");
+            logActivity('update', btk, beforeRow, row, summarizeItemChange('update', btk, beforeRow, row));
         } else {
             const idx = globalInventory.findIndex(i => i.BTKnumber === btk);
             if (idx >= 0) globalInventory[idx] = updated;
@@ -5825,6 +5912,7 @@ th { background: #eee; }
         editTargetBTK = null;
         document.getElementById('modal-title').innerText = '➕ Add New Item';
         document.getElementById('modal-notice').style.display = 'block';
+        document.getElementById('ai-btknumber').readOnly = false;
         ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-location','ai-mapposition','ai-locationcode','ai-comments']
             .forEach(id => { document.getElementById(id).value = ''; });
         populateLocationCodePicker('ai', '');
@@ -5842,6 +5930,11 @@ th { background: #eee; }
         document.getElementById('modal-notice').style.display = 'none';
         document.getElementById('ai-manufacturer').value = item.Manufacturer === 'None' ? '' : item.Manufacturer;
         document.getElementById('ai-btknumber').value = item.BTKnumber;
+        // Renaming a BTK isn't safe to do here for a Supabase-mode item — it's the primary key, and
+        // kit_items.btk has no ON UPDATE CASCADE, so a rename needs the same kit-reference remapping
+        // runMerge() does for a delete, which this form doesn't do. Read-only rather than silently
+        // ignoring whatever gets typed here (which is what happened before this was caught).
+        document.getElementById('ai-btknumber').readOnly = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
         document.getElementById('ai-itemnumber').value = item.itemnumber === 'None' ? '' : item.itemnumber;
         document.getElementById('ai-name-en').value = item['itemname(english)'] === 'Unnamed' ? '' : item['itemname(english)'];
         document.getElementById('ai-name-sv').value = item['itemname(swedish)'] === 'None' ? '' : item['itemname(swedish)'];
@@ -5937,6 +6030,7 @@ th { background: #eee; }
             };
             const { error } = await sb.from('items').insert({ ...row, btk: newBTK, warehouse_id: currentWarehouseId, images: '' });
             if (error) return showToast("Could not duplicate: " + error.message, "error");
+            logActivity('create', newBTK, null, row, `Duplicated ${currentItemBTK} as ${summarizeItemChange('create', newBTK, null, row)}`);
             await supabaseLoadList(currentWarehouseId);
             showToast(`Duplicated as ${newBTK}.`, "success");
             openItem(newBTK, { type: 'global' });
@@ -5965,8 +6059,16 @@ th { background: #eee; }
     }
     async function removeItems(ids) {
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            // Snapshot before the delete — globalInventory still holds these rows at this point,
+            // and a 'delete' log entry's before_data is what revert_activity_log_entry() re-inserts
+            // from if this gets undone later.
+            const beforeItems = ids.map(id => globalInventory.find(i => i.BTKnumber === id)).filter(Boolean);
+            const beforeRows = await Promise.all(beforeItems.map(itemToSupabaseRow));
             const { error } = await sb.from('items').delete().in('btk', ids);
             if (error) return showToast("Could not delete: " + error.message, "error");
+            beforeItems.forEach((item, idx) => {
+                logActivity('delete', item.BTKnumber, beforeRows[idx], null, summarizeItemChange('delete', item.BTKnumber, beforeRows[idx], null));
+            });
             // kit_items.btk has an ON DELETE CASCADE FK to items.btk, so the DB already dropped any
             // kit reference to these BTKs the instant the row above was deleted — this just keeps
             // the in-memory globalKits (which isn't reloaded by supabaseLoadList) in sync with that.
@@ -6252,6 +6354,8 @@ th { background: #eee; }
                 location_code: mergedItem.LocationCode === 'None' ? null : mergedItem.LocationCode,
                 comments: mergedComments || null
             };
+            const survivorBeforeRow = await itemToSupabaseRow(survivor);
+            const loserBeforeRows = await Promise.all(losers.map(itemToSupabaseRow));
             const { error: updateError } = await sb.from('items').update(row).eq('btk', survivorBTK);
             if (updateError) return showToast("Merge failed while saving the survivor: " + updateError.message, "error");
             // Must happen before the delete below — kit_items.btk cascades on items.btk delete, so
@@ -6260,6 +6364,10 @@ th { background: #eee; }
             remapKitItemsInMemory(loserBTKs, survivorBTK);
             const { error: deleteError } = await sb.from('items').delete().in('btk', loserBTKs);
             if (deleteError) return showToast("Survivor saved, but couldn't delete the rest: " + deleteError.message, "error");
+            logActivity('update', survivorBTK, survivorBeforeRow, row, `Merged ${losers.length} item(s) into ${summarizeItemChange('update', survivorBTK, survivorBeforeRow, row)}`);
+            losers.forEach((loser, idx) => {
+                logActivity('delete', loser.BTKnumber, loserBeforeRows[idx], null, `Merged away (into ${survivorBTK}): ${loser['itemname(english)'] || loser.BTKnumber}`);
+            });
             clearSelection();
             await supabaseLoadList(currentWarehouseId);
             showToast(`Merged into ${survivorBTK}.` + (kitsTouched ? ` Updated ${kitsTouched} kit(s) that referenced the merged item(s).` : ''), "success");
@@ -6374,6 +6482,38 @@ th { background: #eee; }
         };
     }
 
+    // ── ACTIVITY LOG (Supabase mode only — "who did this" needs a real account, which static
+    // warehouses 2/3 don't have) ────────────────────────────────────────────
+    // Never awaited by a caller's own success path — a logging failure shouldn't roll back or
+    // block the actual mutation, just gets console-logged. before/after are full Supabase row
+    // objects (see itemToSupabaseRow) so revert_activity_log_entry() can restore one directly.
+    async function logActivity(action, btk, beforeRow, afterRow, summary) {
+        if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') return;
+        const { data: { user } } = await sb.auth.getUser();
+        const { error } = await sb.from('activity_log').insert({
+            warehouse_id: currentWarehouseId, user_id: user ? user.id : null, action,
+            entity_type: 'item', entity_id: btk, before_data: beforeRow || null, after_data: afterRow || null,
+            summary
+        });
+        if (error) console.error("Could not log activity:", error);
+    }
+
+    // Short "field: old -> new" diff for an update's log summary — only the fields most likely to
+    // matter at a glance, not every column (Comments/images especially would be unreadable inline).
+    function summarizeItemChange(action, btk, beforeRow, afterRow) {
+        const name = (afterRow && afterRow.itemname_en) || (beforeRow && beforeRow.itemname_en) || btk;
+        if (action === 'create') return `Added ${name} (${btk})`;
+        if (action === 'delete') return `Removed ${name} (${btk})`;
+        const fields = [
+            ['manufacturer', 'Manufacturer'], ['itemname_en', 'Name'], ['numberofitems', 'Qty'],
+            ['location_code', 'Location'], ['itemnumber', 'Item #1']
+        ];
+        const diffs = fields
+            .filter(([key]) => String((beforeRow || {})[key] ?? '') !== String((afterRow || {})[key] ?? ''))
+            .map(([key, label]) => `${label}: ${(beforeRow || {})[key] ?? '—'} → ${(afterRow || {})[key] ?? '—'}`);
+        return `Updated ${name} (${btk})` + (diffs.length ? ' — ' + diffs.join(', ') : '');
+    }
+
     async function commitCSVImport() {
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
         let writeErrors = 0;
@@ -6382,12 +6522,16 @@ th { background: #eee; }
             for (const item of csvImportResolvedItems) {
                 const row = await itemToSupabaseRow(item);
                 const { error } = await sb.from('items').update(row).eq('btk', item.BTKnumber);
-                if (error) { writeErrors++; console.error(`Could not update ${item.BTKnumber}:`, error); }
+                if (error) { writeErrors++; console.error(`Could not update ${item.BTKnumber}:`, error); continue; }
+                const queueEntry = csvImportQueue.find(q => q.existing.BTKnumber === item.BTKnumber);
+                const beforeRow = queueEntry ? await itemToSupabaseRow(queueEntry.existing) : null;
+                logActivity('update', item.BTKnumber, beforeRow, row, `CSV import: ${summarizeItemChange('update', item.BTKnumber, beforeRow, row)}`);
             }
             for (const item of csvImportPendingNew) {
                 const row = await itemToSupabaseRow(item);
                 const { error } = await sb.from('items').insert({ ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: '' });
-                if (error) { writeErrors++; console.error(`Could not add ${item.BTKnumber}:`, error); }
+                if (error) { writeErrors++; console.error(`Could not add ${item.BTKnumber}:`, error); continue; }
+                logActivity('create', item.BTKnumber, null, row, `CSV import: ${summarizeItemChange('create', item.BTKnumber, null, row)}`);
             }
             clearSelection();
             document.getElementById('search-box').value = '';
@@ -6461,19 +6605,31 @@ th { background: #eee; }
                 location_code: newItem.LocationCode === 'None' ? null : newItem.LocationCode, comments: newItem.Comments
             };
             const wasEdit = modalMode === 'edit';
+            // Snapshot the pre-edit row for the activity log BEFORE issuing the write — globalInventory
+            // still holds the old state at this point (submitItemForm builds `row` from form inputs,
+            // it never mutates globalInventory itself until the reload below).
+            const beforeRow = wasEdit ? await itemToSupabaseRow(globalInventory.find(i => i.BTKnumber === editTargetBTK) || {}) : null;
             const req = wasEdit
                 ? sb.from('items').update(row).eq('btk', editTargetBTK)
                 : sb.from('items').insert({ ...row, btk, warehouse_id: currentWarehouseId, images: '' });
+            // The row payload never includes `btk` (it's the primary key, and kit_items.btk has no
+            // ON UPDATE CASCADE — renaming it here without the same kit-reference remapping
+            // runMerge() does would either fail outright or silently orphan kit references). The
+            // BTK field is read-only for a Supabase-mode edit (see openEditItemModal) so `btk` and
+            // `editTargetBTK` are always the same value on this path regardless — using
+            // editTargetBTK (the row actually written) rather than the disconnected form value.
+            const entityId = wasEdit ? editTargetBTK : btk;
             req.then(async ({ error }) => {
                 if (error) return showToast("Save blocked: " + error.message, "error");
                 closeAddItemModal();
                 showToast("Saved to Supabase.", "success");
+                logActivity(wasEdit ? 'update' : 'create', entityId, beforeRow, row, summarizeItemChange(wasEdit ? 'update' : 'create', entityId, beforeRow, row));
                 // Reload data without the full-list view switch supabaseLoadList() would force —
                 // editing used to always dump you back on the item list even if you opened Edit
                 // from the item's own page. Adding a new item still lands on the list (there's no
                 // item page to return to yet); editing returns to that same item, refreshed.
                 try { await supabaseFetchData(currentWarehouseId); } catch (e) { return; }
-                if (wasEdit) openItem(btk, navigationContext); else showListView('items');
+                if (wasEdit) openItem(entityId, navigationContext); else showListView('items');
             });
             return;
         }
@@ -6796,6 +6952,7 @@ ${css}
         const isAdmin = currentUserRole === 'admin';
         document.getElementById('btn-manage-users').classList.toggle('hidden', !(isSupa && isAdmin));
         document.getElementById('btn-manage-warehouses').classList.toggle('hidden', !(isSupa && isAdmin));
+        document.getElementById('btn-activity-log').classList.toggle('hidden', !(isSupa && isAdmin));
         document.getElementById('display-name-row').classList.toggle('hidden', !isSupa);
         // Storage/database usage stats are admin-only — editors/maintainers/viewers don't need
         // (or, per the requested role model, shouldn't see) account-wide quota info.
