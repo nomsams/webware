@@ -403,6 +403,7 @@
             transition: transform 0.15s;
         }
         #ai-fab:hover { transform: scale(1.06); }
+        .ai-fab-badge { position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--danger); border: 2px solid var(--card-bg); }
         #ai-panel {
             position: fixed; bottom: 88px; right: 20px; width: 360px; max-width: calc(100vw - 2rem);
             max-height: min(70vh, 640px); background: var(--card-bg); border: 1px solid var(--border);
@@ -422,8 +423,12 @@
         .ai-action-card .ai-action-diff { background: rgba(127,127,127,0.14); border-radius: 8px; padding: 0.4rem 0.5rem; margin: 0.35rem 0; font-size: 0.82rem; word-break: break-word; }
         .ai-action-card .ai-action-buttons { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
         .ai-action-card button { flex: 1; min-height: 34px; padding: 0.4rem 0.6rem; font-size: 0.82rem; border-radius: 8px; }
+        .ai-action-card.low-confidence { border-color: #f59e0b; }
         .ai-highlight-pulse { animation: aiPulse 1.4s ease-in-out 2; }
         @keyframes aiPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.55); } 50% { box-shadow: 0 0 0 6px rgba(99,102,241,0); } }
+        .ai-suggestions { display: flex; flex-wrap: wrap; gap: 6px; align-self: stretch; }
+        .ai-suggestions button { flex: none; background: var(--border); border: none; border-radius: 14px; padding: 0.35rem 0.7rem; font-size: 0.78rem; cursor: pointer; color: var(--text-main); min-height: unset; }
+        #ai-recording-status { padding: 0 0.65rem 0.5rem; font-size: 0.78rem; color: var(--danger); text-align: center; font-weight: 600; }
         .ai-panel-input-row { display: flex; gap: 0.5rem; padding: 0.65rem; border-top: 1px solid var(--border); }
         .ai-panel-input-row input { flex: 1; margin: 0; min-height: 38px; }
         .ai-panel-input-row button { min-height: 38px; min-width: 38px; padding: 0 0.6rem; }
@@ -434,16 +439,18 @@
 
 <div id="toast-container" aria-live="polite"></div>
 
-<button id="ai-fab" onclick="toggleAiAssistant()" aria-label="Open AI Assistant" title="AI Assistant">🤖</button>
+<button id="ai-fab" onclick="toggleAiAssistant()" aria-label="Open AI Assistant" title="AI Assistant">🤖<span id="ai-fab-badge" class="ai-fab-badge hidden"></span></button>
+<script>if (!localStorage.getItem('ai-assistant-seen')) { var _aifb = document.getElementById('ai-fab-badge'); if (_aifb) _aifb.classList.remove('hidden'); }</script>
 <div id="ai-panel" class="hidden">
     <div class="ai-panel-header">
         <span>🤖 Assistant</span>
         <button onclick="toggleAiAssistant()" aria-label="Close AI Assistant">✕</button>
     </div>
     <div class="ai-panel-messages" id="ai-panel-messages"></div>
+    <div id="ai-recording-status" class="hidden">🎙️ Listening… <span id="ai-recording-timer">0:00</span> — tap the mic to stop</div>
     <div class="ai-panel-input-row">
         <button id="ai-chat-mic-btn" onclick="aiChatToggleRecording()" aria-label="Record voice instruction" title="Voice input">🎤</button>
-        <input type="text" id="ai-chat-input" placeholder="Ask or instruct…" onkeydown="if(event.key==='Enter') aiChatSendText()">
+        <input type="text" id="ai-chat-input" placeholder='e.g. "find grease sticks"' onkeydown="if(event.key==='Enter') aiChatSendText()">
         <button onclick="aiChatSendText()" aria-label="Send">➤</button>
     </div>
 </div>
@@ -1244,11 +1251,13 @@
         <div class="setting-row">
             <label>🤖 AI Assistant (Groq API Key)</label>
             <p class="setting-desc" id="ai-key-status-text">Checking…</p>
-            <div style="display:flex; gap:8px; margin-top:0.5rem;">
-                <input type="password" id="ai-key-input" placeholder="gsk_..." style="flex:1; margin:0;" autocomplete="off">
+            <div id="ai-key-list"></div>
+            <div style="display:flex; gap:8px; margin-top:0.5rem; flex-wrap:wrap;">
+                <input type="text" id="ai-key-label" placeholder="Label (e.g. Primary)" style="flex:1; min-width:100px; margin:0;">
+                <input type="password" id="ai-key-input" placeholder="gsk_..." style="flex:2; min-width:140px; margin:0;" autocomplete="off">
                 <button class="secondary" onclick="submitAiApiKey()" style="min-height:auto; padding:0 1rem;">Add Key</button>
             </div>
-            <p class="setting-desc">Stored once, shared by everyone using this app — never shown again after saving. Add a backup key any time; the assistant falls back to it if the first one hits a rate limit.</p>
+            <p class="setting-desc">Stored once, shared by everyone using this app — never shown again after saving. Don't have one? Get a free key at <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>, then paste it above. Add a backup key any time; the assistant falls back to it if the first one hits a rate limit.</p>
         </div>
 
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>
@@ -1339,6 +1348,9 @@
     var aiMediaRecorder = null;
     var aiRecordedChunks = [];
     var aiIsRecording = false;
+    var aiRecordingStartedAt = null;
+    var aiRecordingTimerId = null;
+    var aiKeyListCache = [];
     var packOrder = []; // [{btk, qty, packed}] — session-local pick list, never persisted
     var packOrderPreviousView = 'list-view';
     var packOrderEditMode = false;
@@ -7239,15 +7251,66 @@ ${css}
         const opening = panel.classList.contains('hidden');
         panel.classList.toggle('hidden');
         if (opening) {
+            localStorage.setItem('ai-assistant-seen', '1');
+            document.getElementById('ai-fab-badge')?.classList.add('hidden');
             if (!aiAssistantReady) {
                 aiAssistantReady = true;
                 await aiRefreshKeyStatus();
                 aiAppendMessage('system', aiHasApiKey
-                    ? "Ask me to find an item, start a pack order from a kit, or (with an item open) change one of its fields."
-                    : (sb ? "No Groq API key is configured yet. Add one in Settings → AI Assistant." : "Sign in to a Supabase-connected warehouse first."));
+                    ? "Ask me to find an item, start a pack order from a kit, or (with an item open) change one of its fields. You can type or tap 🎤 to speak."
+                    : aiNoKeyMessage());
+                if (aiHasApiKey) aiRenderSuggestions();
             }
             document.getElementById('ai-chat-input').focus();
         }
+    }
+
+    // Plain-language explanation of why the assistant can't run yet — worded differently for an
+    // admin (who can actually fix it from Settings) vs. everyone else (who needs to ask one).
+    function aiNoKeyMessage() {
+        if (!sb) return "This needs the Supabase-connected warehouse — switch to it first.";
+        if (currentUserRole === 'admin') return "No AI key is set up yet. Add one in Settings → 🤖 AI Assistant.";
+        return "The AI Assistant isn't set up yet — ask an admin to add a key in Settings → AI Assistant.";
+    }
+
+    // Turns a raw JS/network error into something a non-technical user can actually act on,
+    // instead of a stack trace or a bare fetch failure.
+    function aiFriendlyError(e) {
+        const msg = (e && e.message) || String(e || '');
+        if (/failed to fetch|network|NetworkError|ERR_/i.test(msg)) return "I couldn't reach the assistant service — check your internet connection and try again.";
+        if (/not authenticated|sign in/i.test(msg)) return "Please sign in first.";
+        if (/429|rate limit/i.test(msg)) return "The assistant is busy right now — try again in a moment.";
+        if (/no groq api key|no AI key/i.test(msg)) return aiNoKeyMessage();
+        return "Something went wrong on my end — please try again.";
+    }
+
+    // Tappable starter examples shown once the panel first opens with a key configured, so a new
+    // (especially non-technical) user has something to tap instead of facing a blank box. Tapping
+    // one fills the input and places the cursor at the end — it doesn't send on its own, so the
+    // user can finish it in their own words (an item name, a kit name, etc.) before sending.
+    function aiRenderSuggestions() {
+        const chips = [
+            { label: '🔍 Find an item', text: 'find ' },
+            { label: '📦 Pack a kit', text: 'pack the kit for ' },
+        ];
+        if (activeView === 'item-view' && currentItemBTK && canEditItems()) {
+            chips.push({ label: '✏️ Rename this item', text: 'change the item name to ' });
+        }
+        window.__aiSuggestionChips = chips;
+        const wrap = document.createElement('div');
+        wrap.className = 'ai-suggestions';
+        wrap.id = 'ai-suggestions';
+        wrap.innerHTML = chips.map((c, i) => `<button type="button" onclick="aiUseSuggestion(${i})">${escapeHtml(c.label)}</button>`).join('');
+        document.getElementById('ai-panel-messages').appendChild(wrap);
+    }
+
+    function aiUseSuggestion(i) {
+        const chip = (window.__aiSuggestionChips || [])[i];
+        if (!chip) return;
+        const input = document.getElementById('ai-chat-input');
+        input.value = chip.text;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
     }
 
     async function aiRefreshKeyStatus() {
@@ -7311,7 +7374,9 @@ Rules:
 - "pack_kit": user wants to start/pack an order from a kit by name or number (e.g. "pack the kit for HANY IC310").
 - "edit_field": ONLY when clearly asking to change one specific field's value on the item that's currently open (e.g. "change the item name to Grease sticks" -> field "name_en", value "Grease sticks").
 - "web_search": user asks a factual question that needs looking something up on the web.
-- "chat": anything else — answer briefly yourself (or say you can't do that yet) in "reply".
+- "chat": anything else — answer briefly yourself (or say you can't do that yet) in "reply". Keep
+  "reply" short (1-3 sentences) and in plain, non-technical language — the person reading it may
+  not be familiar with software or warehouse-system jargon.
 Respond with ONLY the JSON object, nothing else.`;
 
     function aiBuildContextLine() {
@@ -7320,10 +7385,11 @@ Respond with ONLY the JSON object, nothing else.`;
     }
 
     async function aiHandleUtterance(text) {
+        document.getElementById('ai-suggestions')?.remove();
         aiAppendMessage('user', text);
         if (aiHasApiKey === null) await aiRefreshKeyStatus();
         if (!aiHasApiKey) {
-            aiAppendMessage('system', sb ? "No Groq API key configured. Add one in Settings → AI Assistant first." : "Sign in to a Supabase-connected warehouse first.");
+            aiAppendMessage('system', aiNoKeyMessage());
             return;
         }
         const thinking = aiAppendMessage('system', 'Thinking…');
@@ -7342,18 +7408,32 @@ Respond with ONLY the JSON object, nothing else.`;
             reply = JSON.parse(match[0]);
         } catch (e) {
             thinking.remove();
-            aiAppendMessage('assistant', "Sorry, I couldn't process that: " + e.message);
+            aiAppendMessage('assistant', aiFriendlyError(e));
             return;
         }
         thinking.remove();
 
         if (reply.action === 'web_search') { await aiHandleWebSearch(reply.query); return; }
-        if (reply.action === 'chat' || !reply.action) { aiAppendMessage('assistant', reply.reply || "I'm not sure how to help with that yet."); return; }
+        if (reply.action === 'chat' || !reply.action) { aiAppendMessage('assistant', reply.reply || "I'm not sure how to help with that yet — try asking me to find an item, pack a kit, or (with an item open) change one of its fields."); return; }
 
         const built = aiBuildPendingAction(reply);
-        if (!built) { aiAppendMessage('assistant', "I couldn't find what you're referring to — could you be more specific?"); return; }
+        if (!built) { aiAppendMessage('assistant', aiFallbackReasonMessage(reply)); return; }
         aiPendingAction = built;
         aiRenderActionCard(built);
+    }
+
+    // Explains WHY nothing was matched, rather than a flat "not found" — the specific, actionable
+    // reason (open an item first, no permission, nothing similar enough) is far more useful to
+    // someone who doesn't know the app's internals than a generic failure.
+    function aiFallbackReasonMessage(reply) {
+        if (reply.action === 'edit_field') {
+            if (activeView !== 'item-view' || !currentItemBTK) return "Open an item first, then I can change one of its fields.";
+            if (!canEditItems()) return "You don't have permission to edit items.";
+            if (!AI_FIELD_MAP[reply.field]) return "I don't know how to change that field yet.";
+        }
+        if (reply.action === 'search_item') return "I couldn't find an item matching that — try a different name, number, or manufacturer.";
+        if (reply.action === 'pack_kit') return "I couldn't find a kit matching that — check the kit's name and try again.";
+        return "I couldn't find what you're referring to — could you be more specific?";
     }
 
     function aiWordOverlapScore(a, b) {
@@ -7369,18 +7449,24 @@ Respond with ONLY the JSON object, nothing else.`;
         return overlap / Math.max(aTok.size, bTok.size);
     }
 
+    // Returns { item/kit, confident } for the best match found, or null if nothing at all is
+    // similar (an empty inventory/kit list, or a query sharing no words with anything). "confident"
+    // being false doesn't discard the guess — it's still offered, just phrased as a question
+    // ("Did you mean...?") rather than an assertion, so a fuzzy voice transcription still gets
+    // somewhere useful instead of a dead end.
     function aiFuzzyFindItem(query) {
         if (!query || !query.trim()) return null;
         const q = query.trim().toLowerCase();
         const exactBtk = globalInventory.find(i => i.BTKnumber && i.BTKnumber.toLowerCase() === q);
-        if (exactBtk) return exactBtk;
+        if (exactBtk) return { item: exactBtk, confident: true };
         let best = null, bestScore = 0;
         globalInventory.forEach(item => {
             const fields = [item['itemname(english)'], item['itemname(swedish)'], item.itemnumber, item.itemnumber2, item.itemnumber3, item.Manufacturer, item.BTKnumber];
             const score = Math.max(...fields.map(f => aiWordOverlapScore(q, (f || '').toString())));
             if (score > bestScore) { bestScore = score; best = item; }
         });
-        return bestScore >= 0.35 ? best : null;
+        if (!best || bestScore < 0.15) return null;
+        return { item: best, confident: bestScore >= 0.35 };
     }
 
     function aiFuzzyFindKit(query) {
@@ -7392,20 +7478,30 @@ Respond with ONLY the JSON object, nothing else.`;
             const score = Math.max(...fields.map(f => aiWordOverlapScore(q, (f || '').toString())));
             if (score > bestScore) { bestScore = score; best = kit; }
         });
-        return bestScore >= 0.35 ? best : null;
+        if (!best || bestScore < 0.15) return null;
+        return { kit: best, confident: bestScore >= 0.35 };
     }
 
     function aiBuildPendingAction(reply) {
         if (reply.action === 'search_item') {
             const match = aiFuzzyFindItem(reply.query || '');
             if (!match) return null;
-            return { type: 'search_item', btk: match.BTKnumber, name: match['itemname(english)'], summary: `Open "${match['itemname(english)'] || match.BTKnumber}" (${match.BTKnumber})` };
+            const displayName = match.item['itemname(english)'] || match.item.BTKnumber;
+            return {
+                type: 'search_item', btk: match.item.BTKnumber, name: displayName, lowConfidence: !match.confident,
+                summary: match.confident ? `Open "${displayName}" (${match.item.BTKnumber})` : `Did you mean "${displayName}" (${match.item.BTKnumber})?`,
+            };
         }
         if (reply.action === 'pack_kit') {
-            const kit = aiFuzzyFindKit(reply.query || '');
-            if (!kit) return null;
+            const match = aiFuzzyFindKit(reply.query || '');
+            if (!match) return null;
+            const kit = match.kit;
             const count = Object.keys(kit.items || {}).filter(b => kit.items[b] > 0).length;
-            return { type: 'pack_kit', kitnumber: kit.kitnumber, kitName: kit.name, summary: `Start a Pack Order from kit "${kit.name}" (${count} item${count === 1 ? '' : 's'})` };
+            const desc = `kit "${kit.name}" (${count} item${count === 1 ? '' : 's'})`;
+            return {
+                type: 'pack_kit', kitnumber: kit.kitnumber, kitName: kit.name, lowConfidence: !match.confident,
+                summary: match.confident ? `Start a Pack Order from ${desc}` : `Did you mean ${desc}?`,
+            };
         }
         if (reply.action === 'edit_field') {
             if (activeView !== 'item-view' || !currentItemBTK) return null;
@@ -7422,16 +7518,18 @@ Respond with ONLY the JSON object, nothing else.`;
 
     function aiRenderActionCard(action) {
         const card = document.createElement('div');
-        card.className = 'ai-action-card';
+        card.className = 'ai-action-card' + (action.lowConfidence ? ' low-confidence' : '');
         const diffHtml = action.type === 'edit_field'
             ? `<div class="ai-action-diff">"${escapeHtml(action.oldValue || '(empty)')}" → "${escapeHtml(action.newValue || '(empty)')}"</div>`
             : '';
+        const confirmLabel = action.lowConfidence ? "Yes, that one ✓" : "We'll do this ✓";
+        const cancelLabel = action.lowConfidence ? "No, not that" : "Cancel";
         card.innerHTML = `
-            <div class="ai-action-title">${escapeHtml(action.summary)}</div>
+            <div class="ai-action-title">${action.lowConfidence ? '🤔 ' : ''}${escapeHtml(action.summary)}</div>
             ${diffHtml}
             <div class="ai-action-buttons">
-                <button class="secondary" onclick="aiCancelAction()">Cancel</button>
-                <button onclick="aiConfirmAction()">We'll do this ✓</button>
+                <button class="secondary" onclick="aiCancelAction()">${cancelLabel}</button>
+                <button onclick="aiConfirmAction()">${confirmLabel}</button>
             </div>`;
         document.getElementById('ai-panel-messages').appendChild(card);
         card.scrollIntoView({ block: 'end' });
@@ -7473,10 +7571,11 @@ Respond with ONLY the JSON object, nothing else.`;
                 const el = document.getElementById(action.elId);
                 if (el) { el.value = action.newValue; el.classList.remove('ai-highlight-pulse'); }
                 await saveQuickEdit();
-                aiAppendMessage('assistant', `Updated ${action.label}.`);
+                const undoNote = currentUserRole === 'admin' ? ' You can undo this from Settings → 📜 Activity Log if needed.' : '';
+                aiAppendMessage('assistant', `Updated ${action.label}.${undoNote}`);
             }
         } catch (e) {
-            aiAppendMessage('assistant', "That didn't work: " + e.message);
+            aiAppendMessage('assistant', "That didn't work — " + aiFriendlyError(e));
         }
     }
 
@@ -7511,7 +7610,7 @@ Respond with ONLY the JSON object, nothing else.`;
                 model: window.GROQ_MODELS.TEXT,
                 reasoningEffort: 'low',
                 messages: [
-                    { role: 'system', content: 'Answer the user briefly (2-4 sentences) using only the page content given.' },
+                    { role: 'system', content: 'Answer the user briefly (2-4 sentences), in plain language with no jargon, using only the page content given.' },
                     { role: 'user', content: `Question: ${query}\n\nSource: ${top.url}\n${pageText || top.snippet}` },
                 ],
             });
@@ -7519,7 +7618,7 @@ Respond with ONLY the JSON object, nothing else.`;
             aiAppendMessage('assistant', `${answer}\n\nSource: ${top.url}`);
         } catch (e) {
             thinking.remove();
-            aiAppendMessage('assistant', "Web search failed: " + e.message);
+            aiAppendMessage('assistant', aiFriendlyError(e));
         }
     }
 
@@ -7540,14 +7639,22 @@ Respond with ONLY the JSON object, nothing else.`;
         return data.text || '';
     }
 
+    // Max recording length as a safety net — if someone forgets to tap the mic again to stop
+    // (easy to do, especially for a first-time/non-technical user), this stops it for them instead
+    // of recording indefinitely.
+    const AI_MAX_RECORDING_SECONDS = 25;
+
     async function aiChatToggleRecording() {
-        if (aiIsRecording) { if (aiMediaRecorder && aiMediaRecorder.state !== 'inactive') aiMediaRecorder.stop(); return; }
-        if (!navigator.mediaDevices || !window.MediaRecorder) { showToast("Voice input isn't supported in this browser.", "error"); return; }
+        if (aiIsRecording) { aiStopRecordingManually(); return; }
+        if (!navigator.mediaDevices || !window.MediaRecorder) {
+            aiAppendMessage('system', "Voice input isn't supported in this browser — try typing instead.");
+            return;
+        }
         let stream;
         try {
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (e) {
-            showToast("Microphone access denied.", "error");
+            aiAppendMessage('system', "Microphone access was blocked — allow it in your browser's site settings, or just type your instruction below.");
             return;
         }
         aiRecordedChunks = [];
@@ -7555,10 +7662,9 @@ Respond with ONLY the JSON object, nothing else.`;
         aiMediaRecorder.ondataavailable = e => { if (e.data.size > 0) aiRecordedChunks.push(e.data); };
         aiMediaRecorder.onstop = async () => {
             stream.getTracks().forEach(t => t.stop());
-            document.getElementById('ai-chat-mic-btn').classList.remove('recording');
-            aiIsRecording = false;
+            aiStopRecordingUI();
             const blob = new Blob(aiRecordedChunks, { type: aiMediaRecorder.mimeType || 'audio/webm' });
-            if (blob.size < 500) return; // too short to be real speech
+            if (blob.size < 500) { aiAppendMessage('system', "Didn't catch anything — try again?"); return; }
             const thinking = aiAppendMessage('system', 'Transcribing…');
             try {
                 const text = await aiTranscribeAudio(blob);
@@ -7567,51 +7673,101 @@ Respond with ONLY the JSON object, nothing else.`;
                 else aiAppendMessage('system', "Didn't catch that — try again?");
             } catch (e) {
                 thinking.remove();
-                aiAppendMessage('assistant', "Transcription failed: " + e.message);
+                aiAppendMessage('assistant', aiFriendlyError(e));
             }
         };
         aiMediaRecorder.start();
         aiIsRecording = true;
+        aiRecordingStartedAt = Date.now();
         document.getElementById('ai-chat-mic-btn').classList.add('recording');
+        const statusEl = document.getElementById('ai-recording-status');
+        statusEl.classList.remove('hidden');
+        document.getElementById('ai-recording-timer').textContent = '0:00';
+        aiRecordingTimerId = setInterval(() => {
+            const secs = Math.floor((Date.now() - aiRecordingStartedAt) / 1000);
+            document.getElementById('ai-recording-timer').textContent = Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
+            if (secs >= AI_MAX_RECORDING_SECONDS) aiStopRecordingManually();
+        }, 1000);
+    }
+
+    function aiStopRecordingManually() {
+        if (aiMediaRecorder && aiMediaRecorder.state !== 'inactive') aiMediaRecorder.stop();
+    }
+
+    function aiStopRecordingUI() {
+        aiIsRecording = false;
+        clearInterval(aiRecordingTimerId);
+        aiRecordingTimerId = null;
+        document.getElementById('ai-chat-mic-btn').classList.remove('recording');
+        document.getElementById('ai-recording-status').classList.add('hidden');
     }
 
     // ── Settings → AI Assistant key management ──
     async function refreshAiKeySettingsUI() {
         const textEl = document.getElementById('ai-key-status-text');
+        const listEl = document.getElementById('ai-key-list');
         if (!textEl) return;
-        if (!sb) { textEl.textContent = "Unavailable — this app isn't connected to Supabase."; return; }
+        if (!sb) { textEl.textContent = "Unavailable — this app isn't connected to Supabase."; if (listEl) listEl.innerHTML = ''; return; }
         textEl.textContent = "Checking…";
         await aiRefreshKeyStatus();
-        if (aiHasApiKey) {
-            let msg = "A Groq API key is configured and shared by everyone using this app.";
-            if (currentUserRole === 'admin') {
-                try {
-                    const { data: count } = await sb.rpc('count_llm_api_keys');
-                    msg += ` (${count ?? '?'} key${count === 1 ? '' : 's'} on file, including backups.)`;
-                } catch (e) { /* count is a nice-to-have, not required */ }
+        textEl.textContent = aiHasApiKey
+            ? "A Groq API key is configured and shared by everyone using this app."
+            : "No key configured yet — the AI Assistant won't work until one is added below.";
+
+        if (!listEl) return;
+        listEl.innerHTML = '';
+        if (currentUserRole !== 'admin') return;
+        try {
+            const { data, error } = await sb.rpc('list_llm_api_keys');
+            aiKeyListCache = (!error && data) ? data : [];
+            if (aiKeyListCache.length) {
+                listEl.innerHTML = aiKeyListCache.map(k => `
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); font-size:0.85rem;">
+                        <span>🔑 ${escapeHtml(k.label || 'Unlabeled')} <span style="color:var(--text-muted);">— added ${new Date(k.created_at).toLocaleDateString()}</span></span>
+                        <button class="secondary" onclick="removeAiApiKey(${k.id})" style="min-height:auto; padding:2px 8px; font-size:0.78rem; color:var(--danger);">Remove</button>
+                    </div>`).join('');
             }
-            textEl.textContent = msg;
-        } else {
-            textEl.textContent = "No key configured yet — the AI Assistant won't work until one is added below.";
-        }
+        } catch (e) { /* the list is a nice-to-have, not required for the feature to work */ }
     }
 
     async function submitAiApiKey() {
         if (!requireAuth()) return;
         if (!sb) { showToast("This app isn't connected to Supabase.", "error"); return; }
         const input = document.getElementById('ai-key-input');
+        const labelInput = document.getElementById('ai-key-label');
         const key = input.value.trim();
-        if (!key) { showToast("Enter a key first.", "warning"); return; }
+        const label = labelInput.value.trim();
+        if (!key) { showToast("Paste a key first.", "warning"); return; }
         try {
             const { data: userData } = await sb.auth.getUser();
-            const { error } = await sb.from('llm_api_keys').insert({ provider: 'groq', api_key: key, added_by: userData?.user?.id || null });
+            const { error } = await sb.from('llm_api_keys').insert({ provider: 'groq', api_key: key, label: label || null, added_by: userData?.user?.id || null });
             if (error) throw error;
             input.value = '';
+            labelInput.value = '';
             showToast("Key added.", "success");
             await refreshAiKeySettingsUI();
         } catch (e) {
-            showToast("Couldn't add key: " + e.message, "error");
+            showToast("Couldn't add key: " + aiFriendlyError(e), "error");
         }
+    }
+
+    function removeAiApiKey(id) {
+        const key = aiKeyListCache.find(k => k.id === id);
+        showConfirmModal({
+            title: 'Remove this key?',
+            body: `"${key?.label || 'Unlabeled'}" will be removed. If it's the only key, the AI Assistant stops working until a new one is added.`,
+            confirmLabel: 'Remove',
+            onConfirm: async () => {
+                try {
+                    const { error } = await sb.from('llm_api_keys').delete().eq('id', id);
+                    if (error) throw error;
+                    showToast("Key removed.", "success");
+                    await refreshAiKeySettingsUI();
+                } catch (e) {
+                    showToast("Couldn't remove key: " + aiFriendlyError(e), "error");
+                }
+            },
+        });
     }
 </script>
 
