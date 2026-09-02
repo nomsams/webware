@@ -786,7 +786,7 @@
 </div>
 
 <header>
-    <div class="logo-container">
+    <div class="logo-container" role="button" tabindex="0" onclick="goHome()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goHome();}" style="cursor:pointer;" title="Go to Manufacturers">
         <img src="logo.png" alt="Company Logo" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzI1NjNlYiIgcng9IjIwIi8+PHRleHQgeD0iNTAiIHk9IjU4IiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjQ0IiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSIjZmZmZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5XVzwvdGV4dD48L3N2Zz4='" />
     </div>
     <div class="header-actions">
@@ -887,6 +887,13 @@
                 <button class="search-clear" onclick="clearKitSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
             </div>
             <div class="list-stats" id="kit-list-stats"></div>
+        </div>
+
+        <div id="manufacturers-only-controls" class="hidden">
+            <div class="search-wrapper" id="manufacturer-search-container">
+                <input type="text" id="manufacturer-search-box" aria-label="Search Manufacturers" placeholder="Search manufacturer name..." oninput="debounceManufacturerSearch()">
+                <button class="search-clear" onclick="clearManufacturerSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
+            </div>
         </div>
 
         <div id="item-list-container"></div>
@@ -1341,6 +1348,7 @@
     var qrEccLevel = 1; // QRCode.CorrectLevel.M (set after lib loads)
     var searchTimeout = null;
     var kitSearchTimeout = null;
+    var manufacturerSearchTimeout = null;
     var currentlyVisibleIds = [];
     var activeView = 'auth-view';
     var previousView = 'list-view';
@@ -1902,13 +1910,23 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     async function removeWarehouse(l, name) {
         const { error } = await sb.from('warehouses').update({ active: false }).eq('l', l);
         if (error) return showToast("Could not remove warehouse: " + error.message, "error");
+        // Patch in-memory immediately rather than waiting on renderManageWarehousesList()'s own
+        // (unawaited) re-fetch — that avoided a race where renderWarehouseMeta() below could run
+        // before the fresh data landed and rebuild the switcher from stale WAREHOUSES. Also fixes
+        // the switcher never dropping the removed warehouse at all: it used to only get rebuilt
+        // when the warehouse being removed was the one currently open — the one case where the
+        // switcher can't visibly change, since it never hides whichever warehouse is open right now.
+        const w = WAREHOUSES.find(w => w.l === l);
+        if (w) w.active = false;
         showToast(`"${name}" removed.`, "success");
         renderManageWarehousesList();
-        if (l === currentWarehouseId) renderWarehouseMeta(); // stays open in this session, just drops out of the switcher list for next time
+        renderWarehouseMeta();
     }
     async function restoreWarehouse(l, name) {
         const { error } = await sb.from('warehouses').update({ active: true }).eq('l', l);
         if (error) return showToast("Could not restore warehouse: " + error.message, "error");
+        const w = WAREHOUSES.find(w => w.l === l);
+        if (w) w.active = true;
         showToast(`"${name}" restored.`, "success");
         renderManageWarehousesList();
         renderWarehouseMeta();
@@ -3182,6 +3200,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ════════════════════════════════════════════════════════════════════════
     //  LIST MODE (ITEMS / KITS)
     // ════════════════════════════════════════════════════════════════════════
+    // The header logo — "home" is Manufacturers (falls back to Items on a static warehouse, same
+    // as switching there any other way, since static mode has no dedicated manufacturers entity).
+    function goHome() {
+        showListView('manufacturers');
+    }
     function showListView(forceMode) {
         if (!requireAuth()) return;
         if (forceMode) listMode = forceMode;
@@ -3202,6 +3225,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('btn-add-item').classList.toggle('hidden', mode !== 'items');
         document.getElementById('items-only-controls').classList.toggle('hidden', mode !== 'items');
         document.getElementById('kits-only-controls').classList.toggle('hidden', mode !== 'kits');
+        document.getElementById('manufacturers-only-controls').classList.toggle('hidden', mode !== 'manufacturers');
         const fab = document.getElementById('fab-bar');
         if (mode === 'items') { filterList(true); fab.classList.toggle('visible', selectedItems.size > 0); }
         else if (mode === 'manufacturers') { renderManufacturersList(); fab.classList.remove('visible'); }
@@ -3423,6 +3447,19 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         renderKitsList();
     }
 
+    function debounceManufacturerSearch() {
+        const wrapper = document.getElementById('manufacturer-search-container');
+        const val = document.getElementById('manufacturer-search-box').value;
+        val.length > 0 ? wrapper.classList.add('has-text') : wrapper.classList.remove('has-text');
+        clearTimeout(manufacturerSearchTimeout);
+        manufacturerSearchTimeout = setTimeout(() => renderManufacturersList(), 200);
+    }
+    function clearManufacturerSearch() {
+        document.getElementById('manufacturer-search-box').value = '';
+        document.getElementById('manufacturer-search-container').classList.remove('has-text');
+        renderManufacturersList();
+    }
+
     function renderKitsList() {
         const container = document.getElementById('item-list-container');
         container.innerHTML = '';
@@ -3558,8 +3595,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const container = document.getElementById('item-list-container');
         container.innerHTML = '';
         const frag = document.createDocumentFragment();
+        const query = (document.getElementById('manufacturer-search-box')?.value || '').toLowerCase().trim();
+        const manufacturers = query ? globalManufacturers.filter(m => (m.name || '').toLowerCase().includes(query)) : globalManufacturers;
 
-        if (canEditItems()) {
+        // The "Add Manufacturer" row is a create action, not a search result — only show it
+        // unfiltered, so a search that matches nothing doesn't look like a dead end.
+        if (canEditItems() && !query) {
             const addDiv = document.createElement('div');
             addDiv.className = 'kit-row';
             addDiv.setAttribute('role', 'button'); addDiv.tabIndex = 0;
@@ -3569,13 +3610,15 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             frag.appendChild(addDiv);
         }
 
-        if (!globalManufacturers.length) {
+        if (!manufacturers.length) {
             container.appendChild(frag);
-            if (!canEditItems()) container.innerHTML += `<div class="empty-state"><h3>No manufacturers yet</h3></div>`;
+            container.innerHTML += query
+                ? `<div class="empty-state"><p>No manufacturers match "${escapeHtml(document.getElementById('manufacturer-search-box').value)}".</p></div>`
+                : (!canEditItems() ? `<div class="empty-state"><h3>No manufacturers yet</h3></div>` : '');
             return;
         }
 
-        globalManufacturers.forEach(m => {
+        manufacturers.forEach(m => {
             const count = globalInventory.filter(i => i.manufacturerId === m.id).length;
             const div = document.createElement('div');
             div.className = 'kit-row';
@@ -7877,7 +7920,10 @@ Respond with ONLY the JSON object, nothing else.`;
             showToast("Key added.", "success");
             await refreshAiKeySettingsUI();
         } catch (e) {
-            showToast("Couldn't add key: " + aiFriendlyError(e), "error");
+            // The friendly wrapper is for the end-user-facing chat bubble — here in Settings, an
+            // admin trying to configure the app needs the real Supabase/RLS error to diagnose it
+            // (e.g. "not the right role", a missing migration), not a vague "something went wrong".
+            showToast("Couldn't add key: " + (e?.message || e), "error");
         }
     }
 
@@ -7894,7 +7940,7 @@ Respond with ONLY the JSON object, nothing else.`;
                     showToast("Key removed.", "success");
                     await refreshAiKeySettingsUI();
                 } catch (e) {
-                    showToast("Couldn't remove key: " + aiFriendlyError(e), "error");
+                    showToast("Couldn't remove key: " + (e?.message || e), "error");
                 }
             },
         });
