@@ -755,6 +755,44 @@
     </div>
 </div>
 
+<!-- Import Items — chooser between uploading a file and pasting CSV text directly, both funneling
+     into beginItemsCSVImport(). -->
+<div class="modal-overlay" id="import-items-modal" onclick="handleImportItemsModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:480px;">
+        <h3 style="margin-top:0;">📥 Import Items</h3>
+        <div id="import-items-chooser">
+            <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">How would you like to bring in a CSV?</p>
+            <button class="full-width" onclick="triggerCSVImport()" style="margin-bottom:0.75rem;">📁 Upload a CSV File</button>
+            <button class="secondary full-width" onclick="showImportPasteBox()">📋 Paste CSV Text</button>
+        </div>
+        <div id="import-items-paste" class="hidden">
+            <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:0.5rem;">Paste the CSV content below, headers and all.</p>
+            <textarea id="import-paste-textarea" rows="10" style="width:100%; font-family:monospace; font-size:0.8rem; min-height:200px;" placeholder="Manufacturer,BTKnumber,itemname(english),..."></textarea>
+            <div class="modal-actions" style="margin-top:0.75rem;">
+                <button class="secondary" onclick="showImportChooser()">← Back</button>
+                <button style="flex:1;" onclick="submitPastedCSV()">Parse &amp; Continue</button>
+            </div>
+        </div>
+        <button class="secondary full-width" onclick="closeImportItemsModal()" style="margin-top:1rem;">Cancel</button>
+    </div>
+</div>
+
+<!-- Column mapping — shown only when a CSV's headers don't already match our own schema exactly.
+     suggestColumnMapping() proposes a best guess (exact name, then a common-alias table, then a
+     loose edit-distance fallback); the person confirms or corrects it before anything is parsed
+     into real item rows. See beginItemsCSVImport(). -->
+<div class="modal-overlay" id="csv-mapping-modal" onclick="handleCsvMappingModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:620px;">
+        <h3 style="margin-top:0;">🧭 Match CSV Columns</h3>
+        <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">This file's headers don't exactly match what we expect — here's our best guess at what each column means. Check it over, adjust anything wrong, then continue. Columns set to "Ignore" are left out of the import entirely.</p>
+        <div id="csv-mapping-list" style="max-height:50vh; overflow-y:auto;"></div>
+        <div class="modal-actions" style="margin-top:1rem;">
+            <button class="secondary full-width" onclick="closeCsvMappingModal()">Cancel</button>
+            <button class="full-width" onclick="confirmCsvMapping()">Looks Good — Continue</button>
+        </div>
+    </div>
+</div>
+
 <!-- Generic destructive-action confirmation (Remove/Merge) — replaces native confirm()/alert()
      for anything that permanently deletes data, so the warning reads like the rest of the app
      instead of a jarring browser dialog. See showConfirmModal(). -->
@@ -839,7 +877,7 @@
             <h2 style="margin: 0;">Inventory</h2>
             <div class="list-header-actions" id="list-actions">
                 <button id="btn-add-item" onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">➕ Add Item</button>
-                <button class="secondary" id="btn-items-csv" onclick="triggerCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Items CSV</button>
+                <button class="secondary" id="btn-items-csv" onclick="openImportItemsModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Import Items</button>
                 <button class="secondary" id="btn-kits-csv" onclick="triggerKitsCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Kits CSV</button>
                 <button class="secondary" id="btn-warehouse-csv" onclick="triggerWarehouseCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Warehouses CSV</button>
                 <button class="secondary" id="btn-export-db" onclick="exportEncryptedDatabase()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">💾 Export</button>
@@ -1194,6 +1232,7 @@
         <div id="merge-grid-container" style="overflow-x:auto;"></div>
         <div class="modal-actions" style="margin-top:1.5rem;">
             <button class="secondary full-width" onclick="cancelMergeFlow()">Cancel</button>
+            <button class="secondary full-width hidden" id="btn-csv-not-duplicate">↔️ Not the Same Item — Keep Both</button>
             <button class="danger full-width" id="btn-merge-confirm">🔀 Merge & Delete the Rest</button>
         </div>
     </section>
@@ -1649,6 +1688,73 @@
         'Manufacturer', 'BTKnumber', 'itemnumber', 'itemname(english)', 'itemname(swedish)',
         'itemnumber2', 'itemnumber3', 'Numberofitems', 'Inventorylocation', 'MapPosition', 'LocationCode', 'Comments', 'images'
     ];
+
+    // ── Items CSV "smart repair" — column-name matching for a file whose headers don't already
+    // match COLUMNS_B verbatim. Common alternate spellings a real-world export might use, keyed by
+    // our own canonical name; matched after normalizing away case/spacing/punctuation, so "Item
+    // Name", "item_name", and "ITEMNAME" all hit the same alias. See suggestColumnMapping().
+    const CSV_COLUMN_ALIASES = {
+        'BTKnumber': ['btk', 'btknumber', 'btknum', 'btkno', 'systemid', 'id'],
+        'itemname(english)': ['itemname', 'name', 'englishname', 'itemnameenglish', 'productname', 'description', 'title'],
+        'itemname(swedish)': ['itemnameswedish', 'swedishname', 'namesv', 'svensktnamn'],
+        'itemnumber': ['itemnumber1', 'partnumber', 'partno', 'itemno', 'item1', 'articlenumber', 'articleno'],
+        'itemnumber2': ['item2', 'altpartnumber', 'secondarynumber', 'secondarypartnumber'],
+        'itemnumber3': ['item3', 'internalnumber', 'internalid', 'internalpartnumber'],
+        'Manufacturer': ['manufacturer', 'brand', 'supplier', 'vendor', 'maker'],
+        'Numberofitems': ['quantity', 'qty', 'stock', 'count', 'amount', 'onhand'],
+        'Inventorylocation': ['location', 'warehouselocation', 'storage'],
+        'MapPosition': ['zone', 'area', 'map'],
+        'LocationCode': ['bincode', 'binlocation', 'binlocationcode', 'shelf', 'shelflocation'],
+        'Comments': ['comment', 'notes', 'note', 'remarks'],
+        'images': ['image', 'photo', 'photos', 'picture', 'imagefile', 'imagefilename'],
+    };
+    function normalizeHeaderName(h) {
+        return (h || '').toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+    }
+    function levenshteinDistance(a, b) {
+        const m = a.length, n = b.length;
+        if (!m) return n;
+        if (!n) return m;
+        const dp = [];
+        for (let i = 0; i <= m; i++) dp.push([i, ...Array(n).fill(0)]);
+        for (let j = 0; j <= n; j++) dp[0][j] = j;
+        for (let i = 1; i <= m; i++) {
+            for (let j = 1; j <= n; j++) {
+                dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+            }
+        }
+        return dp[m][n];
+    }
+    // One suggested COLUMNS_B target per raw header — exact name match first, then the alias
+    // table, then a loose edit-distance fallback (so a typo like "Manufaturer" still lands on the
+    // right field) rather than silently dropping an unrecognized column. Never maps two different
+    // headers onto the same target field.
+    function suggestColumnMapping(rawHeaders) {
+        const used = new Set();
+        return rawHeaders.map(header => {
+            const norm = normalizeHeaderName(header);
+            let target = COLUMNS_B.find(c => normalizeHeaderName(c) === norm) || null;
+            let confident = !!target;
+            if (!target) {
+                target = COLUMNS_B.find(c => (CSV_COLUMN_ALIASES[c] || []).some(a => normalizeHeaderName(a) === norm)) || null;
+                confident = !!target;
+            }
+            if (!target && norm) {
+                let best = null, bestDist = Infinity;
+                COLUMNS_B.forEach(c => {
+                    [c, ...(CSV_COLUMN_ALIASES[c] || [])].forEach(cand => {
+                        const d = levenshteinDistance(norm, normalizeHeaderName(cand));
+                        if (d < bestDist) { bestDist = d; best = c; }
+                    });
+                });
+                const threshold = Math.max(2, Math.floor(norm.length * 0.34));
+                if (best && bestDist <= threshold) target = best; // confident stays false — flagged for review
+            }
+            if (target && used.has(target)) target = null;
+            if (target) used.add(target);
+            return { header, target, confident };
+        });
+    }
 
     // CSV C — Warehouse lookup metadata (non-secret, embedded for offline UX)
     function getWarehouseMeta(id) {
@@ -3042,6 +3148,31 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function triggerKitsCSVImport() { if (!requireAuth()) return; document.getElementById('kits-csv-upload').click(); }
     function triggerWarehouseCSVImport() { if (!requireAuth()) return; document.getElementById('warehouse-csv-upload').click(); }
 
+    // ── Import Items — chooser (upload vs paste) ──────────────────────────────
+    function openImportItemsModal() {
+        if (!requireAuth()) return;
+        showImportChooser();
+        document.getElementById('import-items-modal').classList.add('open');
+    }
+    function closeImportItemsModal() {
+        document.getElementById('import-items-modal').classList.remove('open');
+        document.getElementById('import-paste-textarea').value = '';
+    }
+    function handleImportItemsModalOverlayClick(e) { if (e.target === document.getElementById('import-items-modal')) closeImportItemsModal(); }
+    function showImportChooser() {
+        document.getElementById('import-items-chooser').classList.remove('hidden');
+        document.getElementById('import-items-paste').classList.add('hidden');
+    }
+    function showImportPasteBox() {
+        document.getElementById('import-items-chooser').classList.add('hidden');
+        document.getElementById('import-items-paste').classList.remove('hidden');
+        document.getElementById('import-paste-textarea').focus();
+    }
+    function submitPastedCSV() {
+        const text = document.getElementById('import-paste-textarea').value;
+        beginItemsCSVImport(text);
+    }
+
     // Collapses same-BTK rows to the last occurrence (consistent with how the app treats BTK as
     // the only safe lookup key elsewhere) and reports which ones collided, rather than silently
     // leaving invisible duplicate rows that .find()-based lookups would never surface.
@@ -3053,6 +3184,167 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             seen.set(item.BTKnumber, item);
         });
         return { deduped: Array.from(seen.values()), dupes: Array.from(dupeSet) };
+    }
+
+    var csvImportPendingParsed = null; // Papa.parse result held while the column-mapping modal is open
+
+    // Single entry point for both the file-upload and paste-text paths. Parses the raw text, then
+    // either proceeds straight through (headers already match COLUMNS_B verbatim — the common,
+    // frictionless case) or opens the column-mapping review step first, so a differently-named or
+    // reordered export still imports correctly instead of silently losing data in columns that
+    // don't line up ("smart repair" — see suggestColumnMapping()).
+    function beginItemsCSVImport(csvText) {
+        if (!csvText || !csvText.trim()) { showToast("Nothing to import — paste or choose a CSV first.", "error"); return; }
+        const parsed = Papa.parse(csvText.trim(), { header: true, skipEmptyLines: true });
+        const rawHeaders = parsed.meta.fields || [];
+        if (!rawHeaders.length || !parsed.data.length) { showToast("Couldn't find a header row and at least one data row in that CSV.", "error"); return; }
+
+        closeImportItemsModal();
+        const exactMatch = rawHeaders.every(h => COLUMNS_B.includes(h));
+        if (exactMatch) {
+            proceedWithColumnMapping(parsed, rawHeaders.map(h => ({ header: h, target: h, confident: true })));
+        } else {
+            openCsvMappingModal(parsed, suggestColumnMapping(rawHeaders));
+        }
+    }
+
+    function openCsvMappingModal(parsed, mapping) {
+        csvImportPendingParsed = parsed;
+        window.__csvMappingState = mapping;
+        const sample = parsed.data[0] || {};
+        document.getElementById('csv-mapping-list').innerHTML = mapping.map((m, i) => `
+            <div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); flex-wrap:wrap;">
+                <div style="flex:1; min-width:140px;">
+                    <strong>${escapeHtml(m.header)}</strong>
+                    ${sample[m.header] ? `<div style="color:var(--text-muted); font-size:0.78rem;">e.g. "${escapeHtml(String(sample[m.header]).slice(0, 40))}"</div>` : ''}
+                </div>
+                <div style="color:var(--text-muted);">→</div>
+                <select data-mapping-idx="${i}" onchange="onCsvMappingSelectChange(event)" style="width:auto; min-width:190px; margin:0;">
+                    <option value="">— Ignore this column —</option>
+                    ${COLUMNS_B.map(c => `<option value="${escapeHtml(c)}" ${c === m.target ? 'selected' : ''}>${escapeHtml((MERGE_FIELDS.find(f => f.key === c) || {}).label || c)}</option>`).join('')}
+                </select>
+                ${!m.confident && m.target ? `<span title="Best guess — please double-check" style="color:#f59e0b;">⚠️ best guess</span>` : ''}
+            </div>`).join('');
+        document.getElementById('csv-mapping-modal').classList.add('open');
+    }
+    function onCsvMappingSelectChange(e) {
+        const idx = parseInt(e.target.dataset.mappingIdx, 10);
+        window.__csvMappingState[idx].target = e.target.value || null;
+        window.__csvMappingState[idx].confident = true; // now user-confirmed, not just a guess
+    }
+    function closeCsvMappingModal() {
+        document.getElementById('csv-mapping-modal').classList.remove('open');
+        csvImportPendingParsed = null;
+        window.__csvMappingState = null;
+    }
+    function handleCsvMappingModalOverlayClick(e) { if (e.target === document.getElementById('csv-mapping-modal')) closeCsvMappingModal(); }
+    function confirmCsvMapping() {
+        const mapping = window.__csvMappingState;
+        const parsed = csvImportPendingParsed;
+        if (!mapping || !parsed) return;
+        if (!mapping.some(m => m.target === 'BTKnumber')) {
+            showToast("No column is mapped to BTK Number — every row will get a fresh one assigned. Fine for genuinely new stock, but double-check that's what you want.", "warning", 7000);
+        }
+        document.getElementById('csv-mapping-modal').classList.remove('open');
+        csvImportPendingParsed = null;
+        window.__csvMappingState = null;
+        proceedWithColumnMapping(parsed, mapping);
+    }
+
+    // Remaps each parsed row's keys from raw CSV headers to our own COLUMNS_B names per the
+    // confirmed mapping, then hands off to the same detection pipeline the exact-match fast path
+    // uses — one shared place that decides what's new, what conflicts, and what merely looks
+    // similar, regardless of how the CSV got here or how its columns were originally named.
+    function proceedWithColumnMapping(parsed, mapping) {
+        const remapped = parsed.data.map(row => {
+            const out = {};
+            mapping.forEach(m => { if (m.target) out[m.target] = row[m.header]; });
+            return out;
+        });
+        const presentColumns = new Set(mapping.filter(m => m.target).map(m => m.target));
+        const { rows: filledRows, autoAssignedCount } = assignMissingBTKs(remapped);
+        finalizeCsvImportRows(filledRows, presentColumns, autoAssignedCount);
+    }
+
+    // Looks for an EXISTING item — under a DIFFERENT BTK; same-BTK is already a hard conflict,
+    // handled separately — that shares an incoming row's item name or any of its item numbers.
+    // Deliberately not fuzzy about it: an exact (trimmed, case-insensitive) match only. A false
+    // "looks like a duplicate" flag puts a real, unrelated item in front of the user for no reason,
+    // which is worse than occasionally missing a near-duplicate only a human would recognize anyway.
+    function findDuplicateMatch(incoming, existingInventory) {
+        const name = (incoming['itemname(english)'] || '').trim().toLowerCase();
+        const nums = [incoming.itemnumber, incoming.itemnumber2, incoming.itemnumber3]
+            .map(v => (v || '').trim().toLowerCase()).filter(v => v && v !== 'none');
+        for (const item of existingInventory) {
+            if (item.BTKnumber === incoming.BTKnumber) continue;
+            if (name && name !== 'unnamed' && name === (item['itemname(english)'] || '').trim().toLowerCase()) {
+                return { item, reason: `same item name "${item['itemname(english)']}"` };
+            }
+            const existingNums = [item.itemnumber, item.itemnumber2, item.itemnumber3]
+                .map(v => (v || '').trim().toLowerCase()).filter(v => v && v !== 'none');
+            const shared = nums.find(n => existingNums.includes(n));
+            if (shared) return { item, reason: `shares item number "${shared}"` };
+        }
+        return null;
+    }
+    function findPossibleDuplicates(candidateRows, existingInventory) {
+        const duplicates = [];
+        const stillNew = [];
+        candidateRows.forEach(incoming => {
+            const match = findDuplicateMatch(incoming, existingInventory);
+            if (match) duplicates.push({ existing: match.item, incoming, type: 'duplicate', reason: match.reason });
+            else stillNew.push(incoming);
+        });
+        return { duplicates, stillNew };
+    }
+
+    // Shared tail of the items-CSV pipeline — the exact-match fast path and the column-mapping path
+    // both funnel here (and so, in turn, do both file-upload and paste-text). Dedupes rows sharing
+    // a BTK within the file itself, then splits the rest into: brand-new (no BTK/name/number overlap
+    // with anything already here — added with no review), hard conflicts (same BTK as an existing
+    // item), and possible duplicates (a different BTK, but the name or another item number matches
+    // something already here). Conflicts and duplicates both go through the same review queue/
+    // merge-grid (see openCSVConflictMergeView) — a hard conflict must be resolved one way or
+    // another, since it IS the same row; a possible duplicate additionally offers "these aren't
+    // actually the same item" as an escape hatch.
+    function finalizeCsvImportRows(filledRows, presentColumns, autoAssignedCount) {
+        const items = normalizeItems(filledRows);
+        if (!items.length) { showToast("No valid rows found.", "error"); return; }
+        const { deduped, dupes } = dedupeByBTK(items);
+
+        const existingByBTK = new Map(globalInventory.map(i => [i.BTKnumber, i]));
+        const candidateNew = [];
+        const conflicts = [];
+        deduped.forEach(row => {
+            const existing = existingByBTK.get(row.BTKnumber);
+            if (existing) conflicts.push({ existing, incoming: row, type: 'conflict' });
+            else candidateNew.push(row);
+        });
+        const { duplicates, stillNew } = findPossibleDuplicates(candidateNew, globalInventory);
+
+        resetCsvImportState();
+        csvImportPendingNew = stillNew;
+        csvImportDupesReport = dupes;
+        csvImportPresentColumns = presentColumns;
+        csvImportAutoAssignedCount = autoAssignedCount;
+
+        const queue = [...conflicts, ...duplicates];
+        if (queue.length === 0) { commitCSVImport(); return; }
+
+        csvImportQueue = queue;
+        csvImportIndex = 0;
+        csvImportResolvedItems = [];
+        const parts = [];
+        if (conflicts.length) parts.push(`${conflicts.length} already-saved BTK number${conflicts.length > 1 ? 's' : ''}`);
+        if (duplicates.length) parts.push(`${duplicates.length} possible duplicate${duplicates.length > 1 ? 's' : ''} under a different BTK`);
+        showConfirmModal({
+            title: `${queue.length} item${queue.length > 1 ? 's' : ''} to review`,
+            body: `This CSV matches ${parts.join(' and ')}. You'll review each one individually — nothing is saved until you've gone through the whole list.` +
+                (stillNew.length ? ` ${stillNew.length} brand-new item(s) in the file will just be added, no review needed.` : '') +
+                `\n\nReview now?`,
+            confirmLabel: 'Review',
+            onConfirm: () => openCSVConflictMergeView()
+        });
     }
 
     // A BTK only in the CSV is new — added directly, no review needed. A BTK that already exists
@@ -3067,43 +3359,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const file = event.target.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = function(e) {
-            const res = Papa.parse(e.target.result, { header: true, skipEmptyLines: true });
-            const presentColumns = new Set(res.meta.fields || []);
-            const { rows: filledRows, autoAssignedCount } = assignMissingBTKs(res.data);
-            const items = normalizeItems(filledRows);
-            if (!items.length) { showToast("No valid rows found.", "error"); return; }
-            const { deduped, dupes } = dedupeByBTK(items);
-
-            const existingByBTK = new Map(globalInventory.map(i => [i.BTKnumber, i]));
-            const newItems = [];
-            const conflicts = [];
-            deduped.forEach(row => {
-                const existing = existingByBTK.get(row.BTKnumber);
-                if (existing) conflicts.push({ existing, incoming: row });
-                else newItems.push(row);
-            });
-
-            resetCsvImportState();
-            csvImportPendingNew = newItems;
-            csvImportDupesReport = dupes;
-            csvImportPresentColumns = presentColumns;
-            csvImportAutoAssignedCount = autoAssignedCount;
-
-            if (conflicts.length === 0) { commitCSVImport(); return; }
-
-            csvImportQueue = conflicts;
-            csvImportIndex = 0;
-            csvImportResolvedItems = [];
-            showConfirmModal({
-                title: `${conflicts.length} item${conflicts.length > 1 ? 's' : ''} already in this warehouse`,
-                body: `This CSV also matches ${conflicts.length} BTK number${conflicts.length > 1 ? 's' : ''} already saved here. You'll review each one and choose what to keep — anything you pick "From CSV" for will overwrite what's currently in the database.` +
-                    (newItems.length ? ` ${newItems.length} brand-new item(s) in the file will just be added, no review needed.` : '') +
-                    `\n\nReview the ${conflicts.length} conflict${conflicts.length > 1 ? 's' : ''} now?`,
-                confirmLabel: 'Review Conflicts',
-                onConfirm: () => openCSVConflictMergeView()
-            });
-        };
+        reader.onload = (e) => beginItemsCSVImport(e.target.result);
         reader.readAsText(file);
         event.target.value = '';
     }
@@ -6786,7 +7042,7 @@ th { background: #eee; }
 
     function openCSVConflictMergeView() {
         if (csvImportIndex >= csvImportQueue.length) { commitCSVImport(); return; }
-        const { existing, incoming } = csvImportQueue[csvImportIndex];
+        const { existing, incoming, type, reason } = csvImportQueue[csvImportIndex];
         mergeMode = 'csv-conflict';
         mergeCandidates = [existing, incoming]; // idx 0 = existing/database, idx 1 = incoming/CSV
         mergeSelections = {};
@@ -6800,12 +7056,18 @@ th { background: #eee; }
             mergeSelections[f.key] = preferCsv ? 1 : 0;
         });
         mergeCustomQty = null;
-        document.getElementById('merge-view-title').textContent = '🔀 Resolve CSV Conflicts';
-        document.getElementById('merge-view-intro').textContent =
-            `Conflict ${csvImportIndex + 1} of ${csvImportQueue.length} — BTK ${existing.BTKnumber} already exists. Tap the value to keep in each row; anything you pick "From CSV" for overwrites what's currently saved. Columns this CSV file doesn't have are left as-is automatically.`;
+        const countLabel = `${csvImportIndex + 1} of ${csvImportQueue.length}`;
+        const isDupe = type === 'duplicate';
+        document.getElementById('merge-view-title').textContent = isDupe ? '🔍 Possible Duplicate' : '🔀 Resolve CSV Conflicts';
+        document.getElementById('merge-view-intro').textContent = isDupe
+            ? `Item ${countLabel} — "${incoming['itemname(english)'] || incoming.BTKnumber}" (from the CSV, BTK ${incoming.BTKnumber}) clashes with "${existing['itemname(english)'] || existing.BTKnumber}" (already saved, BTK ${existing.BTKnumber}) because: ${reason}. Tap the value to keep in each row if these are really the same item — resolving keeps the existing BTK ${existing.BTKnumber} and discards the CSV row's own BTK. If they're not the same item, tap "Not the Same Item" below instead.`
+            : `Conflict ${countLabel} — BTK ${existing.BTKnumber} already exists. Tap the value to keep in each row; anything you pick "From CSV" for overwrites what's currently saved. Columns this CSV file doesn't have are left as-is automatically.`;
         const btn = document.getElementById('btn-merge-confirm');
-        btn.textContent = (csvImportIndex === csvImportQueue.length - 1) ? '✔ Resolve & Finish Import' : '✔ Resolve & Next Conflict';
+        const isLast = csvImportIndex === csvImportQueue.length - 1;
+        btn.textContent = isLast ? '✔ Resolve & Finish Import' : (isDupe ? '✔ Same Item — Merge & Next' : '✔ Resolve & Next Conflict');
         btn.onclick = resolveCsvConflict;
+        document.getElementById('btn-csv-not-duplicate').classList.toggle('hidden', !isDupe);
+        document.getElementById('btn-csv-not-duplicate').onclick = keepCsvDuplicateSeparate;
         switchView('merge-view');
         document.getElementById('fab-bar').classList.remove('visible');
         renderMergeGrid();
@@ -6817,6 +7079,16 @@ th { background: #eee; }
         const finalComments = mergeFieldDisplay(getMergeValue('Comments'));
         const mergedItem = buildMergedItemObject(existing.BTKnumber, finalQty, finalComments === '(none)' ? '' : finalComments, getMergeValue('images'));
         csvImportResolvedItems.push(mergedItem);
+        csvImportIndex++;
+        openCSVConflictMergeView();
+    }
+
+    // "These aren't actually the same item" escape hatch for a possible-duplicate entry — the
+    // incoming CSV row is simply added as its own new item, under its own original BTK, instead of
+    // being merged into the existing item it was flagged against.
+    function keepCsvDuplicateSeparate() {
+        const { incoming } = csvImportQueue[csvImportIndex];
+        csvImportPendingNew.push(incoming);
         csvImportIndex++;
         openCSVConflictMergeView();
     }
