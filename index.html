@@ -243,6 +243,7 @@
         .zone-manual-row input[data-field="label"] { flex: 1; min-width: 120px; }
         .zone-manual-row input[data-field="max_aisle"], .zone-manual-row input[data-field="max_rack"],
         .zone-manual-row input[data-field="max_level"], .zone-manual-row input[data-field="max_bin"] { width: 64px; text-align: center; }
+        .zone-manual-row input[data-field="shelf_width_cm"], .zone-manual-row input[data-field="shelf_height_cm"] { width: 72px; text-align: center; }
 
         .rack-image-card { position: relative; border-radius: 10px; overflow: hidden; background: var(--card-bg); border: 1px solid var(--border); }
         .rack-image-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
@@ -719,7 +720,17 @@
         <input type="text" id="ai-num3" placeholder="e.g. 1001007">
 
         <label class="modal-label" for="ai-qty">Quantity</label>
-        <input type="text" id="ai-qty" placeholder="e.g. 5">
+        <div style="display:flex; gap:8px;">
+            <input type="text" id="ai-qty" placeholder="e.g. 5" style="flex:2; margin:0;">
+            <select id="ai-unittype" style="flex:1; margin:0;">
+                <option value="st">st (each)</option>
+                <option value="kg">kg</option>
+                <option value="liter">liter</option>
+                <option value="pallet">pallet</option>
+                <option value="box">box</option>
+                <option value="bag">bag</option>
+            </select>
+        </div>
 
         <label class="modal-label" for="ai-reorder-threshold">Reorder Threshold (optional)</label>
         <input type="number" min="0" id="ai-reorder-threshold" placeholder="Flags Low stock below this — leave blank to use the app-wide Settings default">
@@ -1686,8 +1697,24 @@
     // ════════════════════════════════════════════════════════════════════════
     const COLUMNS_B = [
         'Manufacturer', 'BTKnumber', 'itemnumber', 'itemname(english)', 'itemname(swedish)',
-        'itemnumber2', 'itemnumber3', 'Numberofitems', 'Inventorylocation', 'MapPosition', 'LocationCode', 'Comments', 'images'
+        'itemnumber2', 'itemnumber3', 'Numberofitems', 'UnitType', 'Inventorylocation', 'MapPosition', 'LocationCode', 'Comments', 'images'
     ];
+
+    // What Numberofitems is counted IN — "5" alone is ambiguous (5 what?), "5 st" (Swedish for
+    // "styck", i.e. each/piece) or "25 liter" isn't. Deliberately a fixed short list rather than
+    // free text, so it stays a compact dropdown everywhere it's edited.
+    const UNIT_TYPES = [
+        { value: 'st', label: 'st (each)' },
+        { value: 'kg', label: 'kg' },
+        { value: 'liter', label: 'liter' },
+        { value: 'pallet', label: 'pallet' },
+        { value: 'box', label: 'box' },
+        { value: 'bag', label: 'bag' },
+    ];
+    function unitTypeOptionsHtml(selected) {
+        const sel = selected || 'st';
+        return UNIT_TYPES.map(u => `<option value="${u.value}" ${u.value === sel ? 'selected' : ''}>${u.label}</option>`).join('');
+    }
 
     // ── Items CSV "smart repair" — column-name matching for a file whose headers don't already
     // match COLUMNS_B verbatim. Common alternate spellings a real-world export might use, keyed by
@@ -1702,6 +1729,7 @@
         'itemnumber3': ['item3', 'internalnumber', 'internalid', 'internalpartnumber'],
         'Manufacturer': ['manufacturer', 'brand', 'supplier', 'vendor', 'maker'],
         'Numberofitems': ['quantity', 'qty', 'stock', 'count', 'amount', 'onhand'],
+        'UnitType': ['unittype', 'unit', 'uom', 'unitofmeasure'],
         'Inventorylocation': ['location', 'warehouselocation', 'storage'],
         'MapPosition': ['zone', 'area', 'map'],
         'LocationCode': ['bincode', 'binlocation', 'binlocationcode', 'shelf', 'shelflocation'],
@@ -1824,6 +1852,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             itemnumber2: row.itemnumber2 || 'None',
             itemnumber3: row.itemnumber3 || 'None',
             Numberofitems: String(row.numberofitems ?? '0'),
+            UnitType: row.unit_type || 'st',
             Inventorylocation: row.inventorylocation || 'None',
             MapPosition: row.map_position || 'None',
             LocationCode: row.location_code || 'None',
@@ -2879,6 +2908,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 COLUMNS_B.forEach(c => { item[c] = (r[c] != null ? String(r[c]).trim() : ''); });
                 if (item['itemname(english)'] === '') item['itemname(english)'] = 'Unnamed';
                 if (item['Numberofitems'] === '') item['Numberofitems'] = '0';
+                if (item['UnitType'] === '' || !UNIT_TYPES.some(u => u.value === item['UnitType'])) item['UnitType'] = 'st';
                 return item;
             });
     }
@@ -4336,13 +4366,28 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                     <label class="modal-label" for="zone-inspector-bin">Bins per level</label>
                     <input type="number" id="zone-inspector-bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('max_bin', this.value)">
                 </div>
+            </div>
+            <div style="display:flex; gap:12px;">
+                <div style="flex:1;">
+                    <label class="modal-label" for="zone-inspector-shelf-width">Shelf width (cm)</label>
+                    <input type="number" id="zone-inspector-shelf-width" min="0" step="0.1" value="${z.shelf_width_cm ?? ''}" placeholder="e.g. 120" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('shelf_width_cm', this.value)">
+                </div>
+                <div style="flex:1;">
+                    <label class="modal-label" for="zone-inspector-shelf-height">Shelf height (cm)</label>
+                    <input type="number" id="zone-inspector-shelf-height" min="0" step="0.1" value="${z.shelf_height_cm ?? ''}" placeholder="e.g. 200" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('shelf_height_cm', this.value)">
+                </div>
             </div>`;
     }
 
     function updateSelectedZoneField(field, value) {
         const z = globalWarehouseZones.find(z => z.zone === selectedZoneLetter);
         if (!z) return;
-        z[field] = (field === 'label') ? value : (parseInt(value, 10) || 1);
+        if (field === 'label') z[field] = value;
+        // Physical dimensions are optional and decimal — unlike the bay/level/bin counts, an empty
+        // value here means "not recorded", not "1", so it's left null rather than forced to a
+        // minimum of 1.
+        else if (field === 'shelf_width_cm' || field === 'shelf_height_cm') z[field] = value === '' ? null : (parseFloat(value) || null);
+        else z[field] = parseInt(value, 10) || 1;
         pushZoneHistory(false); // debounced — don't create an undo step per keystroke
     }
 
@@ -4369,6 +4414,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Depth <input type="number" data-field="max_rack" min="1" value="${z.max_rack || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_rack', this.value)"></label>
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Levels <input type="number" data-field="max_level" min="1" value="${z.max_level || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_level', this.value)"></label>
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Bins <input type="number" data-field="max_bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_bin', this.value)"></label>
+                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Width cm <input type="number" data-field="shelf_width_cm" min="0" step="0.1" value="${z.shelf_width_cm ?? ''}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'shelf_width_cm', this.value)"></label>
+                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Height cm <input type="number" data-field="shelf_height_cm" min="0" step="0.1" value="${z.shelf_height_cm ?? ''}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'shelf_height_cm', this.value)"></label>
                 ${readOnly ? '' : `<button class="secondary" onclick="removeManualZoneRow(${idx})" style="color:var(--danger); padding:0.35rem 0.6rem; min-height:auto;">✕</button>`}
             </div>`).join('') || `<p style="color:var(--text-muted); font-size:0.85rem;">No zones defined yet.</p>`;
     }
@@ -4377,6 +4424,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const z = globalWarehouseZones[idx];
         if (!z) return;
         if (field === 'zone' || field === 'label') z[field] = value;
+        else if (field === 'shelf_width_cm' || field === 'shelf_height_cm') z[field] = value === '' ? null : (parseFloat(value) || null);
         else z[field] = parseInt(value, 10) || 1;
         pushZoneHistory(false); // debounced — don't create an undo step per keystroke
     }
@@ -4406,6 +4454,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const rows = globalWarehouseZones.map(z => ({
             warehouse_id: currentWarehouseId, zone: z.zone.trim().toUpperCase(), label: z.label || null,
             max_aisle: z.max_aisle || 1, max_rack: z.max_rack || 1, max_level: z.max_level || 1, max_bin: z.max_bin || 1,
+            shelf_width_cm: z.shelf_width_cm ?? null, shelf_height_cm: z.shelf_height_cm ?? null,
             grid_col: z.grid_col ?? null, grid_row: z.grid_row ?? null
         }));
 
@@ -5739,7 +5788,7 @@ th { background: #eee; }
             ${field('System ID (BTK)', id)}
             <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
                 <span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Stock (Number of items):</span>
-                <span>${getStr(item.Numberofitems)}</span>
+                <span>${escapeHtml(item.Numberofitems || '0')} ${escapeHtml(item.UnitType || 'st')}</span>
                 <span id="cross-warehouse-total"></span>
                 ${isLowStock(item) ? `<span class="low-stock-badge" title="${lowStockTooltip(item)}">⚠️ Low stock</span>` : ''}
                 ${canEditItems() ? `<span style="display:flex;gap:6px;margin-left:auto;">
@@ -5875,7 +5924,10 @@ th { background: #eee; }
             <label class="modal-label" for="qe-itemnumber3">Item #3 (Internal)</label>
             <input type="text" id="qe-itemnumber3" value="${escapeHtml(val(item.itemnumber3))}">
             <label class="modal-label" for="qe-qty">Stock (Number of items)</label>
-            <input type="text" id="qe-qty" value="${escapeHtml(val(item.Numberofitems))}">
+            <div style="display:flex; gap:8px;">
+                <input type="text" id="qe-qty" value="${escapeHtml(val(item.Numberofitems))}" style="flex:2; margin:0;">
+                <select id="qe-unittype" style="flex:1; margin:0;">${unitTypeOptionsHtml(item.UnitType)}</select>
+            </div>
             <label class="modal-label" for="qe-reorder-threshold">Reorder Threshold (optional)</label>
             <input type="number" min="0" id="qe-reorder-threshold" value="${escapeHtml(item.ReorderThreshold || '')}" placeholder="Flags Low stock below this — leave blank to use the app-wide Settings default">
             <label class="modal-label" for="qe-location">Inventory Location</label>
@@ -5910,6 +5962,7 @@ th { background: #eee; }
             itemnumber2: document.getElementById('qe-itemnumber2').value.trim(),
             itemnumber3: document.getElementById('qe-itemnumber3').value.trim(),
             Numberofitems: document.getElementById('qe-qty').value.trim(),
+            UnitType: document.getElementById('qe-unittype').value || 'st',
             ReorderThreshold: document.getElementById('qe-reorder-threshold').value.trim(),
             Inventorylocation: document.getElementById('qe-location').value.trim(),
             MapPosition: document.getElementById('qe-mapposition').value.trim().toUpperCase(),
@@ -5971,6 +6024,7 @@ th { background: #eee; }
             itemnumber2: fields.itemnumber2 || 'None',
             itemnumber3: fields.itemnumber3 || 'None',
             Numberofitems: fields.Numberofitems || '0',
+            UnitType: UNIT_TYPES.some(u => u.value === fields.UnitType) ? fields.UnitType : 'st',
             ReorderThreshold: fields.ReorderThreshold || '',
             Inventorylocation: fields.Inventorylocation || 'None',
             MapPosition: fields.MapPosition || 'None',
@@ -5991,6 +6045,7 @@ th { background: #eee; }
                 itemname_en: updated['itemname(english)'], itemname_sv: updated['itemname(swedish)'],
                 itemnumber2: updated.itemnumber2, itemnumber3: updated.itemnumber3,
                 numberofitems: parseInt(updated.Numberofitems) || 0,
+                unit_type: updated.UnitType,
                 reorder_threshold: updated.ReorderThreshold === '' ? null : parseInt(updated.ReorderThreshold, 10),
                 inventorylocation: updated.Inventorylocation, map_position: updated.MapPosition === 'None' ? null : updated.MapPosition,
                 location_code: updated.LocationCode === 'None' ? null : updated.LocationCode, comments: updated.Comments
@@ -6533,6 +6588,7 @@ th { background: #eee; }
         document.getElementById('ai-btknumber').readOnly = false;
         ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-reorder-threshold','ai-location','ai-mapposition','ai-locationcode','ai-comments']
             .forEach(id => { document.getElementById(id).value = ''; });
+        document.getElementById('ai-unittype').value = 'st';
         populateLocationCodePicker('ai', '');
         document.getElementById('add-item-modal').classList.add('open');
     }
@@ -6559,6 +6615,7 @@ th { background: #eee; }
         document.getElementById('ai-num2').value = item.itemnumber2 === 'None' ? '' : item.itemnumber2;
         document.getElementById('ai-num3').value = item.itemnumber3 === 'None' ? '' : item.itemnumber3;
         document.getElementById('ai-qty').value = item.Numberofitems === 'None' ? '' : item.Numberofitems;
+        document.getElementById('ai-unittype').value = UNIT_TYPES.some(u => u.value === item.UnitType) ? item.UnitType : 'st';
         document.getElementById('ai-reorder-threshold').value = item.ReorderThreshold || '';
         document.getElementById('ai-location').value = item.Inventorylocation === 'None' ? '' : item.Inventorylocation;
         document.getElementById('ai-mapposition').value = item.MapPosition === 'None' ? '' : item.MapPosition;
@@ -6782,6 +6839,7 @@ th { background: #eee; }
         { key: 'itemnumber3', label: 'Item #3 (Internal)' },
         { key: 'Manufacturer', label: 'Manufacturer' },
         { key: 'Numberofitems', label: 'Quantity' },
+        { key: 'UnitType', label: 'Unit Type' },
         { key: 'Inventorylocation', label: 'Inventory Location' },
         { key: 'MapPosition', label: 'Map Position' },
         { key: 'LocationCode', label: 'Bin Location Code' },
@@ -7103,6 +7161,7 @@ th { background: #eee; }
             itemname_en: item['itemname(english)'], itemname_sv: item['itemname(swedish)'],
             itemnumber2: item.itemnumber2, itemnumber3: item.itemnumber3,
             numberofitems: parseInt(item.Numberofitems, 10) || 0,
+            unit_type: UNIT_TYPES.some(u => u.value === item.UnitType) ? item.UnitType : 'st',
             reorder_threshold: (item.ReorderThreshold === undefined || item.ReorderThreshold === '' || item.ReorderThreshold === null) ? null : parseInt(item.ReorderThreshold, 10),
             inventorylocation: item.Inventorylocation === 'None' ? null : item.Inventorylocation,
             map_position: item.MapPosition === 'None' ? null : item.MapPosition,
@@ -7216,6 +7275,7 @@ th { background: #eee; }
             'itemnumber2':       document.getElementById('ai-num2').value.trim() || 'None',
             'itemnumber3':       document.getElementById('ai-num3').value.trim() || 'None',
             'Numberofitems':     document.getElementById('ai-qty').value.trim() || '0',
+            'UnitType':          document.getElementById('ai-unittype').value || 'st',
             'ReorderThreshold':  document.getElementById('ai-reorder-threshold').value.trim(),
             'Inventorylocation': document.getElementById('ai-location').value.trim() || 'None',
             'MapPosition':       document.getElementById('ai-mapposition').value.trim().toUpperCase() || 'None',
@@ -7231,6 +7291,7 @@ th { background: #eee; }
                 itemname_en: newItem['itemname(english)'], itemname_sv: newItem['itemname(swedish)'],
                 itemnumber2: newItem.itemnumber2, itemnumber3: newItem.itemnumber3,
                 numberofitems: parseInt(newItem.Numberofitems) || 0,
+                unit_type: newItem.UnitType,
                 reorder_threshold: newItem.ReorderThreshold === '' ? null : parseInt(newItem.ReorderThreshold, 10),
                 inventorylocation: newItem.Inventorylocation, map_position: newItem.MapPosition === 'None' ? null : newItem.MapPosition,
                 location_code: newItem.LocationCode === 'None' ? null : newItem.LocationCode, comments: newItem.Comments
@@ -7775,6 +7836,7 @@ ${css}
         itemnumber2: { elId: 'qe-itemnumber2', itemKey: 'itemnumber2', label: 'Item Number 2' },
         itemnumber3: { elId: 'qe-itemnumber3', itemKey: 'itemnumber3', label: 'Item Number 3' },
         quantity: { elId: 'qe-qty', itemKey: 'Numberofitems', label: 'Quantity' },
+        unit_type: { elId: 'qe-unittype', itemKey: 'UnitType', label: 'Unit Type' },
         reorder_threshold: { elId: 'qe-reorder-threshold', itemKey: 'ReorderThreshold', label: 'Reorder Threshold' },
         location: { elId: 'qe-location', itemKey: 'Inventorylocation', label: 'Location' },
         map_position: { elId: 'qe-mapposition', itemKey: 'MapPosition', label: 'Map Position' },
@@ -7785,7 +7847,7 @@ ${css}
     const AI_SYSTEM_PROMPT = `You are an assistant embedded in a warehouse inventory app. The user gives a short instruction (voice-transcribed or typed), possibly in English, Swedish, or Finnish. Classify it into EXACTLY ONE JSON object, no prose, matching one of:
 {"action":"search_item","query":string}
 {"action":"pack_kit","query":string}
-{"action":"edit_field","field":"name_en"|"name_sv"|"manufacturer"|"itemnumber"|"itemnumber2"|"itemnumber3"|"quantity"|"reorder_threshold"|"location"|"map_position"|"location_code"|"comments","value":string}
+{"action":"edit_field","field":"name_en"|"name_sv"|"manufacturer"|"itemnumber"|"itemnumber2"|"itemnumber3"|"quantity"|"unit_type"|"reorder_threshold"|"location"|"map_position"|"location_code"|"comments","value":string}
 {"action":"web_search","query":string}
 {"action":"chat","reply":string}
 Rules:
