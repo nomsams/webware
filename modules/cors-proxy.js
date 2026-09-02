@@ -11,10 +11,12 @@
 // automatically, falling back to a direct fetch (works for hosts that already send CORS headers)
 // if it isn't configured or fails.
 //
-// Public proxies (corsproxy.io, allorigins.win) are NOT used unless a caller explicitly passes
-// `allowPublicFallback: true` — those are unrelated third parties who would otherwise silently see
-// every URL/query this fetches (a Pack Order address lookup, an AI Assistant web search, etc.) in
-// the clear whenever webware's own function isn't deployed or has an outage. Failing the request
+// Public proxies (corsproxy.io, allorigins.win) are NOT used unless allowPublicFallback is true —
+// passed per-call, or set as the running default via configureCorsProxy({allowPublicFallback}) or
+// setAllowPublicFallback() (index.html wires this to Settings → AI Assistant → "Allow public CORS
+// proxy fallback"). Those are unrelated third parties who would otherwise silently see every
+// URL/query this fetches (a Pack Order address lookup, an AI Assistant web search, etc.) in the
+// clear whenever webware's own function isn't deployed or has an outage. Failing the request
 // instead of leaking it to an unapproved third party is the safer default; opt in only if you've
 // decided that trade-off is acceptable for your use case.
 //
@@ -45,8 +47,10 @@ const PUBLIC_FALLBACKS = [
 ];
 
 let ownProxy = null; // { endpoint, supabaseAnonKey, getAccessToken, proxyKey } | null
+let allowPublicFallbackDefault = false;
 
-export function configureCorsProxy({ supabaseUrl, supabaseAnonKey, getAccessToken, proxyKey = DEFAULT_PROXY_KEY } = {}) {
+export function configureCorsProxy({ supabaseUrl, supabaseAnonKey, getAccessToken, proxyKey = DEFAULT_PROXY_KEY, allowPublicFallback } = {}) {
+  if (allowPublicFallback !== undefined) allowPublicFallbackDefault = !!allowPublicFallback;
   if (!supabaseUrl) { ownProxy = null; return; }
   if (!supabaseAnonKey || !getAccessToken) {
     throw new Error('configureCorsProxy: supabaseAnonKey and getAccessToken are required alongside supabaseUrl');
@@ -59,10 +63,17 @@ export function configureCorsProxy({ supabaseUrl, supabaseAnonKey, getAccessToke
   };
 }
 
-// Tries webware's own cors-proxy function first (if configured), then — only with
-// `allowPublicFallback: true` — each public proxy in order, then finally a direct fetch. Returns
+// Lets a caller flip the public-proxy-fallback default at runtime (e.g. a Settings toggle) without
+// re-supplying the rest of configureCorsProxy's args.
+export function setAllowPublicFallback(value) {
+  allowPublicFallbackDefault = !!value;
+}
+
+// Tries webware's own cors-proxy function first (if configured), then — only when
+// allowPublicFallback is true, either passed per-call or via configureCorsProxy()/
+// setAllowPublicFallback() — each public proxy in order, then finally a direct fetch. Returns
 // the first response with res.ok; throws the last error/status if every attempt fails.
-export async function corsFetch(targetUrl, options = {}, { fetchImpl = fetch, allowPublicFallback = false } = {}) {
+export async function corsFetch(targetUrl, options = {}, { fetchImpl = fetch, allowPublicFallback = allowPublicFallbackDefault } = {}) {
   const attempts = [];
   if (ownProxy) {
     attempts.push(async () => {
@@ -102,4 +113,5 @@ export async function corsFetch(targetUrl, options = {}, { fetchImpl = fetch, al
 // Exposed for tests / callers that want to reset state between uses.
 export function _resetCorsProxy() {
   ownProxy = null;
+  allowPublicFallbackDefault = false;
 }

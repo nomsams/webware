@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { corsFetch, configureCorsProxy, _resetCorsProxy, DEFAULT_PROXY_KEY } from '../cors-proxy.js';
+import { corsFetch, configureCorsProxy, setAllowPublicFallback, _resetCorsProxy, DEFAULT_PROXY_KEY } from '../cors-proxy.js';
 
 test.beforeEach(() => _resetCorsProxy());
 
@@ -148,4 +148,61 @@ test('configureCorsProxy() with no args clears the own proxy', async () => {
 
 test('configureCorsProxy requires anonKey and getAccessToken alongside supabaseUrl', () => {
   assert.throws(() => configureCorsProxy({ supabaseUrl: 'https://myproject.supabase.co' }), /required/);
+});
+
+test('setAllowPublicFallback flips the running default without a per-call override', async () => {
+  setAllowPublicFallback(true);
+  const calledUrls = [];
+  const fetchImpl = async (url) => {
+    calledUrls.push(url);
+    if (url.startsWith('https://api.allorigins.win/')) return { ok: true, status: 200 };
+    return { ok: false, status: 502 };
+  };
+
+  await corsFetch('https://example.com/page', {}, { fetchImpl });
+
+  assert.equal(calledUrls.length, 2);
+  assert.match(calledUrls[0], /^https:\/\/corsproxy\.io\//);
+});
+
+test('configureCorsProxy({allowPublicFallback}) sets the same running default', async () => {
+  configureCorsProxy({
+    supabaseUrl: 'https://myproject.supabase.co',
+    supabaseAnonKey: 'anon-key',
+    getAccessToken: async () => 'user-token',
+    allowPublicFallback: true,
+  });
+  const calledUrls = [];
+  const fetchImpl = async (url) => {
+    calledUrls.push(url);
+    if (url.startsWith('https://myproject.supabase.co/')) return { ok: false, status: 500 };
+    if (url.startsWith('https://corsproxy.io/')) return { ok: true, status: 200 };
+    return { ok: false, status: 502 };
+  };
+
+  await corsFetch('https://example.com/page', {}, { fetchImpl });
+
+  assert.equal(calledUrls.length, 2);
+  assert.match(calledUrls[1], /^https:\/\/corsproxy\.io\//);
+});
+
+test('a per-call allowPublicFallback overrides the running default in either direction', async () => {
+  setAllowPublicFallback(true);
+  const calledUrls = [];
+  const fetchImpl = async (url) => { calledUrls.push(url); return { ok: true, status: 200 }; };
+
+  await corsFetch('https://example.com/page', {}, { fetchImpl, allowPublicFallback: false });
+
+  assert.deepEqual(calledUrls, ['https://example.com/page']);
+});
+
+test('_resetCorsProxy() also resets the allowPublicFallback default', async () => {
+  setAllowPublicFallback(true);
+  _resetCorsProxy();
+  const calledUrls = [];
+  const fetchImpl = async (url) => { calledUrls.push(url); return { ok: true, status: 200 }; };
+
+  await corsFetch('https://example.com/page', {}, { fetchImpl });
+
+  assert.deepEqual(calledUrls, ['https://example.com/page']);
 });

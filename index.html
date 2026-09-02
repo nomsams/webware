@@ -1275,6 +1275,14 @@
             <p class="setting-desc">Stored once, shared by everyone using this app — never shown again after saving. Don't have one? Get a free key at <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>, then paste it above. Add a backup key any time; the assistant falls back to it if the first one hits a rate limit.</p>
         </div>
 
+        <div class="setting-row">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="cors-public-fallback-enabled" onchange="onCorsPublicFallbackChange()" style="width:auto; min-height:unset; margin:0;">
+                Allow public CORS proxy fallback for web search
+            </label>
+            <p class="setting-desc">Off by default. When webware's own CORS-proxy function isn't deployed or has an outage, the AI Assistant's web search normally just fails, rather than silently sending your search query to a public third-party proxy (corsproxy.io / allorigins.win) that could see it in the clear. Turn this on only if you'd rather have search keep working than avoid that exposure — this is a per-device setting.</p>
+        </div>
+
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>
         <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
     </section>
@@ -7234,9 +7242,18 @@ ${css}
         document.getElementById('lowstock-enabled').checked = lowStockEnabled;
         document.getElementById('lowstock-threshold').value = lowStockThreshold;
         document.getElementById('lowstock-threshold-row').classList.toggle('hidden', !lowStockEnabled);
+
+        // The actual corsFetch() behavior is already applied at page load (see the module bridge
+        // script, which reads this same key) — this just syncs the checkbox to match.
+        document.getElementById('cors-public-fallback-enabled').checked = localStorage.getItem('cors-allow-public-fallback') === '1';
     }
     function onLowStockSettingChange() {
         document.getElementById('lowstock-threshold-row').classList.toggle('hidden', !document.getElementById('lowstock-enabled').checked);
+    }
+    function onCorsPublicFallbackChange() {
+        const enabled = document.getElementById('cors-public-fallback-enabled').checked;
+        localStorage.setItem('cors-allow-public-fallback', enabled ? '1' : '0');
+        window.setAllowPublicFallback?.(enabled);
     }
     // A per-item ReorderThreshold (set via Add/Edit or quick-edit) always applies, regardless of
     // the global Settings toggle — setting one deliberately on a specific item is a stronger signal
@@ -7893,7 +7910,7 @@ Respond with ONLY the JSON object, nothing else.`;
     window.PerspectiveWarp = PerspectiveWarp;
 
     import { createGroqClient, GROQ_MODELS } from './modules/groq-client.js';
-    import { configureCorsProxy } from './modules/cors-proxy.js';
+    import { configureCorsProxy, setAllowPublicFallback } from './modules/cors-proxy.js';
     import { webSearch, fetchPageText } from './modules/web-search.js';
     window.GROQ_MODELS = GROQ_MODELS;
     window.aiGroq = createGroqClient({
@@ -7905,7 +7922,11 @@ Respond with ONLY the JSON object, nothing else.`;
         supabaseUrl: window.SUPABASE_URL,
         supabaseAnonKey: window.SUPABASE_ANON_KEY,
         getAccessToken: window.getSupabaseAccessToken,
+        // Off unless the user has explicitly opted in via Settings → AI Assistant — see
+        // modules/cors-proxy.js for why this defaults to not leaking queries to a public proxy.
+        allowPublicFallback: localStorage.getItem('cors-allow-public-fallback') === '1',
     });
+    window.setAllowPublicFallback = setAllowPublicFallback;
     window.duckySearch = webSearch;
     window.crawly = fetchPageText;
 </script>
