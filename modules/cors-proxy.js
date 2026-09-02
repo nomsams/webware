@@ -8,8 +8,15 @@
 // Default path calls webware's own cors-proxy Supabase Edge Function
 // (supabase/functions/cors-proxy) — deploy it and call configureCorsProxy() once (same
 // dependency-injected shape as groq-client.js's createGroqClient) and corsFetch() uses it
-// automatically, falling back to public proxies (corsproxy.io, allorigins.win) and finally a
-// direct fetch if it isn't configured or fails.
+// automatically, falling back to a direct fetch (works for hosts that already send CORS headers)
+// if it isn't configured or fails.
+//
+// Public proxies (corsproxy.io, allorigins.win) are NOT used unless a caller explicitly passes
+// `allowPublicFallback: true` — those are unrelated third parties who would otherwise silently see
+// every URL/query this fetches (a Pack Order address lookup, an AI Assistant web search, etc.) in
+// the clear whenever webware's own function isn't deployed or has an outage. Failing the request
+// instead of leaking it to an unapproved third party is the safer default; opt in only if you've
+// decided that trade-off is acceptable for your use case.
 //
 // On "chikibriki": crawly and timeline (github.com/nomsams/crawly, /timeline) default their
 // proxy key to the literal string "chikibriki" against a CORS-proxy Edge Function on a *different*
@@ -52,10 +59,10 @@ export function configureCorsProxy({ supabaseUrl, supabaseAnonKey, getAccessToke
   };
 }
 
-// Tries webware's own cors-proxy function first (if configured), then each public fallback in
-// order, then finally a direct fetch (works for hosts that already send CORS headers). Returns
+// Tries webware's own cors-proxy function first (if configured), then — only with
+// `allowPublicFallback: true` — each public proxy in order, then finally a direct fetch. Returns
 // the first response with res.ok; throws the last error/status if every attempt fails.
-export async function corsFetch(targetUrl, options = {}, { fetchImpl = fetch } = {}) {
+export async function corsFetch(targetUrl, options = {}, { fetchImpl = fetch, allowPublicFallback = false } = {}) {
   const attempts = [];
   if (ownProxy) {
     attempts.push(async () => {
@@ -72,8 +79,10 @@ export async function corsFetch(targetUrl, options = {}, { fetchImpl = fetch } =
       });
     });
   }
-  for (const build of PUBLIC_FALLBACKS) {
-    attempts.push(() => fetchImpl(build(targetUrl), options));
+  if (allowPublicFallback) {
+    for (const build of PUBLIC_FALLBACKS) {
+      attempts.push(() => fetchImpl(build(targetUrl), options));
+    }
   }
   attempts.push(() => fetchImpl(targetUrl, options));
 

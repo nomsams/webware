@@ -78,6 +78,18 @@ Deno.serve(async (req) => {
     return json({ error: "not authenticated" }, 401);
   }
 
+  // Signed in isn't the same as authorized — sending mail through the org's own SMTP identity to
+  // an arbitrary recipient with arbitrary content is sensitive enough to need the same "can write"
+  // bar the rest of the app uses (editor/maintainer/admin), not just any signed-in viewer.
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+  if (profileError || !profile || !["editor", "maintainer", "admin"].includes(profile.role)) {
+    return json({ error: "not authorized to send email" }, 403);
+  }
+
   let body: { to?: string; subject?: string; text?: string };
   try {
     body = await req.json();
@@ -86,6 +98,18 @@ Deno.serve(async (req) => {
   }
   const { to, subject, text } = body;
   if (!to || typeof to !== "string") return json({ error: "to is required" }, 400);
+
+  // Basic shape check + CRLF rejection on the two header-bound fields — defense in depth against
+  // header injection (e.g. a smuggled extra "Bcc:" line) regardless of what denomailer itself
+  // guards against internally. `text` is the message body, not a header, so newlines there are
+  // expected and left alone.
+  const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+  if (!EMAIL_RE.test(to) || /[\r\n]/.test(to)) {
+    return json({ error: "to must be a single, valid email address" }, 400);
+  }
+  if (subject !== undefined && subject !== null && (typeof subject !== "string" || /[\r\n]/.test(subject))) {
+    return json({ error: "subject must not contain line breaks" }, 400);
+  }
 
   const client = new SMTPClient({
     connection: {

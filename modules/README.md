@@ -65,14 +65,18 @@ node --test modules/tests/*.test.js
   neither is more than a few lines to add directly wherever this ends up wired in, if wanted.
 - **`email-sender.js`** + **`../supabase/functions/send-email/index.ts`** — sends email via SMTP
   (Gmail/Outlook/one.com presets, or a custom host for your own server), credentials held as
-  Supabase secrets, same pattern as `GROQ_API_KEY`. Also exports `buildMailtoLink()`, a
-  zero-backend fallback that just opens the user's own mail client with everything prefilled, and
-  `buildPackOrderEmailTemplate()`, which turns an `order-parser.js`-shaped draft into a ready
-  subject/body. **Not exercised against a live SMTP server** (no Deno runtime available in this
-  environment) — the `denomailer` usage follows its documented API but verify it end-to-end once
-  deployed. See the function's doc comment for the Gmail app-password requirement and the Outlook
-  basic-auth caveat (Microsoft has disabled it for most tenants since 2022–2023 — confirm yours
-  still allows it before relying on that preset).
+  Supabase secrets, same pattern as `GROQ_API_KEY`. The function requires editor/maintainer/admin
+  (checked server-side against `profiles.role`, not just "signed in" — sending mail as the org's
+  own SMTP identity to an arbitrary recipient is sensitive enough to need the same bar the rest of
+  the app uses for writes) and validates `to`/`subject` (a real email shape, no `\r\n`) before
+  handing anything to the SMTP client, as defense in depth against header injection. Also exports
+  `buildMailtoLink()`, a zero-backend fallback that just opens the user's own mail client with
+  everything prefilled, and `buildPackOrderEmailTemplate()`, which turns an `order-parser.js`-shaped
+  draft into a ready subject/body. **Not exercised against a live SMTP server** (no Deno runtime
+  available in this environment) — the `denomailer` usage follows its documented API but verify it
+  end-to-end once deployed. See the function's doc comment for the Gmail app-password requirement
+  and the Outlook basic-auth caveat (Microsoft has disabled it for most tenants since 2022–2023 —
+  confirm yours still allows it before relying on that preset).
 
 - **`perspective-warp.js`** — **wired in** (see above), unlike everything else on this list. Straightens
   a rack/aisle photo taken at an angle into a flat top-down rectangle — mark the 4 corners of the

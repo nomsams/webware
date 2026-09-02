@@ -2236,6 +2236,29 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ════════════════════════════════════════════════════════════════════════
     const BTK_RE = /BTK0*([0-9]{1,6})/i;
 
+    // Random per-upload token appended to Storage object paths — the item-images/rack-images
+    // buckets are public (getPublicUrl() ignores RLS, see README), so a purely deterministic path
+    // (just the BTK, or warehouse/zone/aisle/rack) let anyone walk the predictable sequence and
+    // view every photo with zero credentials. The real path is now only ever recorded on the
+    // owning row (items.image_full_url, warehouse_rack_images.image_url), reachable only through a
+    // normal RLS-gated select — see storage_object_btk() (schema_storage_object_btk_token.sql) for
+    // the matching server-side change this depends on for item-images' write policies.
+    function randomStorageToken() {
+        if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+        return (Date.now().toString(16) + Math.random().toString(16).slice(2)).slice(0, 12);
+    }
+
+    // Recovers the Storage object path from a previously-stored getPublicUrl() string, so
+    // replacing or removing a photo targets the real (tokenized) filename instead of trying to
+    // reconstruct one deterministically.
+    function storagePathFromPublicUrl(url, bucket) {
+        if (!url) return null;
+        const marker = `/storage/v1/object/public/${bucket}/`;
+        const idx = url.indexOf(marker);
+        if (idx === -1) return null;
+        return url.slice(idx + marker.length).split('?')[0];
+    }
+
     function drawToBlob(bmp, maxDim, q) {
         const s = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
         const c = document.createElement('canvas');
@@ -2589,20 +2612,29 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     // All accepted images in this batch are downloaded and linked to the item together, once the
     // queue is empty — same "download + drop into assets/" convention as the rest of the app.
-    // Uploads a single item's full+thumb blobs to Supabase Storage (flat filenames keyed by BTK,
-    // upsert so re-uploading just replaces in place — no old-version cleanup needed) and links them
-    // on the item row. Cache-busts the URL so the browser doesn't keep showing a stale replaced image.
+    // Uploads a single item's full+thumb blobs to Supabase Storage — each path carries a random
+    // token (randomStorageToken()) rather than being purely BTK-derived, since the bucket is public
+    // and a deterministic path would let anyone enumerate every item's photo with zero credentials.
+    // Each upload therefore gets its own new path (upsert:true no longer replaces "in place" the
+    // way the old deterministic name did), so the previous photo's objects are explicitly cleaned
+    // up afterward instead of being left behind as storage-quota-eating orphans. The URL is
+    // inherently unique per upload now, so no separate cache-busting query param is needed.
     async function uploadItemPhotoToSupabase(btk, full, thumb) {
-        const fullPath = `${btk}_full.jpg`, thumbPath = `${btk}_thumb.jpg`;
+        const existingItem = globalInventory.find(i => i.BTKnumber === btk) || {};
+        const oldFullPath = storagePathFromPublicUrl(existingItem.imageFullUrl, SUPABASE_STORAGE_BUCKET);
+        const oldThumbPath = storagePathFromPublicUrl(existingItem.imageThumbUrl, SUPABASE_STORAGE_BUCKET);
+        const token = randomStorageToken();
+        const fullPath = `${btk}_${token}_full.jpg`, thumbPath = `${btk}_${token}_thumb.jpg`;
         const up1 = await sb.storage.from(SUPABASE_STORAGE_BUCKET).upload(fullPath, full, { upsert: true, contentType: 'image/jpeg' });
         if (up1.error) throw up1.error;
         const up2 = await sb.storage.from(SUPABASE_STORAGE_BUCKET).upload(thumbPath, thumb, { upsert: true, contentType: 'image/jpeg' });
         if (up2.error) throw up2.error;
-        const bust = '?v=' + Date.now();
-        const fullUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(fullPath).data.publicUrl + bust;
-        const thumbUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(thumbPath).data.publicUrl + bust;
+        const fullUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(fullPath).data.publicUrl;
+        const thumbUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(thumbPath).data.publicUrl;
         const { error } = await sb.from('items').update({ image_full_url: fullUrl, image_thumb_url: thumbUrl }).eq('btk', btk);
         if (error) throw error;
+        const stale = [oldFullPath, oldThumbPath].filter(p => p && p !== fullPath && p !== thumbPath);
+        if (stale.length) await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove(stale).catch(() => {});
         return { fullUrl, thumbUrl };
     }
 
@@ -3341,9 +3373,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             div.innerHTML = `
                 <div class="select-circle" role="checkbox" aria-checked="${isChecked}" data-id="${id}" aria-label="Select for label" tabindex="0"></div>
                 <div class="item-info">
-                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed'} ${lowStockBadge}</div>
-                    ${rNums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${rNums}</div>` : ''}
-                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${rMfr ? rMfr + ' ' : ''}${id}</div>
+                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${escapeHtml(item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed')} ${lowStockBadge}</div>
+                    ${rNums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${escapeHtml(rNums)}</div>` : ''}
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${rMfr ? escapeHtml(rMfr) + ' ' : ''}${id}</div>
                 </div>
                 ${qtyHtml}`;
             div.onclick = () => openItem(id, { type: 'global' });
@@ -3490,9 +3522,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 <div class="select-circle" role="checkbox" aria-checked="${isSelected}" data-id="${btk}" aria-label="Select for pack order" tabindex="0"></div>
                 ${stepperHtml}
                 <div class="kit-info">
-                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${kName}</div>
-                    ${kNums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${kNums}</div>` : ''}
-                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${kMfr ? kMfr + ' ' : ''}${btk}</div>
+                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${escapeHtml(kName)}</div>
+                    ${kNums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${escapeHtml(kNums)}</div>` : ''}
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${kMfr ? escapeHtml(kMfr) + ' ' : ''}${btk}</div>
                 </div>
                 <span class="kit-qty-badge">×${qty}</span>`;
             div.onclick = () => openItem(btk, { type: 'kit', kitnumber: kit.kitnumber, kitName: kit.name, items: btks });
@@ -3601,8 +3633,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             div.innerHTML = `
                 <div class="select-circle" role="checkbox" aria-checked="${selectedItems.has(btk)}" data-id="${btk}" aria-label="Select for pack order" tabindex="0"></div>
                 <div class="kit-info">
-                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed'}</div>
-                    <div class="item-sub" style="font-weight:700;color:var(--text-main);">${nums}</div>
+                    <div class="item-title" style="font-size:1.05rem;font-weight:800;">${escapeHtml(item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed')}</div>
+                    <div class="item-sub" style="font-weight:700;color:var(--text-main);">${escapeHtml(nums)}</div>
                     <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${btk}</div>
                 </div>`;
             div.onclick = () => openItem(btk, { type: 'global' });
@@ -4197,14 +4229,21 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         try {
             const bmp = await createImageBitmap(file);
             const blob = await drawToBlob(bmp, 1600, 0.85);
-            const path = `${currentWarehouseId}/${zone}-${aisle}-${rack}.jpg`;
+            // Tokenized path, same reasoning as item-images: rack-images is a public bucket, and
+            // `<warehouseId>/<zone>-<aisle>-<rack>.jpg` was fully guessable from the warehouse's own
+            // (small, sequential) zone/aisle/rack layout — anyone could have walked the whole
+            // facility's interior photos with zero credentials.
+            const existing = globalRackImages.find(i => i.warehouse_id === currentWarehouseId && i.zone === zone && i.aisle === aisle && i.rack === rack);
+            const oldPath = existing ? storagePathFromPublicUrl(existing.image_url, 'rack-images') : null;
+            const path = `${currentWarehouseId}/${zone}-${aisle}-${rack}-${randomStorageToken()}.jpg`;
             const up = await sb.storage.from('rack-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
             if (up.error) throw up.error;
-            const url = sb.storage.from('rack-images').getPublicUrl(path).data.publicUrl + '?v=' + Date.now();
+            const url = sb.storage.from('rack-images').getPublicUrl(path).data.publicUrl;
             const { data, error } = await sb.from('warehouse_rack_images')
                 .upsert({ warehouse_id: currentWarehouseId, zone, aisle, rack, image_url: url }, { onConflict: 'warehouse_id,zone,aisle,rack' })
                 .select().single();
             if (error) throw error;
+            if (oldPath && oldPath !== path) await sb.storage.from('rack-images').remove([oldPath]).catch(() => {});
             const idx = globalRackImages.findIndex(i => i.id === data.id);
             if (idx >= 0) globalRackImages[idx] = data; else globalRackImages.push(data);
             renderRackImageGallery();
@@ -4219,8 +4258,15 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const img = globalRackImages.find(i => i.id === id);
         if (!img || !confirm("Remove this photo?")) return;
         try {
-            const path = `${img.warehouse_id}/${img.zone}-${img.aisle}-${img.rack}.jpg`;
-            await sb.storage.from('rack-images').remove([path]);
+            // Tokenized paths (see handleRackImageUpload) can't be reconstructed from the row's own
+            // zone/aisle/rack fields — recover both the base and any "straightened" derivative from
+            // their actual stored URLs instead. (The derivative was never cleaned up here before —
+            // a pre-existing leak this happens to fix too.)
+            const paths = [
+                storagePathFromPublicUrl(img.image_url, 'rack-images'),
+                storagePathFromPublicUrl(img.grid_overlay?.rectifiedImageUrl, 'rack-images'),
+            ].filter(Boolean);
+            if (paths.length) await sb.storage.from('rack-images').remove(paths);
             const { error } = await sb.from('warehouse_rack_images').delete().eq('id', id);
             if (error) throw error;
             globalRackImages = globalRackImages.filter(i => i.id !== id);
@@ -4468,10 +4514,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!rec) return;
         try {
             const blob = await new Promise(resolve => rackWarpState.rectifiedCanvas.toBlob(resolve, 'image/jpeg', 0.9));
-            const path = `${rec.warehouse_id}/${rec.zone}-${rec.aisle}-${rec.rack}-rectified.jpg`;
+            const oldRectifiedPath = storagePathFromPublicUrl(rec.grid_overlay?.rectifiedImageUrl, 'rack-images');
+            const path = `${rec.warehouse_id}/${rec.zone}-${rec.aisle}-${rec.rack}-rectified-${randomStorageToken()}.jpg`;
             const up = await sb.storage.from('rack-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
             if (up.error) throw up.error;
-            const rectifiedImageUrl = sb.storage.from('rack-images').getPublicUrl(path).data.publicUrl + '?v=' + Date.now();
+            const rectifiedImageUrl = sb.storage.from('rack-images').getPublicUrl(path).data.publicUrl;
 
             const gridOverlay = {
                 corners: rackWarpState.corners,
@@ -4482,6 +4529,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             };
             const { data, error } = await sb.from('warehouse_rack_images').update({ grid_overlay: gridOverlay }).eq('id', rackWarpState.imageId).select().single();
             if (error) throw error;
+            if (oldRectifiedPath && oldRectifiedPath !== path) await sb.storage.from('rack-images').remove([oldRectifiedPath]).catch(() => {});
 
             const idx = globalRackImages.findIndex(i => i.id === data.id);
             if (idx >= 0) globalRackImages[idx] = data;
@@ -5287,7 +5335,7 @@ th { background: #eee; }
     // behavior); the 🏭 link (Supabase mode, when linked) navigates to that manufacturer's page.
     // Two separate clickable spans rather than one, so each keeps its own single responsibility.
     function manufacturerField(item) {
-        const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
+        const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : escapeHtml(val);
         if (!item.Manufacturer || item.Manufacturer === 'None') {
             return `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Manufacturer:</span><span>${getStr(item.Manufacturer)}</span></div>`;
         }
@@ -5347,7 +5395,7 @@ th { background: #eee; }
     }
 
     function renderItemFields(item, id) {
-        const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : val;
+        const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : escapeHtml(val);
         const dMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
         const field = (label, val) => `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">${label}:</span><span>${getStr(val)}</span></div>`;
         const fieldLink = (label, key, val) => {
@@ -5358,7 +5406,7 @@ th { background: #eee; }
             return `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">${label}:</span><span>${valHtml}</span></div>`;
         };
         document.getElementById('detail-content').innerHTML = `
-            <div style="margin-bottom:14px;font-size:1rem;color:var(--text-muted);"><strong style="color:var(--text-main);">${dMfr ? dMfr + ' · ' : ''}</strong><span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span></div>
+            <div style="margin-bottom:14px;font-size:1rem;color:var(--text-muted);"><strong style="color:var(--text-main);">${dMfr ? escapeHtml(dMfr) + ' · ' : ''}</strong><span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span></div>
             ${field('Item Name (English)', item['itemname(english)'])}
             ${field('Item Name (Swedish)', item['itemname(swedish)'])}
             ${fieldLink('Item #1', 'itemnumber', item.itemnumber)}
@@ -5660,7 +5708,13 @@ th { background: #eee; }
 
         if (isSupa) {
             try {
-                await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove([`${currentItemBTK}_full.jpg`, `${currentItemBTK}_thumb.jpg`]);
+                // Paths are tokenized (see uploadItemPhotoToSupabase), not reconstructible from the
+                // BTK alone — the item's own stored URL is the only source of truth for them now.
+                const paths = [
+                    storagePathFromPublicUrl(item.imageFullUrl, SUPABASE_STORAGE_BUCKET),
+                    storagePathFromPublicUrl(item.imageThumbUrl, SUPABASE_STORAGE_BUCKET),
+                ].filter(Boolean);
+                if (paths.length) await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove(paths);
                 const { error } = await sb.from('items').update({ image_full_url: null, image_thumb_url: null }).eq('btk', currentItemBTK);
                 if (error) throw error;
                 item.imageFullUrl = ''; item.imageThumbUrl = '';

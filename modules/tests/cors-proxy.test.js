@@ -6,7 +6,17 @@ import { corsFetch, configureCorsProxy, _resetCorsProxy, DEFAULT_PROXY_KEY } fro
 
 test.beforeEach(() => _resetCorsProxy());
 
-test('unconfigured corsFetch falls through public proxies in order until one succeeds', async () => {
+test('unconfigured corsFetch does NOT touch public proxies by default — goes straight to a direct fetch', async () => {
+  const calledUrls = [];
+  const fetchImpl = async (url) => { calledUrls.push(url); return { ok: true, status: 200 }; };
+
+  const res = await corsFetch('https://example.com/page', {}, { fetchImpl });
+
+  assert.equal(res.ok, true);
+  assert.deepEqual(calledUrls, ['https://example.com/page']);
+});
+
+test('with allowPublicFallback: true, an unconfigured corsFetch falls through public proxies in order', async () => {
   const calledUrls = [];
   const fetchImpl = async (url) => {
     calledUrls.push(url);
@@ -14,7 +24,7 @@ test('unconfigured corsFetch falls through public proxies in order until one suc
     return { ok: false, status: 502 };
   };
 
-  const res = await corsFetch('https://example.com/page', {}, { fetchImpl });
+  const res = await corsFetch('https://example.com/page', {}, { fetchImpl, allowPublicFallback: true });
 
   assert.equal(res.ok, true);
   assert.equal(calledUrls.length, 2);
@@ -59,7 +69,7 @@ test('configureCorsProxy accepts a custom proxyKey override', async () => {
   assert.equal(calls[0]['x-proxy-key'], 'my-custom-key');
 });
 
-test('own-proxy failure falls back to public proxies', async () => {
+test('own-proxy failure without allowPublicFallback goes to a direct fetch, not public proxies', async () => {
   configureCorsProxy({
     supabaseUrl: 'https://myproject.supabase.co',
     supabaseAnonKey: 'anon-key',
@@ -73,6 +83,28 @@ test('own-proxy failure falls back to public proxies', async () => {
   };
 
   const res = await corsFetch('https://example.com/page', {}, { fetchImpl });
+
+  assert.equal(res.ok, true);
+  assert.equal(calledUrls.length, 2);
+  assert.match(calledUrls[0], /^https:\/\/myproject\.supabase\.co\//);
+  assert.equal(calledUrls[1], 'https://example.com/page');
+});
+
+test('own-proxy failure WITH allowPublicFallback falls back to public proxies', async () => {
+  configureCorsProxy({
+    supabaseUrl: 'https://myproject.supabase.co',
+    supabaseAnonKey: 'anon-key',
+    getAccessToken: async () => 'user-token',
+  });
+  const calledUrls = [];
+  const fetchImpl = async (url) => {
+    calledUrls.push(url);
+    if (url.startsWith('https://myproject.supabase.co/')) return { ok: false, status: 500 };
+    if (url.startsWith('https://corsproxy.io/')) return { ok: true, status: 200 };
+    return { ok: false, status: 502 };
+  };
+
+  const res = await corsFetch('https://example.com/page', {}, { fetchImpl, allowPublicFallback: true });
 
   assert.equal(res.ok, true);
   assert.equal(calledUrls.length, 2);
@@ -111,7 +143,7 @@ test('configureCorsProxy() with no args clears the own proxy', async () => {
 
   await corsFetch('https://example.com/page', {}, { fetchImpl });
 
-  assert.match(calledUrls[0], /^https:\/\/corsproxy\.io\//);
+  assert.deepEqual(calledUrls, ['https://example.com/page']);
 });
 
 test('configureCorsProxy requires anonKey and getAccessToken alongside supabaseUrl', () => {
