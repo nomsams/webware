@@ -38,29 +38,40 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
   }
-  if (req.method !== "POST") {
-    return json({ error: "POST only" }, 405);
-  }
+  // Everything past this point is wrapped — an unhandled throw here (a bad env var, a Supabase
+  // client error, anything) would otherwise fall through to Deno's own default error response,
+  // which does NOT carry CORS_HEADERS. Since every real call to this function is cross-origin, the
+  // browser then blocks that response entirely and reports it to the caller as a bare network
+  // failure ("Failed to fetch") with zero detail — indistinguishable from the function never having
+  // been deployed at all. Catching here turns that into a real, visible error instead.
+  try {
+    if (req.method !== "POST") {
+      return json({ error: "POST only" }, 405);
+    }
 
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const authedClient = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: { user }, error: authError } = await authedClient.auth.getUser();
-  if (authError || !user) {
-    return json({ error: "not authenticated" }, 401);
-  }
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const authedClient = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: authError } = await authedClient.auth.getUser();
+    if (authError || !user) {
+      return json({ error: "not authenticated" }, 401);
+    }
 
-  const keys = await loadActiveKeys();
-  if (keys.length === 0) {
-    return json({ error: "no Groq API key configured — add one in Settings → AI Assistant" }, 500);
-  }
+    const keys = await loadActiveKeys();
+    if (keys.length === 0) {
+      return json({ error: "no Groq API key configured — add one in Settings → AI Assistant" }, 500);
+    }
 
-  const contentType = req.headers.get("Content-Type") || "";
-  if (contentType.includes("multipart/form-data")) {
-    return handleTranscription(req, keys);
+    const contentType = req.headers.get("Content-Type") || "";
+    if (contentType.includes("multipart/form-data")) {
+      return await handleTranscription(req, keys);
+    }
+    return await handleChat(req, keys);
+  } catch (err) {
+    console.error("groq-proxy: unhandled error:", err);
+    return json({ error: err instanceof Error ? err.message : "internal error" }, 500);
   }
-  return handleChat(req, keys);
 });
 
 // Service-role client — bypasses RLS, so this is the only place able to read llm_api_keys.api_key.

@@ -62,78 +62,86 @@ const CORS_HEADERS = {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
-  if (req.method !== "POST") return json({ error: "POST only" }, 405);
-
-  const smtpConfig = resolveSmtpConfig();
-  if (!smtpConfig || !SMTP_USER || !SMTP_PASSWORD) {
-    return json({ error: "SMTP is not configured (SMTP_PROVIDER/SMTP_HOST, SMTP_USER, SMTP_PASSWORD secrets)" }, 500);
-  }
-
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const supabase = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) {
-    return json({ error: "not authenticated" }, 401);
-  }
-
-  // Signed in isn't the same as authorized — sending mail through the org's own SMTP identity to
-  // an arbitrary recipient with arbitrary content is sensitive enough to need the same "can write"
-  // bar the rest of the app uses (editor/maintainer/admin), not just any signed-in viewer.
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-  if (profileError || !profile || !["editor", "maintainer", "admin"].includes(profile.role)) {
-    return json({ error: "not authorized to send email" }, 403);
-  }
-
-  let body: { to?: string; subject?: string; text?: string };
+  // Wrapped for the same reason as groq-proxy/cors-proxy: an unhandled throw here would fall
+  // through to Deno's own default error response, which carries no CORS headers — the browser
+  // blocks it outright on a cross-origin call, surfacing only a bare "Failed to fetch".
   try {
-    body = await req.json();
-  } catch {
-    return json({ error: "invalid JSON body" }, 400);
-  }
-  const { to, subject, text } = body;
-  if (!to || typeof to !== "string") return json({ error: "to is required" }, 400);
+    if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
-  // Basic shape check + CRLF rejection on the two header-bound fields — defense in depth against
-  // header injection (e.g. a smuggled extra "Bcc:" line) regardless of what denomailer itself
-  // guards against internally. `text` is the message body, not a header, so newlines there are
-  // expected and left alone.
-  const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
-  if (!EMAIL_RE.test(to) || /[\r\n]/.test(to)) {
-    return json({ error: "to must be a single, valid email address" }, 400);
-  }
-  if (subject !== undefined && subject !== null && (typeof subject !== "string" || /[\r\n]/.test(subject))) {
-    return json({ error: "subject must not contain line breaks" }, 400);
-  }
+    const smtpConfig = resolveSmtpConfig();
+    if (!smtpConfig || !SMTP_USER || !SMTP_PASSWORD) {
+      return json({ error: "SMTP is not configured (SMTP_PROVIDER/SMTP_HOST, SMTP_USER, SMTP_PASSWORD secrets)" }, 500);
+    }
 
-  const client = new SMTPClient({
-    connection: {
-      hostname: smtpConfig.host,
-      port: smtpConfig.port,
-      tls: smtpConfig.secure,
-      auth: { username: SMTP_USER, password: SMTP_PASSWORD },
-    },
-  });
-
-  try {
-    await client.send({
-      from: SMTP_FROM!,
-      to,
-      subject: subject || "(no subject)",
-      content: text || "",
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
+      global: { headers: { Authorization: authHeader } },
     });
-  } catch (err) {
-    return json({ error: `send failed: ${err instanceof Error ? err.message : String(err)}` }, 502);
-  } finally {
-    await client.close();
-  }
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return json({ error: "not authenticated" }, 401);
+    }
 
-  return json({ sent: true });
+    // Signed in isn't the same as authorized — sending mail through the org's own SMTP identity to
+    // an arbitrary recipient with arbitrary content is sensitive enough to need the same "can write"
+    // bar the rest of the app uses (editor/maintainer/admin), not just any signed-in viewer.
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    if (profileError || !profile || !["editor", "maintainer", "admin"].includes(profile.role)) {
+      return json({ error: "not authorized to send email" }, 403);
+    }
+
+    let body: { to?: string; subject?: string; text?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "invalid JSON body" }, 400);
+    }
+    const { to, subject, text } = body;
+    if (!to || typeof to !== "string") return json({ error: "to is required" }, 400);
+
+    // Basic shape check + CRLF rejection on the two header-bound fields — defense in depth against
+    // header injection (e.g. a smuggled extra "Bcc:" line) regardless of what denomailer itself
+    // guards against internally. `text` is the message body, not a header, so newlines there are
+    // expected and left alone.
+    const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+    if (!EMAIL_RE.test(to) || /[\r\n]/.test(to)) {
+      return json({ error: "to must be a single, valid email address" }, 400);
+    }
+    if (subject !== undefined && subject !== null && (typeof subject !== "string" || /[\r\n]/.test(subject))) {
+      return json({ error: "subject must not contain line breaks" }, 400);
+    }
+
+    const client = new SMTPClient({
+      connection: {
+        hostname: smtpConfig.host,
+        port: smtpConfig.port,
+        tls: smtpConfig.secure,
+        auth: { username: SMTP_USER, password: SMTP_PASSWORD },
+      },
+    });
+
+    try {
+      await client.send({
+        from: SMTP_FROM!,
+        to,
+        subject: subject || "(no subject)",
+        content: text || "",
+      });
+    } catch (err) {
+      return json({ error: `send failed: ${err instanceof Error ? err.message : String(err)}` }, 502);
+    } finally {
+      await client.close();
+    }
+
+    return json({ sent: true });
+  } catch (err) {
+    console.error("send-email: unhandled error:", err);
+    return json({ error: err instanceof Error ? err.message : "internal error" }, 500);
+  }
 });
 
 function json(body: unknown, status = 200): Response {

@@ -39,48 +39,57 @@ function isBlockedHost(hostname: string): boolean {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
-  if (req.method !== "GET") return json({ error: "GET only" }, 405);
-
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const supabase = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) {
-    return json({ error: "not authenticated" }, 401);
-  }
-
-  if (CORS_PROXY_KEY && req.headers.get("x-proxy-key") !== CORS_PROXY_KEY) {
-    return json({ error: "invalid proxy key" }, 403);
-  }
-
-  const targetUrl = new URL(req.url).searchParams.get("url");
-  if (!targetUrl) return json({ error: "?url= is required" }, 400);
-
-  let parsed: URL;
+  // Wrapped for the same reason as groq-proxy: an unhandled throw here would fall through to
+  // Deno's own default error response, which carries no CORS headers — the browser blocks it
+  // outright on a cross-origin call, and the caller sees a bare "Failed to fetch" with no detail,
+  // indistinguishable from this function never having been deployed.
   try {
-    parsed = new URL(targetUrl);
-  } catch {
-    return json({ error: "invalid url" }, 400);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return json({ error: "only http/https urls are allowed" }, 400);
-  }
-  if (isBlockedHost(parsed.hostname)) {
-    return json({ error: "that host is not allowed" }, 400);
-  }
+    if (req.method !== "GET") return json({ error: "GET only" }, 405);
 
-  const upstream = await fetch(parsed.toString(), {
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; webware-cors-proxy/1.0)" },
-  });
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return json({ error: "not authenticated" }, 401);
+    }
 
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers: {
-      ...CORS_HEADERS,
-      "Content-Type": upstream.headers.get("Content-Type") ?? "text/plain",
-    },
-  });
+    if (CORS_PROXY_KEY && req.headers.get("x-proxy-key") !== CORS_PROXY_KEY) {
+      return json({ error: "invalid proxy key" }, 403);
+    }
+
+    const targetUrl = new URL(req.url).searchParams.get("url");
+    if (!targetUrl) return json({ error: "?url= is required" }, 400);
+
+    let parsed: URL;
+    try {
+      parsed = new URL(targetUrl);
+    } catch {
+      return json({ error: "invalid url" }, 400);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return json({ error: "only http/https urls are allowed" }, 400);
+    }
+    if (isBlockedHost(parsed.hostname)) {
+      return json({ error: "that host is not allowed" }, 400);
+    }
+
+    const upstream = await fetch(parsed.toString(), {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; webware-cors-proxy/1.0)" },
+    });
+
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": upstream.headers.get("Content-Type") ?? "text/plain",
+      },
+    });
+  } catch (err) {
+    console.error("cors-proxy: unhandled error:", err);
+    return json({ error: err instanceof Error ? err.message : "internal error" }, 500);
+  }
 });
 
 function json(body: unknown, status = 200): Response {
