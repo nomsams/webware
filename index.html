@@ -891,7 +891,7 @@
 
         <div id="manufacturers-only-controls" class="hidden">
             <div class="search-wrapper" id="manufacturer-search-container">
-                <input type="text" id="manufacturer-search-box" aria-label="Search Manufacturers" placeholder="Search manufacturer name..." oninput="debounceManufacturerSearch()">
+                <input type="text" id="manufacturer-search-box" aria-label="Search Manufacturers" placeholder="Search manufacturer, item name, number, BTK..." oninput="debounceManufacturerSearch()">
                 <button class="search-clear" onclick="clearManufacturerSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
             </div>
         </div>
@@ -3591,12 +3591,28 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ════════════════════════════════════════════════════════════════════════
     //  MANUFACTURERS (Supabase mode only) — list, detail page, edit modal, logo upload
     // ════════════════════════════════════════════════════════════════════════
+    // A manufacturer matches either by its own name, or by any of ITS items matching the same
+    // broad set of fields the main item search uses — so typing an item name, number, or BTK here
+    // finds the right manufacturer too, not just a manufacturer-name substring match.
+    function manufacturerMatchesQuery(m, query) {
+        if ((m.name || '').toLowerCase().includes(query)) return true;
+        return globalInventory.some(item => {
+            if (item.manufacturerId !== m.id) return false;
+            const fields = [
+                item['itemname(english)'], item['itemname(swedish)'], item.BTKnumber,
+                item.itemnumber, item.itemnumber2, item.itemnumber3,
+                item.Inventorylocation, item.LocationCode, item.Comments, item.Numberofitems,
+            ];
+            return fields.some(f => f && f.toString().toLowerCase().includes(query));
+        });
+    }
+
     function renderManufacturersList() {
         const container = document.getElementById('item-list-container');
         container.innerHTML = '';
         const frag = document.createDocumentFragment();
         const query = (document.getElementById('manufacturer-search-box')?.value || '').toLowerCase().trim();
-        const manufacturers = query ? globalManufacturers.filter(m => (m.name || '').toLowerCase().includes(query)) : globalManufacturers;
+        const manufacturers = query ? globalManufacturers.filter(m => manufacturerMatchesQuery(m, query)) : globalManufacturers;
 
         // The "Add Manufacturer" row is a create action, not a search result — only show it
         // unfiltered, so a search that matches nothing doesn't look like a dead end.

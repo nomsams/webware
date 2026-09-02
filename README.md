@@ -232,6 +232,7 @@ Everything lives in the `public` schema with RLS enabled. Set up a fresh project
 | 26 | `schema_llm_assistant_bootstrap_fix.sql` | tightens `p_llm_api_keys_insert`'s bootstrap clause to editor+ — it previously let a viewer add the first key |
 | 27 | `schema_storage_object_btk_token.sql` | updates `storage_object_btk()` for tokenized item-image filenames (see the Images section below); backward-compatible with untokenized ones already uploaded |
 | 28 | `schema_harden_search_path.sql` | pins `search_path` on every `SECURITY DEFINER` function (hardening — see the function's own comment) |
+| 29 | `schema_llm_assistant_grant_repair.sql` | re-asserts the `insert, delete` grant on `llm_api_keys` (fixes "permission denied for table llm_api_keys" on insert), and rewrites the insert policy's bootstrap check to use `has_llm_api_key()` instead of a raw self-referencing subquery that needed a grant nothing ever gave it |
 | — | `schema_image_storage_fix_bucket_public.sql` | not numbered/sequential — a standalone repair for an already-provisioned project where `item-images` was created private before `schema_image_storage.sql` ran; forces the bucket `public = true`. Safe to re-run, run any time you're seeing broken images. |
 
 `seed_items.sql` / `seed_kits.sql` are one-time data loads for the original Häny catalog, not schema — skip them for a fresh dataset.
