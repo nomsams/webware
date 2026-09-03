@@ -22,13 +22,21 @@ export const GROQ_MODELS = {
   // Text-only. Free tier: 30 RPM / 1K RPD / 8K TPM / 200K TPD.
   TEXT: 'openai/gpt-oss-120b',
   // Multimodal (accepts images). Free tier: 30 RPM / 1K RPD / 8K TPM / 2M TPD.
-  // NOTE: verify this id in your Groq console — "qwen/qwen3.8-27b" as supplied doesn't match
-  // Groq's usual model-naming pattern (likely qwen/qwen3-32b or a vision-specific id). Update
-  // here and in supabase/functions/groq-proxy/index.ts's ALLOWED_MODELS together.
   MULTIMODAL: 'qwen/qwen3.8-27b',
 };
 
 export const REASONING_EFFORTS = ['low', 'medium', 'high', 'default'];
+
+// Each model's own recommended call defaults — not universal, the multimodal model's differ from
+// the text model's (lower temperature, higher top_p, "default" reasoning effort rather than
+// "medium"). A caller's own explicit option always overrides these; a model not in this table
+// (shouldn't happen given groq-proxy's own ALLOWED_MODELS check, but just in case) falls back to
+// the text model's defaults rather than throwing.
+const MODEL_DEFAULTS = {
+  [GROQ_MODELS.TEXT]: { temperature: 1, topP: 1, reasoningEffort: 'medium' },
+  [GROQ_MODELS.MULTIMODAL]: { temperature: 0.6, topP: 0.95, reasoningEffort: 'default' },
+};
+const FALLBACK_MODEL_DEFAULTS = MODEL_DEFAULTS[GROQ_MODELS.TEXT];
 
 // Dependency-injected so this module has no hard dependency on a particular supabase-js
 // version or global — pass plain values/callbacks instead of the sb client object itself.
@@ -52,12 +60,17 @@ export function createGroqClient({ supabaseUrl, supabaseAnonKey, getAccessToken,
     });
   }
 
-  function buildPayload({ model, messages, temperature = 1, maxTokens = 2048, topP = 1, reasoningEffort = 'medium', stream = false }) {
+  function buildPayload({ model, messages, temperature, maxTokens = 2048, topP, reasoningEffort, stream = false }) {
     if (!model) throw new Error('groq-client: model is required');
     if (!Array.isArray(messages) || messages.length === 0) throw new Error('groq-client: messages must be a non-empty array');
+    const defaults = MODEL_DEFAULTS[model] || FALLBACK_MODEL_DEFAULTS;
     return {
-      model, messages, temperature, max_completion_tokens: maxTokens,
-      top_p: topP, reasoning_effort: reasoningEffort, stream,
+      model, messages,
+      temperature: temperature ?? defaults.temperature,
+      max_completion_tokens: maxTokens,
+      top_p: topP ?? defaults.topP,
+      reasoning_effort: reasoningEffort ?? defaults.reasoningEffort,
+      stream,
     };
   }
 

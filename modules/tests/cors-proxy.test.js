@@ -2,21 +2,34 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { corsFetch, configureCorsProxy, setAllowPublicFallback, _resetCorsProxy, DEFAULT_PROXY_KEY } from '../cors-proxy.js';
+import { corsFetch, configureCorsProxy, setAllowPublicFallback, _resetCorsProxy, DEFAULT_PROXY_KEY, KNOWN_EXTERNAL_PROXY_URL } from '../cors-proxy.js';
 
 test.beforeEach(() => _resetCorsProxy());
 
-test('unconfigured corsFetch does NOT touch public proxies by default — goes straight to a direct fetch', async () => {
+test('unconfigured corsFetch tries the known external chikibriki proxy by default (not the fully-public fallbacks)', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => { calls.push({ url, headers: options?.headers }); return { ok: true, status: 200 }; };
+
+  const res = await corsFetch('https://example.com/page', {}, { fetchImpl });
+
+  assert.equal(res.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, `${KNOWN_EXTERNAL_PROXY_URL}?url=${encodeURIComponent('https://example.com/page')}`);
+  assert.equal(calls[0].headers['x-proxy-key'], DEFAULT_PROXY_KEY);
+  assert.equal(DEFAULT_PROXY_KEY, 'chikibriki');
+});
+
+test('useKnownExternalProxy: false skips it, going straight to a direct fetch (still no public fallback by default)', async () => {
   const calledUrls = [];
   const fetchImpl = async (url) => { calledUrls.push(url); return { ok: true, status: 200 }; };
 
-  const res = await corsFetch('https://example.com/page', {}, { fetchImpl });
+  const res = await corsFetch('https://example.com/page', {}, { fetchImpl, useKnownExternalProxy: false });
 
   assert.equal(res.ok, true);
   assert.deepEqual(calledUrls, ['https://example.com/page']);
 });
 
-test('with allowPublicFallback: true, an unconfigured corsFetch falls through public proxies in order', async () => {
+test('with allowPublicFallback: true and the known external proxy skipped, falls through public proxies in order', async () => {
   const calledUrls = [];
   const fetchImpl = async (url) => {
     calledUrls.push(url);
@@ -24,7 +37,7 @@ test('with allowPublicFallback: true, an unconfigured corsFetch falls through pu
     return { ok: false, status: 502 };
   };
 
-  const res = await corsFetch('https://example.com/page', {}, { fetchImpl, allowPublicFallback: true });
+  const res = await corsFetch('https://example.com/page', {}, { fetchImpl, allowPublicFallback: true, useKnownExternalProxy: false });
 
   assert.equal(res.ok, true);
   assert.equal(calledUrls.length, 2);
@@ -51,10 +64,9 @@ test('configured corsFetch calls the own cors-proxy function first, with auth + 
   assert.equal(calls[0].headers.Authorization, 'Bearer user-token');
   assert.equal(calls[0].headers.apikey, 'anon-key');
   assert.equal(calls[0].headers['x-proxy-key'], DEFAULT_PROXY_KEY);
-  assert.equal(DEFAULT_PROXY_KEY, 'chikibriki');
 });
 
-test('configureCorsProxy accepts a custom proxyKey override', async () => {
+test('configureCorsProxy accepts a custom proxyKey override (own proxy only — the known external one always uses the conventional key)', async () => {
   configureCorsProxy({
     supabaseUrl: 'https://myproject.supabase.co',
     supabaseAnonKey: 'anon-key',
@@ -69,7 +81,7 @@ test('configureCorsProxy accepts a custom proxyKey override', async () => {
   assert.equal(calls[0]['x-proxy-key'], 'my-custom-key');
 });
 
-test('own-proxy failure without allowPublicFallback goes to a direct fetch, not public proxies', async () => {
+test('own-proxy failure falls through to the known external proxy next, before a direct fetch', async () => {
   configureCorsProxy({
     supabaseUrl: 'https://myproject.supabase.co',
     supabaseAnonKey: 'anon-key',
@@ -79,7 +91,8 @@ test('own-proxy failure without allowPublicFallback goes to a direct fetch, not 
   const fetchImpl = async (url) => {
     calledUrls.push(url);
     if (url.startsWith('https://myproject.supabase.co/')) return { ok: false, status: 500 };
-    return { ok: true, status: 200 };
+    if (url.startsWith(KNOWN_EXTERNAL_PROXY_URL)) return { ok: true, status: 200 };
+    return { ok: false, status: 502 };
   };
 
   const res = await corsFetch('https://example.com/page', {}, { fetchImpl });
@@ -87,10 +100,10 @@ test('own-proxy failure without allowPublicFallback goes to a direct fetch, not 
   assert.equal(res.ok, true);
   assert.equal(calledUrls.length, 2);
   assert.match(calledUrls[0], /^https:\/\/myproject\.supabase\.co\//);
-  assert.equal(calledUrls[1], 'https://example.com/page');
+  assert.match(calledUrls[1], new RegExp('^' + KNOWN_EXTERNAL_PROXY_URL.replace(/[.]/g, '\\.')));
 });
 
-test('own-proxy failure WITH allowPublicFallback falls back to public proxies', async () => {
+test('own-proxy and known-external-proxy failure WITH allowPublicFallback falls back to public proxies', async () => {
   configureCorsProxy({
     supabaseUrl: 'https://myproject.supabase.co',
     supabaseAnonKey: 'anon-key',
@@ -100,6 +113,7 @@ test('own-proxy failure WITH allowPublicFallback falls back to public proxies', 
   const fetchImpl = async (url) => {
     calledUrls.push(url);
     if (url.startsWith('https://myproject.supabase.co/')) return { ok: false, status: 500 };
+    if (url.startsWith(KNOWN_EXTERNAL_PROXY_URL)) return { ok: false, status: 500 };
     if (url.startsWith('https://corsproxy.io/')) return { ok: true, status: 200 };
     return { ok: false, status: 502 };
   };
@@ -107,12 +121,13 @@ test('own-proxy failure WITH allowPublicFallback falls back to public proxies', 
   const res = await corsFetch('https://example.com/page', {}, { fetchImpl, allowPublicFallback: true });
 
   assert.equal(res.ok, true);
-  assert.equal(calledUrls.length, 2);
+  assert.equal(calledUrls.length, 3);
   assert.match(calledUrls[0], /^https:\/\/myproject\.supabase\.co\//);
-  assert.match(calledUrls[1], /^https:\/\/corsproxy\.io\//);
+  assert.match(calledUrls[1], new RegExp('^' + KNOWN_EXTERNAL_PROXY_URL.replace(/[.]/g, '\\.')));
+  assert.match(calledUrls[2], /^https:\/\/corsproxy\.io\//);
 });
 
-test('corsFetch falls back to a direct fetch as the last resort', async () => {
+test('corsFetch falls back to a direct fetch as the very last resort', async () => {
   const calledUrls = [];
   const fetchImpl = async (url) => {
     calledUrls.push(url);
@@ -131,7 +146,7 @@ test('corsFetch throws when every attempt fails', async () => {
   await assert.rejects(corsFetch('https://example.com/page', {}, { fetchImpl }), /network down/);
 });
 
-test('configureCorsProxy() with no args clears the own proxy', async () => {
+test('configureCorsProxy() with no args clears the own proxy (known external proxy still tried)', async () => {
   configureCorsProxy({
     supabaseUrl: 'https://myproject.supabase.co',
     supabaseAnonKey: 'anon-key',
@@ -143,7 +158,7 @@ test('configureCorsProxy() with no args clears the own proxy', async () => {
 
   await corsFetch('https://example.com/page', {}, { fetchImpl });
 
-  assert.deepEqual(calledUrls, ['https://example.com/page']);
+  assert.deepEqual(calledUrls, [`${KNOWN_EXTERNAL_PROXY_URL}?url=${encodeURIComponent('https://example.com/page')}`]);
 });
 
 test('configureCorsProxy requires anonKey and getAccessToken alongside supabaseUrl', () => {
@@ -159,7 +174,7 @@ test('setAllowPublicFallback flips the running default without a per-call overri
     return { ok: false, status: 502 };
   };
 
-  await corsFetch('https://example.com/page', {}, { fetchImpl });
+  await corsFetch('https://example.com/page', {}, { fetchImpl, useKnownExternalProxy: false });
 
   assert.equal(calledUrls.length, 2);
   assert.match(calledUrls[0], /^https:\/\/corsproxy\.io\//);
@@ -180,7 +195,7 @@ test('configureCorsProxy({allowPublicFallback}) sets the same running default', 
     return { ok: false, status: 502 };
   };
 
-  await corsFetch('https://example.com/page', {}, { fetchImpl });
+  await corsFetch('https://example.com/page', {}, { fetchImpl, useKnownExternalProxy: false });
 
   assert.equal(calledUrls.length, 2);
   assert.match(calledUrls[1], /^https:\/\/corsproxy\.io\//);
@@ -191,7 +206,7 @@ test('a per-call allowPublicFallback overrides the running default in either dir
   const calledUrls = [];
   const fetchImpl = async (url) => { calledUrls.push(url); return { ok: true, status: 200 }; };
 
-  await corsFetch('https://example.com/page', {}, { fetchImpl, allowPublicFallback: false });
+  await corsFetch('https://example.com/page', {}, { fetchImpl, allowPublicFallback: false, useKnownExternalProxy: false });
 
   assert.deepEqual(calledUrls, ['https://example.com/page']);
 });
@@ -202,7 +217,7 @@ test('_resetCorsProxy() also resets the allowPublicFallback default', async () =
   const calledUrls = [];
   const fetchImpl = async (url) => { calledUrls.push(url); return { ok: true, status: 200 }; };
 
-  await corsFetch('https://example.com/page', {}, { fetchImpl });
+  await corsFetch('https://example.com/page', {}, { fetchImpl, useKnownExternalProxy: false });
 
   assert.deepEqual(calledUrls, ['https://example.com/page']);
 });

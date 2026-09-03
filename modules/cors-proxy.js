@@ -3,32 +3,40 @@
 //
 // STATUS: wired into index.html — configureCorsProxy() is called once from the module bridge near
 // the end of the page, so window.duckySearch/window.crawly (web-search.js) route through
-// webware's own cors-proxy Edge Function rather than the public fallbacks below.
+// webware's own cors-proxy Edge Function when it's deployed, and the known external
+// chikibriki-gated proxy otherwise (see KNOWN_EXTERNAL_PROXY_URL below) — so web search works even
+// before webware's own function is deployed.
 //
 // Default path calls webware's own cors-proxy Supabase Edge Function
 // (supabase/functions/cors-proxy) — deploy it and call configureCorsProxy() once (same
 // dependency-injected shape as groq-client.js's createGroqClient) and corsFetch() uses it
-// automatically, falling back to a direct fetch (works for hosts that already send CORS headers)
-// if it isn't configured or fails.
+// automatically, falling through to KNOWN_EXTERNAL_PROXY_URL below (always tried, no opt-in
+// needed), then — only if allowPublicFallback is true — the fully-anonymous PUBLIC_FALLBACKS,
+// then finally a direct fetch (works for hosts that already send CORS headers) if everything
+// above isn't configured or fails.
 //
-// Public proxies (corsproxy.io, allorigins.win) are NOT used unless allowPublicFallback is true —
-// passed per-call, or set as the running default via configureCorsProxy({allowPublicFallback}) or
-// setAllowPublicFallback() (index.html wires this to Settings → AI Assistant → "Allow public CORS
-// proxy fallback"). Those are unrelated third parties who would otherwise silently see every
-// URL/query this fetches (a Pack Order address lookup, an AI Assistant web search, etc.) in the
-// clear whenever webware's own function isn't deployed or has an outage. Failing the request
-// instead of leaking it to an unapproved third party is the safer default; opt in only if you've
-// decided that trade-off is acceptable for your use case.
+// On "chikibriki": crawly and timeline (github.com/nomsams/crawly, /timeline — same author as
+// webware) default their proxy key to the literal string "chikibriki" against a CORS-proxy Edge
+// Function on Supabase project `onbkfqayveownervyktu` — a *different* project than webware's own,
+// but the same author's, not a random public service. That value is hardcoded in cleartext in both
+// of those public repos, so it was never actually secret — it functions as a conventional
+// non-secret gate value, not unlike a public API identifier, and (being a shared public-utility
+// function across that author's own projects) doesn't require a signed-in user of ITS project the
+// way webware's own cors-proxy does. KNOWN_EXTERNAL_PROXY_URL below calls it directly with that
+// key — a genuinely useful fallback for exactly the case where webware's own function isn't
+// deployed yet, at the cost of that project's own logs seeing the URL/query in the clear whenever
+// it's actually used (i.e. whenever webware's own function is skipped or fails). Webware's own
+// cors-proxy function is NOT what this key protects, either — it requires a signed-in Supabase
+// user, the same real protection groq-proxy uses for GROQ_API_KEY. If you want CORS_PROXY_KEY
+// checked server-side too (defense in depth, optional), set it to match:
+// `supabase secrets set CORS_PROXY_KEY=chikibriki`.
 //
-// On "chikibriki": crawly and timeline (github.com/nomsams/crawly, /timeline) default their
-// proxy key to the literal string "chikibriki" against a CORS-proxy Edge Function on a *different*
-// Supabase project than webware's own. That value is hardcoded in cleartext in both of those
-// public repos, so it was never actually secret — it functions as a conventional non-secret gate
-// value, not unlike a public API identifier. DEFAULT_PROXY_KEY below keeps that same convention
-// (sent as the x-proxy-key header) for parity, but it is NOT what protects webware's own
-// cors-proxy function — that function requires a signed-in Supabase user, the same real
-// protection groq-proxy uses for GROQ_API_KEY. If you want CORS_PROXY_KEY checked server-side
-// too (defense in depth, optional), set it to match: `supabase secrets set CORS_PROXY_KEY=chikibriki`.
+// Fully-anonymous public proxies (corsproxy.io, allorigins.win) are a separate, stricter tier —
+// NOT used unless allowPublicFallback is true — passed per-call, or set as the running default via
+// configureCorsProxy({allowPublicFallback}) or setAllowPublicFallback() (index.html wires this to
+// Settings → AI Assistant → "Allow public CORS proxy fallback"). Those are truly unrelated third
+// parties; failing the request instead of silently leaking to one is the safer default, opt in
+// only if that trade-off is acceptable for your use case.
 //
 // Usage:
 //   import { configureCorsProxy } from './cors-proxy.js';
@@ -40,6 +48,7 @@
 //   const res = await corsFetch('https://html.duckduckgo.com/html/?q=...');
 
 export const DEFAULT_PROXY_KEY = 'chikibriki';
+export const KNOWN_EXTERNAL_PROXY_URL = 'https://onbkfqayveownervyktu.supabase.co/functions/v1/cors-proxy';
 
 const PUBLIC_FALLBACKS = [
   (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
@@ -69,11 +78,13 @@ export function setAllowPublicFallback(value) {
   allowPublicFallbackDefault = !!value;
 }
 
-// Tries webware's own cors-proxy function first (if configured), then — only when
-// allowPublicFallback is true, either passed per-call or via configureCorsProxy()/
-// setAllowPublicFallback() — each public proxy in order, then finally a direct fetch. Returns
-// the first response with res.ok; throws the last error/status if every attempt fails.
-export async function corsFetch(targetUrl, options = {}, { fetchImpl = fetch, allowPublicFallback = allowPublicFallbackDefault } = {}) {
+// Tries webware's own cors-proxy function first (if configured), then the known external
+// chikibriki-gated proxy (always tried — see KNOWN_EXTERNAL_PROXY_URL above; set
+// `useKnownExternalProxy: false` to skip it), then — only when allowPublicFallback is true,
+// either passed per-call or via configureCorsProxy()/setAllowPublicFallback() — each fully-public
+// proxy in order, then finally a direct fetch. Returns the first response with res.ok; throws the
+// last error/status if every attempt fails.
+export async function corsFetch(targetUrl, options = {}, { fetchImpl = fetch, allowPublicFallback = allowPublicFallbackDefault, useKnownExternalProxy = true } = {}) {
   const attempts = [];
   if (ownProxy) {
     attempts.push(async () => {
@@ -89,6 +100,12 @@ export async function corsFetch(targetUrl, options = {}, { fetchImpl = fetch, al
         },
       });
     });
+  }
+  if (useKnownExternalProxy) {
+    attempts.push(() => fetchImpl(`${KNOWN_EXTERNAL_PROXY_URL}?url=${encodeURIComponent(targetUrl)}`, {
+      ...options,
+      headers: { ...(options.headers || {}), 'x-proxy-key': DEFAULT_PROXY_KEY },
+    }));
   }
   if (allowPublicFallback) {
     for (const build of PUBLIC_FALLBACKS) {

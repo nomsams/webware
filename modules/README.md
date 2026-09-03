@@ -25,8 +25,11 @@ node --test modules/tests/*.test.js
   chat bubble's classification/reply calls and voice transcription.
 - **`cors-proxy.js`** + **`../supabase/functions/cors-proxy/index.ts`** — CORS-proxy fetch client,
   used by `web-search.js`. Configured once from the module bridge in `index.html`, so it calls
-  webware's own `cors-proxy` Edge Function first, falling back to public proxies and finally a
-  direct fetch. See the `chikibriki` note below.
+  webware's own `cors-proxy` Edge Function first (once deployed), then the known external
+  chikibriki-gated proxy (`KNOWN_EXTERNAL_PROXY_URL` — always tried, no opt-in needed, so web
+  search works even before webware's own function is deployed), then — only if the user has opted
+  into it in Settings — fully-public proxies, then finally a direct fetch. See the `chikibriki`
+  note below.
 - **`web-search.js`** — DuckDuckGo search + page-text extraction, ported from
   `github.com/nomsams/timeline` (the search) with a cleanup approach mirroring
   `github.com/nomsams/crawly` (the text extraction). Depends on `cors-proxy.js`. Backs the AI
@@ -100,15 +103,20 @@ etc.) — either shape keeps the credential off the client, which is the part th
 Prefer one of these over a client-embedded key for any future proxy this app adds.
 
 `cors-proxy.js`'s `chikibriki` default is a different case, worth understanding separately: crawly
-and timeline (two of the reference repos this was ported from) hardcode a fallback proxy key,
-`"chikibriki"`, in cleartext in their own public source, against a CORS-proxy Edge Function on a
-Supabase project (`onbkfqayveownervyktu`) that belongs to those repos, not to webware. That value
-was never actually secret — it's a conventional gate value, the same way an API's public client ID
-isn't secret. `modules/cors-proxy.js` keeps `chikibriki` as its own default `x-proxy-key` (for
-parity, per request), sent to **webware's own** `cors-proxy` Edge Function rather than the other
-project's — that function's real protection is requiring a signed-in Supabase user, same as
-`groq-proxy`. `CORS_PROXY_KEY` is an optional extra secret-side check if you want it, but the auth
-requirement is what actually gates the function.
+and timeline (two of the reference repos this was ported from — same author as webware) hardcode a
+fallback proxy key, `"chikibriki"`, in cleartext in their own public source, against a CORS-proxy
+Edge Function on Supabase project `onbkfqayveownervyktu` — that project's, not webware's own. That
+value was never actually secret — it's a conventional gate value, the same way an API's public
+client ID isn't secret, and (being a shared public-utility function across that author's own
+projects) doesn't require a signed-in user of *that* project. `modules/cors-proxy.js` sends
+`chikibriki` two places: as its own default `x-proxy-key` to **webware's own** `cors-proxy` Edge
+Function (that function's real protection is requiring a signed-in Supabase user, same as
+`groq-proxy` — `CORS_PROXY_KEY` is an optional extra secret-side check on top, but auth is what
+actually gates it), and to `KNOWN_EXTERNAL_PROXY_URL` — the *other* project's cors-proxy, called
+directly, no webware credentials involved. That second one is a genuinely useful fallback for
+"webware's own function isn't deployed yet," at the cost of that other project's own logs seeing
+the URL/query in the clear whenever it's actually used — pass `useKnownExternalProxy: false` to
+`corsFetch()` (or wherever that's threaded through) if that trade-off isn't wanted for a given call.
 
 ## Not ported as a separate module
 

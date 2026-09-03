@@ -110,3 +110,47 @@ test('chat() rejects with no access token instead of calling fetch', async () =>
 test('createGroqClient requires its config', () => {
   assert.throws(() => createGroqClient({}), /required/);
 });
+
+test('chat() applies the text model\'s own defaults when none are given', async () => {
+  let capturedBody;
+  const fetchImpl = async (url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'ok' } }] }) };
+  };
+  const groq = createGroqClient({ supabaseUrl: 'https://example.supabase.co', supabaseAnonKey: 'anon-key', getAccessToken: fakeGetAccessToken(), fetchImpl });
+
+  await groq.chat({ model: GROQ_MODELS.TEXT, messages: [{ role: 'user', content: 'hi' }] });
+
+  assert.equal(capturedBody.temperature, 1);
+  assert.equal(capturedBody.top_p, 1);
+  assert.equal(capturedBody.reasoning_effort, 'medium');
+});
+
+test('chat() applies the multimodal model\'s own (different) defaults when none are given', async () => {
+  let capturedBody;
+  const fetchImpl = async (url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'ok' } }] }) };
+  };
+  const groq = createGroqClient({ supabaseUrl: 'https://example.supabase.co', supabaseAnonKey: 'anon-key', getAccessToken: fakeGetAccessToken(), fetchImpl });
+
+  await groq.chat({ model: GROQ_MODELS.MULTIMODAL, messages: [{ role: 'user', content: 'hi' }] });
+
+  assert.equal(capturedBody.temperature, 0.6);
+  assert.equal(capturedBody.top_p, 0.95);
+  assert.equal(capturedBody.reasoning_effort, 'default');
+});
+
+test('chat() lets an explicit option override the model\'s own default', async () => {
+  let capturedBody;
+  const fetchImpl = async (url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'ok' } }] }) };
+  };
+  const groq = createGroqClient({ supabaseUrl: 'https://example.supabase.co', supabaseAnonKey: 'anon-key', getAccessToken: fakeGetAccessToken(), fetchImpl });
+
+  await groq.chat({ model: GROQ_MODELS.MULTIMODAL, messages: [{ role: 'user', content: 'hi' }], temperature: 0.2 });
+
+  assert.equal(capturedBody.temperature, 0.2);
+  assert.equal(capturedBody.top_p, 0.95); // untouched options still use the model's own default
+});
