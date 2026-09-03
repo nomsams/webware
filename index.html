@@ -1321,7 +1321,18 @@
         <button class="secondary full-width hidden" id="btn-backorder-report" onclick="openBackorderReportModal()" style="margin-bottom:1rem;">📋 Backorder Report</button>
 
         <div class="setting-row">
-            <label>🤖 AI Assistant (Groq API Key)</label>
+            <label>🔑 Your Personal Groq API Key (optional)</label>
+            <p class="setting-desc" id="personal-groq-key-status-text">Checking…</p>
+            <div style="display:flex; gap:8px; margin-top:0.5rem; flex-wrap:wrap;">
+                <input type="password" id="personal-groq-key-input" placeholder="gsk_..." style="flex:1; min-width:160px; margin:0;" autocomplete="off">
+                <button class="secondary" onclick="savePersonalGroqKey()" style="min-height:auto; padding:0 1rem;">Save</button>
+                <button class="secondary hidden" id="btn-remove-personal-groq-key" onclick="removePersonalGroqKey()" style="min-height:auto; padding:0 1rem; color:var(--danger);">Remove</button>
+            </div>
+            <p class="setting-desc">Stored only in this browser — never synced, never sent anywhere but straight to Groq. Bypasses the shared key below entirely and needs no server-side setup at all (works even if <code>groq-proxy</code> was never deployed). Free at <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>.</p>
+        </div>
+
+        <div class="setting-row">
+            <label>🤖 Shared AI Assistant Key (Groq API Key)</label>
             <p class="setting-desc" id="ai-key-status-text">Checking…</p>
             <div id="ai-key-list"></div>
             <div style="display:flex; gap:8px; margin-top:0.5rem; flex-wrap:wrap;">
@@ -7731,6 +7742,7 @@ ${css}
         document.getElementById('storage-usage-row').classList.toggle('hidden', !(isSupa && isAdmin));
         if (isSupa && isAdmin) refreshStorageUsage();
         if (isSupa) loadMyDisplayName();
+        refreshPersonalGroqKeyUI();
         refreshAiKeySettingsUI();
     }
     function toggleSettings() {
@@ -7803,10 +7815,58 @@ ${css}
 
     // Plain-language explanation of why the assistant can't run yet — worded differently for an
     // admin (who can actually fix it from Settings) vs. everyone else (who needs to ask one).
+    // Personal-key users never see this — see aiRefreshKeyStatus(), checked first.
     function aiNoKeyMessage() {
-        if (!sb) return "This needs the Supabase-connected warehouse — switch to it first.";
-        if (currentUserRole === 'admin') return "No AI key is set up yet. Add one in Settings → 🤖 AI Assistant.";
-        return "The AI Assistant isn't set up yet — ask an admin to add a key in Settings → AI Assistant.";
+        if (!sb) return "Add your own free Groq key in Settings → 🤖 AI Assistant — no deployment or admin needed, works in any warehouse.";
+        if (currentUserRole === 'admin') return "No AI key is set up yet. Add your own free one, or a shared one for everyone, in Settings → 🤖 AI Assistant.";
+        return "The AI Assistant isn't set up yet — add your own free Groq key in Settings → 🤖 AI Assistant (a couple minutes, no admin needed), or ask an admin to add a shared one.";
+    }
+
+    // ── Personal Groq key (bring-your-own, optional) ───────────────────────────
+    // Stored only in this browser (localStorage — per-device, never synced or sent anywhere but
+    // straight to Groq itself) and, when set, used INSTEAD of the shared llm_api_keys/groq-proxy
+    // path — see aiGetGroqClient(). Calls go directly from this browser to api.groq.com (confirmed
+    // to allow direct cross-origin browser requests — no CORS proxy needed either), so this path
+    // needs no Supabase Edge Function deployed at all. The trade-off of any client-embedded key
+    // applies: it's visible to anyone with access to this browser's storage/network traffic, which
+    // is the point — it's a free-tier key one person brought for their own use, not a shared secret.
+    const LS_PERSONAL_GROQ_KEY = 'personal-groq-api-key';
+    function getPersonalGroqKey() {
+        try { return localStorage.getItem(LS_PERSONAL_GROQ_KEY) || null; }
+        catch { return null; }
+    }
+    function savePersonalGroqKey() {
+        const input = document.getElementById('personal-groq-key-input');
+        const key = input.value.trim();
+        if (!key) { showToast("Paste a key first.", "warning"); return; }
+        localStorage.setItem(LS_PERSONAL_GROQ_KEY, key);
+        input.value = '';
+        showToast("Personal key saved — used instead of the shared one from now on.", "success");
+        refreshPersonalGroqKeyUI();
+        aiRefreshKeyStatus();
+    }
+    function removePersonalGroqKey() {
+        localStorage.removeItem(LS_PERSONAL_GROQ_KEY);
+        showToast("Personal key removed.", "success");
+        refreshPersonalGroqKeyUI();
+        aiRefreshKeyStatus();
+    }
+    function refreshPersonalGroqKeyUI() {
+        const statusEl = document.getElementById('personal-groq-key-status-text');
+        if (!statusEl) return;
+        const has = !!getPersonalGroqKey();
+        statusEl.textContent = has
+            ? "A personal key is set on this device — used instead of the shared one, and works without any server-side setup."
+            : "Not set on this device — the shared key below (if configured) is used instead.";
+        document.getElementById('btn-remove-personal-groq-key').classList.toggle('hidden', !has);
+    }
+    // The client every AI Assistant call goes through — a fresh direct-mode client (no Supabase or
+    // groq-proxy involved at all) when a personal key is set, otherwise the shared proxy-mode
+    // window.aiGroq built at page load. Cheap to construct, so built fresh each call rather than
+    // cached, which keeps it correct immediately after adding/removing a personal key.
+    function aiGetGroqClient() {
+        const personalKey = getPersonalGroqKey();
+        return personalKey ? window.createGroqClient({ apiKey: personalKey }) : window.aiGroq;
     }
 
     // Turns a raw JS/network error into something a non-technical user can actually act on,
@@ -7850,6 +7910,7 @@ ${css}
     }
 
     async function aiRefreshKeyStatus() {
+        if (getPersonalGroqKey()) { aiHasApiKey = true; return true; }
         if (!sb) { aiHasApiKey = false; return false; }
         try {
             const { data, error } = await sb.rpc('has_llm_api_key');
@@ -7932,7 +7993,7 @@ Respond with ONLY the JSON object, nothing else.`;
         const thinking = aiAppendMessage('system', 'Thinking…');
         let reply;
         try {
-            const raw = await window.aiGroq.chat({
+            const raw = await aiGetGroqClient().chat({
                 model: window.GROQ_MODELS.TEXT,
                 reasoningEffort: 'low',
                 messages: [
@@ -8183,7 +8244,7 @@ Respond with ONLY the JSON object, nothing else.`;
             const top = results[0];
             let pageText = '';
             try { pageText = await window.crawly(top.url, { maxChars: 3000 }); } catch (e) { /* fall back to the search snippet */ }
-            const answer = await window.aiGroq.chat({
+            const answer = await aiGetGroqClient().chat({
                 model: window.GROQ_MODELS.TEXT,
                 reasoningEffort: 'low',
                 messages: [
@@ -8200,20 +8261,7 @@ Respond with ONLY the JSON object, nothing else.`;
     }
 
     async function aiTranscribeAudio(blob) {
-        const accessToken = await getSupabaseAccessToken();
-        if (!accessToken) throw new Error('Sign in first.');
-        const endpoint = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/groq-proxy`;
-        const form = new FormData();
-        form.append('file', blob, 'speech.webm');
-        form.append('model', 'whisper-large-v3-turbo');
-        const res = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': SUPABASE_ANON_KEY },
-            body: form,
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-        return data.text || '';
+        return aiGetGroqClient().transcribe(blob);
     }
 
     // Max recording length as a safety net — if someone forgets to tap the mic again to stop
@@ -8365,6 +8413,11 @@ Respond with ONLY the JSON object, nothing else.`;
     import { configureCorsProxy, setAllowPublicFallback } from './modules/cors-proxy.js';
     import { webSearch, fetchPageText } from './modules/web-search.js';
     window.GROQ_MODELS = GROQ_MODELS;
+    // The pre-built proxy-mode client (needs groq-proxy deployed) — the fallback when no personal
+    // key is set. window.createGroqClient itself is also exposed so aiGetGroqClient() can build a
+    // direct-mode client on the fly ({apiKey}, no Supabase/groq-proxy involved at all) whenever a
+    // personal key is set — see the AI ASSISTANT section of the classic script.
+    window.createGroqClient = createGroqClient;
     window.aiGroq = createGroqClient({
         supabaseUrl: window.SUPABASE_URL,
         supabaseAnonKey: window.SUPABASE_ANON_KEY,

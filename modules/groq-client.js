@@ -1,22 +1,36 @@
-// Browser-side client for chatting with Groq-hosted models via the groq-proxy Supabase Edge
-// Function (supabase/functions/groq-proxy) — the GROQ_API_KEY secret lives only in Supabase's
-// function secrets and never reaches the browser.
+// Browser-side client for chatting with Groq-hosted models, in either of two modes:
 //
-// STATUS: wired into index.html (bridged via the <script type="module"> block near the end of
-// the page, as window.aiGroq — see the AI ASSISTANT section of the classic script). Requires
-// groq-proxy to be deployed (`supabase functions deploy groq-proxy`) and at least one Groq key
-// added via Settings → AI Assistant (stored in the llm_api_keys table, not a function secret —
-// see supabase/schema_llm_assistant.sql) before it will actually work.
+//   - Proxy mode (pass supabaseUrl/supabaseAnonKey/getAccessToken): calls the groq-proxy Supabase
+//     Edge Function (supabase/functions/groq-proxy), which holds a shared key server-side (the
+//     llm_api_keys table) — no key of any kind reaches the browser. Requires groq-proxy deployed.
+//   - Direct mode (pass apiKey instead): calls api.groq.com straight from the browser with that
+//     key. Groq's API sends permissive CORS headers for this (confirmed against the real API —
+//     both /chat/completions and /audio/transcriptions respond to a cross-origin browser fetch
+//     rather than blocking it), so no server-side proxy is needed at all. The trade-off is the
+//     usual one for any client-embedded key: it's visible to anyone who inspects this browser's
+//     network traffic or storage — appropriate for a personal, free-tier key one person brings
+//     for their own use, not for a key anyone would mind being exposed. index.html stores a
+//     personal key in localStorage (per-device, never sent anywhere but straight to Groq) and
+//     prefers direct mode over proxy mode whenever one is set — see aiGetGroqClient().
+//
+// STATUS: wired into index.html (bridged via the <script type="module"> block near the end of the
+// page — see the AI ASSISTANT section of the classic script, which builds a proxy-mode client as
+// window.aiGroq at load and a direct-mode one on demand via window.createGroqClient({apiKey}) when
+// a personal key is set).
 //
 // Usage:
 //   import { createGroqClient, GROQ_MODELS } from './groq-client.js';
+//   // proxy mode:
 //   const groq = createGroqClient({
 //     supabaseUrl: SUPABASE_URL,
 //     supabaseAnonKey: SUPABASE_ANON_KEY,
 //     getAccessToken: async () => (await sb.auth.getSession()).data.session?.access_token,
 //   });
+//   // direct mode:
+//   const groq = createGroqClient({ apiKey: 'gsk_...' });
 //   const reply = await groq.chat({ model: GROQ_MODELS.TEXT, messages: [{ role: 'user', content: 'hi' }] });
 //   for await (const delta of groq.stream({ model: GROQ_MODELS.TEXT, messages: [...] })) { ... }
+//   const text = await groq.transcribe(audioBlob);
 
 export const GROQ_MODELS = {
   // Text-only. Free tier: 30 RPM / 1K RPD / 8K TPM / 200K TPD.
@@ -26,6 +40,9 @@ export const GROQ_MODELS = {
 };
 
 export const REASONING_EFFORTS = ['low', 'medium', 'high', 'default'];
+
+export const GROQ_DIRECT_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
+export const GROQ_DIRECT_TRANSCRIBE_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 
 // Each model's own recommended call defaults — not universal, the multimodal model's differ from
 // the text model's (lower temperature, higher top_p, "default" reasoning effort rather than
@@ -40,16 +57,24 @@ const FALLBACK_MODEL_DEFAULTS = MODEL_DEFAULTS[GROQ_MODELS.TEXT];
 
 // Dependency-injected so this module has no hard dependency on a particular supabase-js
 // version or global — pass plain values/callbacks instead of the sb client object itself.
-export function createGroqClient({ supabaseUrl, supabaseAnonKey, getAccessToken, fetchImpl = fetch }) {
-  if (!supabaseUrl || !supabaseAnonKey || !getAccessToken) {
-    throw new Error('createGroqClient: supabaseUrl, supabaseAnonKey, and getAccessToken are required');
+export function createGroqClient({ supabaseUrl, supabaseAnonKey, getAccessToken, fetchImpl = fetch, apiKey } = {}) {
+  const direct = !!apiKey;
+  if (!direct && (!supabaseUrl || !supabaseAnonKey || !getAccessToken)) {
+    throw new Error('createGroqClient: supabaseUrl, supabaseAnonKey, and getAccessToken are required (or pass apiKey to call Groq directly, bypassing groq-proxy)');
   }
-  const endpoint = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/groq-proxy`;
+  const proxyEndpoint = direct ? null : `${supabaseUrl.replace(/\/$/, '')}/functions/v1/groq-proxy`;
 
-  async function callProxy(payload) {
+  async function callChat(payload) {
+    if (direct) {
+      return fetchImpl(GROQ_DIRECT_CHAT_URL, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    }
     const accessToken = await getAccessToken();
     if (!accessToken) throw new Error('groq-client: no active session — sign in first');
-    return fetchImpl(endpoint, {
+    return fetchImpl(proxyEndpoint, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -57,6 +82,23 @@ export function createGroqClient({ supabaseUrl, supabaseAnonKey, getAccessToken,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
+    });
+  }
+
+  async function callTranscribe(form) {
+    if (direct) {
+      return fetchImpl(GROQ_DIRECT_TRANSCRIBE_URL, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        body: form,
+      });
+    }
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error('groq-client: no active session — sign in first');
+    return fetchImpl(proxyEndpoint, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseAnonKey },
+      body: form,
     });
   }
 
@@ -76,9 +118,9 @@ export function createGroqClient({ supabaseUrl, supabaseAnonKey, getAccessToken,
 
   // One-shot, non-streaming call. Returns the assistant's reply text.
   async function chat(options) {
-    const res = await callProxy(buildPayload({ ...options, stream: false }));
+    const res = await callChat(buildPayload({ ...options, stream: false }));
     const data = await res.json();
-    if (!res.ok) throw new Error(`groq-client: ${data?.error || `HTTP ${res.status}`}`);
+    if (!res.ok) throw new Error(`groq-client: ${data?.error?.message || data?.error || `HTTP ${res.status}`}`);
     const text = data?.choices?.[0]?.message?.content;
     if (typeof text !== 'string') throw new Error('groq-client: unexpected response shape');
     return text;
@@ -87,16 +129,27 @@ export function createGroqClient({ supabaseUrl, supabaseAnonKey, getAccessToken,
   // Streaming call. Async-generator yielding text deltas as they arrive (parses the
   // OpenAI-style SSE stream Groq/groq-proxy sends).
   async function* stream(options) {
-    const res = await callProxy(buildPayload({ ...options, stream: true }));
+    const res = await callChat(buildPayload({ ...options, stream: true }));
     if (!res.ok || !res.body) {
       let message = `HTTP ${res.status}`;
-      try { message = (await res.json())?.error || message; } catch { /* body wasn't JSON */ }
+      try { const data = await res.json(); message = data?.error?.message || data?.error || message; } catch { /* body wasn't JSON */ }
       throw new Error(`groq-client: ${message}`);
     }
     yield* parseSseDeltas(res.body);
   }
 
-  return { chat, stream };
+  // Whisper transcription. Returns the transcribed text (empty string if Groq returned none).
+  async function transcribe(blob, { model = 'whisper-large-v3-turbo', fileName = 'speech.webm' } = {}) {
+    const form = new FormData();
+    form.append('file', blob, fileName);
+    form.append('model', model);
+    const res = await callTranscribe(form);
+    const data = await res.json();
+    if (!res.ok) throw new Error(`groq-client: ${data?.error?.message || data?.error || `HTTP ${res.status}`}`);
+    return data.text || '';
+  }
+
+  return { chat, stream, transcribe };
 }
 
 // Exported separately so it can be unit-tested without a real fetch Response stream.

@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createGroqClient, parseSseLine, parseSseDeltas, GROQ_MODELS } from '../groq-client.js';
+import { createGroqClient, parseSseLine, parseSseDeltas, GROQ_MODELS, GROQ_DIRECT_CHAT_URL, GROQ_DIRECT_TRANSCRIBE_URL } from '../groq-client.js';
 
 function fakeGetAccessToken(token = 'test-token') {
   return async () => token;
@@ -153,4 +153,71 @@ test('chat() lets an explicit option override the model\'s own default', async (
 
   assert.equal(capturedBody.temperature, 0.2);
   assert.equal(capturedBody.top_p, 0.95); // untouched options still use the model's own default
+});
+
+// ── Direct mode (personal key, no groq-proxy / no Supabase) ────────────────────────────────
+
+test('createGroqClient does not require Supabase config when apiKey is given (direct mode)', () => {
+  assert.doesNotThrow(() => createGroqClient({ apiKey: 'gsk_personal' }));
+});
+
+test('direct-mode chat() posts straight to api.groq.com with the personal key, no Supabase headers', async () => {
+  let capturedUrl, capturedInit;
+  const fetchImpl = async (url, init) => {
+    capturedUrl = url;
+    capturedInit = init;
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'the answer' } }] }) };
+  };
+  const groq = createGroqClient({ apiKey: 'gsk_personal', fetchImpl });
+
+  const reply = await groq.chat({ model: GROQ_MODELS.TEXT, messages: [{ role: 'user', content: 'hi' }] });
+
+  assert.equal(reply, 'the answer');
+  assert.equal(capturedUrl, GROQ_DIRECT_CHAT_URL);
+  assert.equal(capturedInit.headers.Authorization, 'Bearer gsk_personal');
+  assert.equal(capturedInit.headers.apikey, undefined); // no Supabase apikey header in direct mode
+});
+
+test('direct-mode chat() surfaces Groq\'s own {error:{message}} shape, not [object Object]', async () => {
+  const fetchImpl = async () => ({ ok: false, status: 401, json: async () => ({ error: { message: 'Invalid API Key', type: 'invalid_request_error' } }) });
+  const groq = createGroqClient({ apiKey: 'gsk_bad', fetchImpl });
+
+  await assert.rejects(
+    groq.chat({ model: GROQ_MODELS.TEXT, messages: [{ role: 'user', content: 'hi' }] }),
+    /Invalid API Key/,
+  );
+});
+
+test('direct-mode transcribe() posts multipart form data straight to api.groq.com', async () => {
+  let capturedUrl, capturedInit;
+  const fetchImpl = async (url, init) => {
+    capturedUrl = url;
+    capturedInit = init;
+    return { ok: true, status: 200, json: async () => ({ text: 'transcribed words' }) };
+  };
+  const groq = createGroqClient({ apiKey: 'gsk_personal', fetchImpl });
+
+  const text = await groq.transcribe(new Blob(['fake audio']), { fileName: 'speech.webm' });
+
+  assert.equal(text, 'transcribed words');
+  assert.equal(capturedUrl, GROQ_DIRECT_TRANSCRIBE_URL);
+  assert.equal(capturedInit.headers.Authorization, 'Bearer gsk_personal');
+  assert.ok(capturedInit.body instanceof FormData);
+});
+
+test('proxy-mode transcribe() posts to groq-proxy with the Supabase session, not api.groq.com', async () => {
+  let capturedUrl, capturedInit;
+  const fetchImpl = async (url, init) => {
+    capturedUrl = url;
+    capturedInit = init;
+    return { ok: true, status: 200, json: async () => ({ text: 'transcribed words' }) };
+  };
+  const groq = createGroqClient({ supabaseUrl: 'https://example.supabase.co', supabaseAnonKey: 'anon-key', getAccessToken: fakeGetAccessToken(), fetchImpl });
+
+  const text = await groq.transcribe(new Blob(['fake audio']));
+
+  assert.equal(text, 'transcribed words');
+  assert.equal(capturedUrl, 'https://example.supabase.co/functions/v1/groq-proxy');
+  assert.equal(capturedInit.headers.Authorization, 'Bearer test-token');
+  assert.equal(capturedInit.headers.apikey, 'anon-key');
 });

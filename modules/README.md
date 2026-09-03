@@ -16,13 +16,22 @@ node --test modules/tests/*.test.js
 
 - **`groq-client.js`** + **`../supabase/functions/groq-proxy/index.ts`** — chat with Groq-hosted
   models (model + reasoning-effort selectable, streaming supported) and Whisper audio
-  transcription, with the API key held server-side — not in the browser, and not even in the Edge
-  Function's own secrets, but in the `llm_api_keys` table (`supabase/schema_llm_assistant.sql`),
-  shared across every app user with optional backup keys the function falls through to on a rate
-  limit. RLS has no `select` policy on that table at all, so no client can ever read a key back.
-  Deploy the function (`supabase functions deploy groq-proxy` — no secrets to set) and add at least
-  one key from Settings → AI Assistant before this does anything real. Backs the 🤖 AI Assistant
-  chat bubble's classification/reply calls and voice transcription.
+  transcription. `createGroqClient()` supports two modes:
+  - **Proxy mode** (`{supabaseUrl, supabaseAnonKey, getAccessToken}`): the API key is held
+    server-side — not in the browser, and not even in the Edge Function's own secrets, but in the
+    `llm_api_keys` table (`supabase/schema_llm_assistant.sql`), shared across every app user with
+    optional backup keys the function falls through to on a rate limit. RLS has no `select` policy
+    on that table at all, so no client can ever read a key back. Requires `groq-proxy` deployed
+    (`supabase functions deploy groq-proxy` — no secrets to set).
+  - **Direct mode** (`{apiKey}`): calls `api.groq.com` straight from the browser with that key —
+    confirmed against the live API that both `/chat/completions` and `/audio/transcriptions` send
+    the CORS headers a cross-origin browser request needs, so this needs no Edge Function at all.
+    Meant for a personal, free-tier key one person brings for their own use (it's as visible as any
+    client-embedded key), not a shared one.
+
+  index.html's `aiGetGroqClient()` picks direct mode when a personal key is set in Settings
+  (`localStorage`, per-device) and proxy mode otherwise — see the README's AI Assistant section.
+  Backs the 🤖 AI Assistant chat bubble's classification/reply calls and voice transcription either way.
 - **`cors-proxy.js`** + **`../supabase/functions/cors-proxy/index.ts`** — CORS-proxy fetch client,
   used by `web-search.js`. Configured once from the module bridge in `index.html`, so it calls
   webware's own `cors-proxy` Edge Function first (once deployed), then the known external
