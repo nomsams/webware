@@ -246,6 +246,7 @@ Everything lives in the `public` schema with RLS enabled. Set up a fresh project
 | 29 | `schema_llm_assistant_grant_repair.sql` | re-asserts the `insert, delete` grant on `llm_api_keys` (fixes "permission denied for table llm_api_keys" on insert), and rewrites the insert policy's bootstrap check to use `has_llm_api_key()` instead of a raw self-referencing subquery that needed a grant nothing ever gave it |
 | 30 | `schema_item_units.sql` | `items.unit_type` (default `'st'`) |
 | 31 | `schema_zone_shelf_dimensions.sql` | `warehouse_zones.shelf_width_cm`, `warehouse_zones.shelf_height_cm` |
+| 32 | `schema_fix_email_type_mismatch.sql` | fixes "structure of query does not match function result type" on Manage Users — `list_profiles_with_email()`/`list_warehouse_permissions()` selected `auth.users.email` (`varchar`) into a column declared `text`, which `RETURN QUERY` checks strictly; adds an explicit cast |
 | — | `schema_image_storage_fix_bucket_public.sql` | not numbered/sequential — a standalone repair for an already-provisioned project where `item-images` was created private before `schema_image_storage.sql` ran; forces the bucket `public = true`. Safe to re-run, run any time you're seeing broken images. |
 
 `seed_items.sql` / `seed_kits.sql` are one-time data loads for the original Häny catalog, not schema — skip them for a fresh dataset.
