@@ -7873,7 +7873,15 @@ ${css}
     // instead of a stack trace or a bare fetch failure.
     function aiFriendlyError(e) {
         const msg = (e && e.message) || String(e || '');
-        if (/failed to fetch|network|NetworkError|ERR_/i.test(msg)) return "I couldn't reach the assistant service — check your internet connection and try again.";
+        if (/failed to fetch|network|NetworkError|ERR_/i.test(msg)) {
+            // A bare "failed to fetch" from proxy mode almost always means groq-proxy itself isn't
+            // deployed (an undeployed/erroring Edge Function's response carries no CORS headers, so
+            // the browser reports it exactly like a real network outage) rather than the user's own
+            // connection — and unlike a real outage, that's fixable from Settings without deploying
+            // anything, so say so instead of sending them to check their WiFi.
+            if (!getPersonalGroqKey()) return "I couldn't reach the shared assistant service (it may not be deployed). Add your own free Groq API key in ⚙️ Settings to use the assistant directly — or check your internet connection and try again.";
+            return "I couldn't reach the assistant service — check your internet connection and try again.";
+        }
         if (/not authenticated|sign in/i.test(msg)) return "Please sign in first.";
         if (/429|rate limit/i.test(msg)) return "The assistant is busy right now — try again in a moment.";
         if (/no groq api key|no AI key/i.test(msg)) return aiNoKeyMessage();
