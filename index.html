@@ -7971,13 +7971,13 @@ ${css}
 
     const AI_SYSTEM_PROMPT = `You are an assistant embedded in a warehouse inventory app. The user gives a short instruction (voice-transcribed or typed), possibly in English, Swedish, or Finnish. Classify it into EXACTLY ONE JSON object, no prose, matching one of:
 {"action":"search_item","query":string}
-{"action":"pack_kit","query":string}
+{"action":"pack_kit","query":string,"multiplier":number}
 {"action":"edit_field","field":"name_en"|"name_sv"|"manufacturer"|"itemnumber"|"itemnumber2"|"itemnumber3"|"quantity"|"unit_type"|"reorder_threshold"|"location"|"map_position"|"location_code"|"comments","value":string}
 {"action":"web_search","query":string}
 {"action":"chat","reply":string}
 Rules:
 - "search_item": user wants to find/open an item by name, number, or manufacturer.
-- "pack_kit": user wants to start/pack an order from a kit by name or number (e.g. "pack the kit for HANY IC310").
+- "pack_kit": user wants to start/pack an order from a kit by name or number (e.g. "pack the kit for HANY IC310"). "multiplier" is how many times over to pack every item in the kit — 1 by default, or the number they said (e.g. "pack twice of everything" -> 2, "triple the kit" -> 3, "pack 4x IC310" -> 4).
 - "edit_field": ONLY when clearly asking to change one specific field's value on the item that's currently open (e.g. "change the item name to Grease sticks" -> field "name_en", value "Grease sticks").
 - "web_search": user asks a factual question that needs looking something up on the web.
 - "chat": anything else — answer briefly yourself (or say you can't do that yet) in "reply". Keep
@@ -8048,6 +8048,14 @@ Respond with ONLY the JSON object, nothing else.`;
         a = a.toLowerCase().trim(); b = b.toLowerCase().trim();
         if (a === b) return 1;
         if (b.includes(a) || a.includes(b)) return 0.8;
+        // Spacing/punctuation-blind containment check: a query like "IC310" shares no whole word
+        // with a kit/item name like "SPARE PART KIT IC 310" (the number is glued to the letters on
+        // one side, split by a space on the other), so the plain substring and token-overlap checks
+        // above both score it 0. Comparing alphanumeric-only versions of both strings catches this
+        // and other spacing/hyphenation differences without needing a real fuzzy-match library.
+        const aSquash = a.replace(/[^a-z0-9]/g, '');
+        const bSquash = b.replace(/[^a-z0-9]/g, '');
+        if (aSquash && bSquash && (bSquash.includes(aSquash) || aSquash.includes(bSquash))) return 0.75;
         const aTok = new Set(a.split(/\s+/).filter(Boolean));
         const bTok = new Set(b.split(/\s+/).filter(Boolean));
         if (!aTok.size || !bTok.size) return 0;
@@ -8113,10 +8121,14 @@ Respond with ONLY the JSON object, nothing else.`;
                 const it = globalInventory.find(i => i.BTKnumber === b);
                 return it ? (it['itemname(english)'] || b) : b;
             });
-            const desc = `kit "${kit.name}" (${btks.length} item${btks.length === 1 ? '' : 's'})`;
+            // Clamp/validate rather than trust the model's number outright — a bad or missing
+            // multiplier should fall back to a normal single pack, not silently pack a huge order.
+            const rawMultiplier = Number(reply.multiplier);
+            const multiplier = (Number.isFinite(rawMultiplier) && rawMultiplier >= 1 && rawMultiplier <= 20) ? Math.round(rawMultiplier) : 1;
+            const desc = `kit "${kit.name}" (${btks.length} item${btks.length === 1 ? '' : 's'}${multiplier > 1 ? `, ×${multiplier} each` : ''})`;
             return {
                 type: 'pack_kit', kitnumber: kit.kitnumber, kitName: kit.name, lowConfidence: !match.confident,
-                sampleNames, itemCount: btks.length,
+                sampleNames, itemCount: btks.length, multiplier,
                 summary: match.confident ? `Start a Pack Order from ${desc}` : `Did you mean ${desc}?`,
             };
         }
@@ -8212,7 +8224,8 @@ Respond with ONLY the JSON object, nothing else.`;
                 aiAppendMessage('assistant', `Opened ${action.name || action.btk}.`);
             } else if (action.type === 'pack_kit') {
                 aiStartPackOrderFromKit(action);
-                aiAppendMessage('assistant', `Started a Pack Order from "${action.kitName}".`);
+                const multNote = action.multiplier > 1 ? ` (×${action.multiplier} each)` : '';
+                aiAppendMessage('assistant', `Started a Pack Order from "${action.kitName}"${multNote}.`);
             } else if (action.type === 'edit_field') {
                 const el = document.getElementById(action.elId);
                 if (el) { el.value = action.newValue; el.classList.remove('ai-highlight-pulse'); }
@@ -8230,12 +8243,14 @@ Respond with ONLY the JSON object, nothing else.`;
     function aiStartPackOrderFromKit(action) {
         const kit = globalKits.find(k => k.kitnumber === action.kitnumber && k.name === action.kitName);
         if (!kit) { showToast('Kit not found', 'error'); return; }
+        const multiplier = action.multiplier > 1 ? action.multiplier : 1;
         Object.keys(kit.items || {}).forEach(btk => {
             const qty = kit.items[btk];
             if (!qty || qty <= 0) return;
+            const finalQty = qty * multiplier;
             const existing = packOrder.find(o => o.btk === btk);
-            if (existing) existing.qty = qty;
-            else packOrder.push({ btk, qty, packed: false });
+            if (existing) existing.qty = finalQty;
+            else packOrder.push({ btk, qty: finalQty, packed: false });
         });
         updatePackOrderBadge();
         openPackOrderView();
