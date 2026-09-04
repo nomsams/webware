@@ -452,6 +452,13 @@
         .ai-action-card button { flex: 1; min-height: 34px; padding: 0.4rem 0.6rem; font-size: 0.82rem; border-radius: 8px; }
         .ai-action-card.low-confidence { border-color: #f59e0b; }
         .ai-action-card .ai-action-link { background: none; border: none; color: var(--primary); text-decoration: underline; font-size: 0.8rem; padding: 0.15rem 0; cursor: pointer; text-align: left; flex: none; align-self: flex-start; min-height: unset; }
+        .ai-item-list { max-width: 100%; white-space: normal; }
+        .ai-list-item { cursor: pointer; padding: 0.4rem 0.25rem; border-bottom: 1px solid rgba(127,127,127,0.25); border-radius: 6px; }
+        .ai-list-item:last-of-type { border-bottom: none; }
+        .ai-list-item:hover { background: rgba(127,127,127,0.1); }
+        .ai-list-item-name { font-weight: 600; }
+        .ai-list-item-meta { color: var(--text-muted); font-size: 0.78rem; }
+        .ai-list-item-more { color: var(--text-muted); font-size: 0.78rem; padding-top: 0.25rem; }
         .ai-highlight-pulse { animation: aiPulse 1.4s ease-in-out 2; }
         @keyframes aiPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.55); } 50% { box-shadow: 0 0 0 6px rgba(99,102,241,0); } }
         .ai-suggestions { display: flex; flex-wrap: wrap; gap: 6px; align-self: stretch; }
@@ -8512,7 +8519,7 @@ ${css}
                 aiAssistantReady = true;
                 await aiRefreshKeyStatus();
                 aiAppendMessage('system', aiHasApiKey
-                    ? "Ask me to find an item, start a pack order from a kit, or (with an item open) change one of its fields. You can type or tap 🎤 to speak."
+                    ? "Ask me things like \"find item 12345\", \"which items are from Bosch\", \"pack the grease sticks\", \"pack all the rings from the 310 kit\", or a factual question like a company's address. With an item open I can also change one of its fields. Type or tap 🎤 to speak."
                     : aiNoKeyMessage());
                 if (aiHasApiKey) aiRenderSuggestions();
             }
@@ -8610,6 +8617,7 @@ ${css}
         const chips = [
             { label: '🔍 Find an item', text: 'find ' },
             { label: '📦 Pack a kit', text: 'pack the kit for ' },
+            { label: '📋 List items from...', text: 'which items are from ' },
         ];
         if (activeView === 'item-view' && currentItemBTK && canEditItems()) {
             chips.push({ label: '✏️ Rename this item', text: 'change the item name to ' });
@@ -8685,17 +8693,19 @@ ${css}
 
     const AI_SYSTEM_PROMPT = `You are an assistant embedded in a warehouse inventory app. The user gives a short instruction (voice-transcribed or typed), possibly in English, Swedish, or Finnish. Classify it into EXACTLY ONE JSON object, no prose, matching one of:
 {"action":"search_item","query":string}
-{"action":"pack_kit","query":string,"multiplier":number}
+{"action":"pack_kit","query":string,"multiplier":number,"filter":string}
 {"action":"pack_order","text":string}
+{"action":"list_items","query":string}
 {"action":"edit_field","field":"name_en"|"name_sv"|"manufacturer"|"itemnumber"|"itemnumber2"|"itemnumber3"|"quantity"|"unit_type"|"reorder_threshold"|"location"|"map_position"|"location_code"|"comments","value":string}
 {"action":"web_search","query":string}
 {"action":"chat","reply":string}
 Rules:
-- "search_item": user wants to find/open an item by name, number, or manufacturer.
-- "pack_kit": user wants to start/pack an order from ONE named kit (e.g. "pack the kit for HANY IC310"). "multiplier" is how many times over to pack every item in the kit — 1 by default, or the number they said (e.g. "pack twice of everything" -> 2, "triple the kit" -> 3, "pack 4x IC310" -> 4).
-- "pack_order": user describes a pack order as a list of items (not a single named kit) — by name, BTK, or "item N" — each with an optional quantity, and optionally a recipient to send it to (e.g. "pack 2 bolts and 1 gasket for Anna Andersson" or "send BTK000012 x3 to Acme AB, look up their address"). "text" is the instruction verbatim — it's parsed separately, so just copy it exactly.
+- "search_item": user wants to find/open ONE specific item by name, number, or manufacturer.
+- "pack_kit": user wants to start/pack an order from a whole or partial named KIT (e.g. "pack the kit for HANY IC310", "pack all the rings from the 310 kit"). "multiplier" is how many times over to pack every included item — 1 by default, or the number they said (e.g. "pack twice of everything" -> 2, "triple the kit" -> 3, "pack 4x IC310" -> 4). "filter" (optional) narrows it to only the items in that kit whose name matches a word/phrase — e.g. "pack all the rings from the 310 kit" -> query "310", filter "rings"; omit filter to pack the whole kit. If it's clearly just ONE item and not a kit (e.g. "pack the grease sticks"), use "pack_order" instead, not this.
+- "pack_order": user describes a pack order as one or more individual items (not a whole/partial named kit) — by name, BTK, or "item N" — each with an optional quantity, and optionally a recipient to send it to (e.g. "pack the grease sticks", "pack 2 bolts and 1 gasket for Anna Andersson", "send BTK000012 x3 to Acme AB, look up their address"). "text" is the instruction verbatim — it's parsed separately, so just copy it exactly.
+- "list_items": user wants to SEE/LIST several items matching something — a manufacturer, keyword, or category (e.g. "which items are from Bosch", "list items with grease", "what do we have from HÄNY") — not open one specific item (search_item) and not pack anything (pack_kit/pack_order).
 - "edit_field": ONLY when clearly asking to change one specific field's value on the item that's currently open (e.g. "change the item name to Grease sticks" -> field "name_en", value "Grease sticks").
-- "web_search": user asks a factual question that needs looking something up on the web.
+- "web_search": user asks a factual question that needs looking something up on the web — including things like a company's address, phone number, or registration/org number.
 - "chat": anything else — answer briefly yourself (or say you can't do that yet) in "reply". Keep
   "reply" short (1-3 sentences) and in plain, non-technical language — the person reading it may
   not be familiar with software or warehouse-system jargon.
@@ -8737,7 +8747,8 @@ Respond with ONLY the JSON object, nothing else.`;
 
         if (reply.action === 'web_search') { await aiHandleWebSearch(reply.query); return; }
         if (reply.action === 'pack_order') { await aiHandlePackOrderRequest(reply.text || text); return; }
-        if (reply.action === 'chat' || !reply.action) { aiAppendMessage('assistant', reply.reply || "I'm not sure how to help with that yet — try asking me to find an item, pack a kit, or (with an item open) change one of its fields."); return; }
+        if (reply.action === 'list_items') { aiHandleListItems(reply.query); return; }
+        if (reply.action === 'chat' || !reply.action) { aiAppendMessage('assistant', reply.reply || "I'm not sure how to help with that yet — try asking me to find an item, list items from a manufacturer, pack a kit, or (with an item open) change one of its fields."); return; }
 
         const built = aiBuildPendingAction(reply);
         if (!built) { aiAppendMessage('assistant', aiFallbackReasonMessage(reply)); return; }
@@ -8756,7 +8767,13 @@ Respond with ONLY the JSON object, nothing else.`;
             if (!AI_FIELD_MAP[reply.field]) return "I don't know how to change that field yet.";
         }
         if (reply.action === 'search_item') return "I couldn't find an item matching that — try a different name, number, or manufacturer.";
-        if (reply.action === 'pack_kit') return "I couldn't find a kit matching that — check the kit's name and try again.";
+        if (reply.action === 'pack_kit') {
+            // Re-checked here (cheap, no network) purely to give a more specific reason than a flat
+            // "no kit found" — a kit DID match, it's just that nothing inside it matched the filter.
+            const kitMatch = aiFuzzyFindKit(reply.query || '');
+            if (kitMatch && reply.filter) return `I found the kit "${kitMatch.kit.name}", but nothing in it matched "${reply.filter}" — check the wording and try again.`;
+            return "I couldn't find a kit or item matching that — check the name and try again.";
+        }
         return "I couldn't find what you're referring to — could you be more specific?";
     }
 
@@ -8831,9 +8848,34 @@ Respond with ONLY the JSON object, nothing else.`;
         }
         if (reply.action === 'pack_kit') {
             const match = aiFuzzyFindKit(reply.query || '');
-            if (!match) return null;
+            if (!match) {
+                // No kit at all matched that name — very likely they meant a single item, not a
+                // kit ("pack the grease sticks" isn't a kit called "grease sticks"). Fall back to
+                // packing just that one item rather than a flat "couldn't find a kit" dead end.
+                const itemMatch = aiFuzzyFindItem(reply.query || '');
+                if (!itemMatch) return null;
+                const item = itemMatch.item;
+                const displayName = item['itemname(english)'] || item.BTKnumber;
+                return {
+                    type: 'pack_order_draft',
+                    items: [{ reference: reply.query, quantity: 1, btk: item.BTKnumber, matchedName: displayName, elsewhere: null }],
+                    resolvedCount: 1, unresolvedCount: 0, recipientName: null, recipientAddress: null,
+                    lowConfidence: true, // always phrased as a question — no kit named that exists, so this is a guess at what they meant
+                    summary: `No kit named "${reply.query}" — pack "${displayName}" instead?`,
+                };
+            }
             const kit = match.kit;
-            const btks = Object.keys(kit.items || {}).filter(b => kit.items[b] > 0);
+            let btks = Object.keys(kit.items || {}).filter(b => kit.items[b] > 0);
+            // Optional "pack all the rings from the 310 kit" narrowing — only the items inside the
+            // matched kit whose own name is a decent word-overlap match for the filter text.
+            const filterText = (reply.filter || '').trim();
+            if (filterText) {
+                btks = btks.filter(b => {
+                    const it = globalInventory.find(i => i.BTKnumber === b);
+                    return it && aiWordOverlapScore(filterText, it['itemname(english)'] || '') >= 0.3;
+                });
+                if (!btks.length) return null; // aiFallbackReasonMessage explains this case specifically
+            }
             const sampleNames = btks.slice(0, 3).map(b => {
                 const it = globalInventory.find(i => i.BTKnumber === b);
                 return it ? (it['itemname(english)'] || b) : b;
@@ -8842,10 +8884,11 @@ Respond with ONLY the JSON object, nothing else.`;
             // multiplier should fall back to a normal single pack, not silently pack a huge order.
             const rawMultiplier = Number(reply.multiplier);
             const multiplier = (Number.isFinite(rawMultiplier) && rawMultiplier >= 1 && rawMultiplier <= 20) ? Math.round(rawMultiplier) : 1;
-            const desc = `kit "${kit.name}" (${btks.length} item${btks.length === 1 ? '' : 's'}${multiplier > 1 ? `, ×${multiplier} each` : ''})`;
+            const filterNote = filterText ? ` matching "${filterText}"` : '';
+            const desc = `kit "${kit.name}"${filterNote} (${btks.length} item${btks.length === 1 ? '' : 's'}${multiplier > 1 ? `, ×${multiplier} each` : ''})`;
             return {
                 type: 'pack_kit', kitnumber: kit.kitnumber, kitName: kit.name, lowConfidence: !match.confident,
-                sampleNames, itemCount: btks.length, multiplier,
+                sampleNames, itemCount: btks.length, multiplier, filterBtks: filterText ? btks : null,
                 summary: match.confident ? `Start a Pack Order from ${desc}` : `Did you mean ${desc}?`,
             };
         }
@@ -8980,6 +9023,7 @@ Respond with ONLY the JSON object, nothing else.`;
         if (!kit) { showToast('Kit not found', 'error'); return; }
         const multiplier = action.multiplier > 1 ? action.multiplier : 1;
         Object.keys(kit.items || {}).forEach(btk => {
+            if (action.filterBtks && !action.filterBtks.includes(btk)) return; // e.g. "pack all the rings from the 310 kit" — skip items outside the filter
             const qty = kit.items[btk];
             if (!qty || qty <= 0) return;
             const finalQty = qty * multiplier;
@@ -9052,6 +9096,41 @@ Respond with ONLY the JSON object, nothing else.`;
         }
     }
 
+    // "which items are from Bosch"/"list items with grease" — the multi-match counterpart to
+    // search_item's single best match, reusing the exact same matcher the Items/Manufacturers
+    // search boxes use (itemMatchesQuery) rather than a fuzzy score, so results here are exactly
+    // what typing the same text into either search box would show.
+    const AI_LIST_ITEMS_LIMIT = 15;
+    function aiHandleListItems(query) {
+        if (!query || !query.trim()) { aiAppendMessage('assistant', "What should I list — a manufacturer, a keyword, or something else?"); return; }
+        const q = query.toLowerCase().trim();
+        const matches = globalInventory.filter(item => itemMatchesQuery(item, q));
+        if (!matches.length) { aiAppendMessage('assistant', `I couldn't find any items matching "${query}".`); return; }
+        aiRenderItemListMessage(query, matches);
+    }
+
+    function aiRenderItemListMessage(query, matches) {
+        const shown = matches.slice(0, AI_LIST_ITEMS_LIMIT);
+        const rows = shown.map(item => {
+            const name = escapeHtml(item['itemname(english)'] || item.BTKnumber);
+            const mfr = (item.Manufacturer && item.Manufacturer !== 'None') ? escapeHtml(item.Manufacturer) : '';
+            const btk = escapeHtml(item.BTKnumber);
+            return `<div class="ai-list-item" onclick="aiOpenListedItem('${btk}')">
+                <div class="ai-list-item-name">${name}</div>
+                <div class="ai-list-item-meta">${mfr ? mfr + ' · ' : ''}${btk}</div>
+            </div>`;
+        }).join('');
+        const more = matches.length > shown.length
+            ? `<div class="ai-list-item-more">+${matches.length - shown.length} more — try a more specific search.</div>` : '';
+        const card = document.createElement('div');
+        card.className = 'ai-msg ai-msg-assistant ai-item-list';
+        card.innerHTML = `<div>Found ${matches.length} item${matches.length === 1 ? '' : 's'} matching "${escapeHtml(query)}":</div>${rows}${more}`;
+        document.getElementById('ai-panel-messages').appendChild(card);
+        card.scrollIntoView({ block: 'end' });
+    }
+
+    function aiOpenListedItem(btk) { openItem(btk, { type: 'global' }); }
+
     // Bounded per the app's own policy: webSearch() fetches exactly one DuckDuckGo results page (no
     // pagination), and only the single top result's page is fetched here — no recursive crawling.
     async function aiHandleWebSearch(query) {
@@ -9067,7 +9146,7 @@ Respond with ONLY the JSON object, nothing else.`;
                 model: window.GROQ_MODELS.TEXT,
                 reasoningEffort: 'low',
                 messages: [
-                    { role: 'system', content: 'Answer the user briefly (2-4 sentences), in plain language with no jargon, using only the page content given.' },
+                    { role: 'system', content: 'Answer the user briefly, in plain language with no jargon, using only the page content given. If they asked for specific facts — an address, phone number, organization/registration number, etc. — list each on its own line clearly labeled (e.g. "Address: ..."), not buried in a paragraph. If something they asked for isn\'t in the page content, say so plainly rather than guessing.' },
                     { role: 'user', content: `Question: ${query}\n\nSource: ${top.url}\n${pageText || top.snippet}` },
                 ],
             });
