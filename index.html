@@ -650,6 +650,33 @@
     </div>
 </div>
 
+<!-- Unassigned Images — photos set aside during Batch Image Review that ran out of suggested
+     matches, stored under the item-images bucket's own "unassigned/" prefix (see
+     uploadUnassignedImage()) rather than a new table, so there's nothing extra to migrate. -->
+<div class="modal-overlay" id="unassigned-images-modal" onclick="handleUnassignedImagesModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:560px;">
+        <h3>🗄️ Unassigned Images</h3>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">Images set aside during Batch Image Import that didn't get matched to an item. Assign each to the right item, or delete it.</p>
+        <div id="unassigned-images-list" style="max-height:55vh; overflow-y:auto;">Loading…</div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeUnassignedImagesModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Search-and-pick used by "🔗 Assign" above — same pattern as the manual search in Batch Image
+     Review, just operating on a stored unassigned image instead of a file still in the browser. -->
+<div class="modal-overlay" id="assign-unassigned-image-modal" onclick="handleAssignUnassignedImageModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:420px;">
+        <h3>🔗 Assign Image to Item</h3>
+        <input type="text" id="assign-unassigned-search" oninput="searchAssignUnassignedImage()" placeholder="Search item name, number, BTK...">
+        <div id="assign-unassigned-results"></div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeAssignUnassignedImageModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
 <!-- Saved Recipients (Pack Order) — stored in this browser only (localStorage), same as a
      phone's own contact list; import from a .vcf via the button on the Pack Order view. -->
 <div class="modal-overlay" id="saved-recipients-modal" onclick="handleSavedRecipientsModalOverlayClick(event)">
@@ -1514,6 +1541,33 @@
         <div id="dashboard-quicklinks" style="margin-top:1.5rem; display:flex; flex-wrap:wrap; gap:8px;"></div>
     </section>
 
+    <!-- Batch Image Review — one file at a time from a multi-file picker, filename fuzzy-matched
+         against itemnumber/2/3 (see findImageMatchCandidates). Confirm assigns it; Skip tries the
+         next-best suggestion, then finally sets it aside as "unassigned" once suggestions run out. -->
+    <section id="batch-image-review-view" class="card hidden">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
+            <button class="secondary" onclick="cancelBatchImageReview()">✕ Cancel Import</button>
+            <span id="batch-image-progress" style="color:var(--text-muted); font-weight:600;"></span>
+        </div>
+        <h1 style="margin-bottom:1rem; border-bottom:2px solid var(--border); padding-bottom:0.75rem; font-size:1.6rem; color:var(--primary);">🖼️ Batch Image Review</h1>
+        <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+            <div style="flex:1; min-width:240px; max-width:400px;">
+                <img id="batch-image-preview" alt="" style="width:100%; border-radius:12px; border:1px solid var(--border); background:var(--border); display:block;">
+                <p id="batch-image-filename" style="text-align:center; color:var(--text-muted); font-size:0.85rem; margin-top:0.5rem; word-break:break-all;"></p>
+            </div>
+            <div style="flex:1; min-width:240px;">
+                <div id="batch-image-suggestion" style="background:var(--border); border-radius:10px; padding:12px; margin-bottom:1rem;"></div>
+                <div style="display:flex; gap:8px; margin-bottom:1.25rem;">
+                    <button class="secondary full-width" id="btn-batch-image-skip" onclick="skipBatchImageMatch()">⏭️ Skip</button>
+                    <button class="success-btn full-width" id="btn-batch-image-confirm" onclick="confirmBatchImageMatch()">✅ Confirm</button>
+                </div>
+                <label class="modal-label" for="batch-image-manual-search">Or search for the right item manually</label>
+                <input type="text" id="batch-image-manual-search" oninput="searchBatchImageManualMatch()" placeholder="Search item name, number, BTK...">
+                <div id="batch-image-manual-results"></div>
+            </div>
+        </div>
+    </section>
+
     <!-- View 5: Settings -->
     <section id="settings-view" class="card hidden">
         <h2 style="margin-bottom: 1.5rem;">App Settings</h2>
@@ -1578,6 +1632,7 @@
         <button class="secondary full-width hidden" id="btn-activity-log" onclick="openActivityLogModal()" style="margin-bottom:1rem;">📜 Activity Log</button>
         <button class="secondary full-width hidden" id="btn-backorder-report" onclick="openBackorderReportModal()" style="margin-bottom:1rem;">📋 Backorder Report</button>
         <button class="secondary full-width hidden" id="btn-pack-order-history" onclick="openPackOrderHistoryModal()" style="margin-bottom:1rem;">🧾 Pack Order History</button>
+        <button class="secondary full-width hidden" id="btn-unassigned-images" onclick="openUnassignedImagesModal()" style="margin-bottom:1rem;">🗄️ Unassigned Images</button>
 
         <div class="setting-row">
             <label>🔑 Your Personal Groq API Key (optional)</label>
@@ -3032,50 +3087,325 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     function triggerBatchImageUpload() { if (!requireAuth()) return; document.getElementById('batch-image-upload').click(); }
 
-    async function handleBatchImageUpload(event) {
+    // ── Batch Image Import matching ─────────────────────────────────────────────────────────
+    // Filenames commonly encode itemnumber/2/3 in inconsistent formats — a manufacturer's own
+    // numbering, with or without a literal dot, dash-separated, sometimes a leading letter tag,
+    // and a trailing single letter (a/b/c...) marking the 2nd/3rd photo of the same item. Rather
+    // than parsing every shape precisely, both sides are normalized down to bare alphanumerics and
+    // compared by containment — robust across all of that without per-pattern rules. This only
+    // ever produces a *suggestion* for a human to confirm (see the review view below), never an
+    // automatic write, so a looser match here is a convenience, not a risk.
+    //
+    // 444-prefixed itemnumbers are excluded entirely — see the no-hash-item-identity memory: those
+    // are synthetic per-row filler values (supabase/seed_items.sql), not real identity, so matching
+    // a filename against one would be matching against noise.
+    function normalizeForImageMatch(s) {
+        return (s || '').toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+    }
+    function isSyntheticItemNumber(n) {
+        const norm = normalizeForImageMatch(n);
+        return !norm || norm === 'none' || norm.startsWith('444');
+    }
+    function buildImageMatchIndex(inventory) {
+        const entries = [];
+        inventory.forEach(item => {
+            [['itemnumber', item.itemnumber], ['itemnumber2', item.itemnumber2], ['itemnumber3', item.itemnumber3]].forEach(([field, val]) => {
+                if (isSyntheticItemNumber(val)) return;
+                const norm = normalizeForImageMatch(val);
+                if (norm.length < 4) return; // too short to be a specific match — avoid trivial false positives (e.g. "1")
+                entries.push({ item, field, norm });
+            });
+        });
+        return entries;
+    }
+    // One candidate per item (the best-matching field kept), best match first: an exact normalized
+    // match beats a containment match, and among containment matches a longer (more specific)
+    // itemnumber beats a shorter one.
+    function findImageMatchCandidates(filename, index) {
+        const base = (filename || '').replace(/\.[a-z0-9]+$/i, '');
+        const normBase = normalizeForImageMatch(base);
+        if (!normBase) return [];
+        const bestPerItem = new Map();
+        index.forEach(({ item, field, norm }) => {
+            let hit = null;
+            if (normBase === norm) hit = { item, field, norm, exact: true };
+            else if (normBase.includes(norm)) hit = { item, field, norm, exact: false };
+            if (!hit) return;
+            const prev = bestPerItem.get(item.BTKnumber);
+            if (!prev || (hit.exact && !prev.exact) || (hit.exact === prev.exact && hit.norm.length > prev.norm.length)) {
+                bestPerItem.set(item.BTKnumber, hit);
+            }
+        });
+        return Array.from(bestPerItem.values()).sort((a, b) => {
+            if (a.exact !== b.exact) return a.exact ? -1 : 1;
+            return b.norm.length - a.norm.length;
+        });
+    }
+
+    // ── Batch Image Review — one file at a time from the multi-file picker ─────────────────────
+    var batchImageQueue = [];            // [{ file, candidates, candidateIndex }]
+    var batchImageIndex = 0;
+    var batchImageResults = { assigned: 0, unassigned: 0 };
+    var batchImageUnassignedFiles = [];  // files that ran out of candidates (or had none)
+    var batchImageStaticZipEntries = []; // static/draft mode only — no server-side storage, so confirmed images are zipped at the end like the old flow did
+
+    function handleBatchImageUpload(event) {
         const files = Array.from(event.target.files || []);
         event.target.value = '';
         if (!files.length) return;
+        const index = buildImageMatchIndex(globalInventory);
+        batchImageQueue = files.map(file => ({ file, candidates: findImageMatchCandidates(file.name, index), candidateIndex: 0 }));
+        batchImageIndex = 0;
+        batchImageResults = { assigned: 0, unassigned: 0 };
+        batchImageUnassignedFiles = [];
+        batchImageStaticZipEntries = [];
+        switchView('batch-image-review-view');
+        renderBatchImageReview();
+    }
 
-        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
-        const matched = [], unmatched = [];
-        for (const file of files) {
-            const m = file.name.match(BTK_RE);
-            const btk = m ? 'BTK' + m[1].padStart(6, '0') : null;
-            const item = btk && globalInventory.find(i => i.BTKnumber === btk);
-            if (!item) { unmatched.push(file.name); continue; }
-            const { full, thumb, filename, thumbName } = await resizeImage(file, btk);
-            if (!isSupa) item.images = appendImageFilename(item.images, filename);
-            matched.push({ btk, filename, thumbName, full, thumb });
+    function renderBatchImageReview() {
+        if (batchImageIndex >= batchImageQueue.length) { finishBatchImageReview(); return; }
+        const entry = batchImageQueue[batchImageIndex];
+        const candidate = entry.candidates[entry.candidateIndex];
+
+        document.getElementById('batch-image-progress').textContent = `Image ${batchImageIndex + 1} of ${batchImageQueue.length}`;
+        const imgEl = document.getElementById('batch-image-preview');
+        if (imgEl.dataset.objectUrl) URL.revokeObjectURL(imgEl.dataset.objectUrl);
+        const objUrl = URL.createObjectURL(entry.file);
+        imgEl.src = objUrl;
+        imgEl.dataset.objectUrl = objUrl;
+        document.getElementById('batch-image-filename').textContent = entry.file.name;
+
+        const infoEl = document.getElementById('batch-image-suggestion');
+        const btnConfirm = document.getElementById('btn-batch-image-confirm');
+        const btnSkip = document.getElementById('btn-batch-image-skip');
+
+        if (!candidate) {
+            infoEl.innerHTML = `<p style="color:var(--text-muted); margin:0;">No matching item found for this filename.</p>`;
+            btnConfirm.classList.add('hidden');
+            btnSkip.textContent = '🗄️ Set Aside — Unassigned';
+        } else {
+            const item = candidate.item;
+            const fieldLabel = { itemnumber: 'Item Number', itemnumber2: 'Item Number 2', itemnumber3: 'Item Number 3' }[candidate.field];
+            // Only one photo per item is kept — flag it if this same item is also the top guess for
+            // another file still in this batch, so confirming here isn't a silent surprise later.
+            const others = batchImageQueue.filter((e, i) => i !== batchImageIndex && e.candidates[0] && e.candidates[0].item.BTKnumber === item.BTKnumber).length;
+            const numLines = ['itemnumber', 'itemnumber2', 'itemnumber3']
+                .filter(f => item[f] && item[f] !== 'None')
+                .map(f => `${f === 'itemnumber' ? 'Item # 1' : f === 'itemnumber2' ? 'Item # 2' : 'Item # 3'}: ${escapeHtml(item[f])}`)
+                .join('<br>');
+            infoEl.innerHTML = `
+                <div style="font-weight:700;">${escapeHtml(item['itemname(english)'] || item.BTKnumber)}</div>
+                <div style="color:var(--text-muted); font-size:0.85rem;">BTK ${escapeHtml(item.BTKnumber)}${item.Manufacturer && item.Manufacturer !== 'None' ? ' · ' + escapeHtml(item.Manufacturer) : ''}</div>
+                ${numLines ? `<div style="margin-top:6px; font-size:0.85rem;">${numLines}</div>` : ''}
+                <div style="margin-top:6px; font-size:0.8rem; color:var(--primary);">Matched on ${fieldLabel}${candidate.exact ? ' (exact)' : ''}</div>
+                ${others ? `<div style="margin-top:6px; font-size:0.78rem; color:#f59e0b;">⚠️ ${others} other image${others === 1 ? '' : 's'} in this batch also matched this item — only one photo per item is kept, so confirming here may replace it.</div>` : ''}
+            `;
+            btnConfirm.classList.remove('hidden');
+            btnSkip.textContent = (entry.candidateIndex + 1 < entry.candidates.length) ? '⏭️ Skip — Try Next Suggestion' : '🗄️ Skip — Set Aside';
         }
 
-        if (!matched.length) { showToast("No filenames matched a BTK number.", "warning"); return; }
-        const unmatchedMsg = unmatched.length ? ` ${unmatched.length} file(s) unmatched: ${unmatched.join(', ')}` : '';
+        document.getElementById('batch-image-manual-search').value = '';
+        document.getElementById('batch-image-manual-results').innerHTML = '';
+    }
 
-        if (isSupa) {
-            const totalBytes = matched.reduce((s, m) => s + m.full.size + m.thumb.size, 0);
-            if (!(await checkStorageBudget(totalBytes))) {
-                showToast("Storage budget would be exceeded — batch not uploaded. Check Settings for usage.", "error", 8000);
-                return;
-            }
-            let uploaded = 0;
-            for (const m of matched) {
-                try {
-                    const { fullUrl, thumbUrl } = await uploadItemPhotoToSupabase(m.btk, m.full, m.thumb);
-                    const item = globalInventory.find(i => i.BTKnumber === m.btk);
-                    if (item) { item.imageFullUrl = fullUrl; item.imageThumbUrl = thumbUrl; }
-                    uploaded++;
-                } catch (e) { console.error(`Upload failed for ${m.btk}:`, e); }
-            }
-            if (listMode === 'items') filterList(false);
-            showToast(`Uploaded ${uploaded} of ${matched.length} photo(s) to Supabase.${unmatchedMsg}`, "success", 8000);
+    async function confirmBatchImageMatch() {
+        const entry = batchImageQueue[batchImageIndex];
+        const candidate = entry.candidates[entry.candidateIndex];
+        if (!candidate) return;
+        await assignBatchImageToItem(entry.file, candidate.item.BTKnumber);
+        batchImageResults.assigned++;
+        batchImageIndex++;
+        renderBatchImageReview();
+    }
+
+    async function skipBatchImageMatch() {
+        const entry = batchImageQueue[batchImageIndex];
+        if (entry.candidateIndex + 1 < entry.candidates.length) {
+            entry.candidateIndex++;
+            renderBatchImageReview();
             return;
         }
+        batchImageUnassignedFiles.push(entry.file);
+        batchImageResults.unassigned++;
+        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            try { await uploadUnassignedImage(entry.file); } catch (e) { console.error('Could not store unassigned image:', e); }
+        }
+        batchImageIndex++;
+        renderBatchImageReview();
+    }
 
-        saveDraft(currentWarehouseId);
-        await downloadImageZip(matched);
+    function searchBatchImageManualMatch() {
+        const q = document.getElementById('batch-image-manual-search').value.toLowerCase().trim();
+        const results = document.getElementById('batch-image-manual-results');
+        if (!q) { results.innerHTML = ''; return; }
+        const matches = globalInventory.filter(item => itemMatchesQuery(item, q)).slice(0, 8);
+        results.innerHTML = matches.map(item => `<div class="ai-list-item" onclick="pickBatchImageManualMatch('${escapeHtml(item.BTKnumber)}')">
+            <div class="ai-list-item-name">${escapeHtml(item['itemname(english)'] || item.BTKnumber)}</div>
+            <div class="ai-list-item-meta">${escapeHtml(item.BTKnumber)}</div>
+        </div>`).join('') || '<p style="color:var(--text-muted); font-size:0.85rem;">No matches.</p>';
+    }
+    async function pickBatchImageManualMatch(btk) {
+        const entry = batchImageQueue[batchImageIndex];
+        await assignBatchImageToItem(entry.file, btk);
+        batchImageResults.assigned++;
+        batchImageIndex++;
+        renderBatchImageReview();
+    }
+
+    async function assignBatchImageToItem(file, btk) {
+        const { full, thumb, filename, thumbName } = await resizeImage(file, btk);
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        if (isSupa) {
+            if (!(await checkStorageBudget(full.size + thumb.size))) {
+                showToast(`Storage budget exceeded — skipped photo for ${btk}.`, "warning", 6000);
+                return;
+            }
+            try {
+                const { fullUrl, thumbUrl } = await uploadItemPhotoToSupabase(btk, full, thumb);
+                const item = globalInventory.find(i => i.BTKnumber === btk);
+                if (item) { item.imageFullUrl = fullUrl; item.imageThumbUrl = thumbUrl; }
+            } catch (e) {
+                console.error(`Upload failed for ${btk}:`, e);
+                showToast(`Could not upload photo for ${btk}: ${e.message || e}`, "error");
+            }
+        } else {
+            const item = globalInventory.find(i => i.BTKnumber === btk);
+            if (item) item.images = appendImageFilename(item.images, filename);
+            batchImageStaticZipEntries.push({ btk, filename, thumbName, full, thumb });
+        }
+    }
+
+    async function finishBatchImageReview() {
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        const imgEl = document.getElementById('batch-image-preview');
+        if (imgEl.dataset.objectUrl) { URL.revokeObjectURL(imgEl.dataset.objectUrl); imgEl.dataset.objectUrl = ''; }
+        if (!isSupa) {
+            saveDraft(currentWarehouseId);
+            if (batchImageStaticZipEntries.length) await downloadImageZip(batchImageStaticZipEntries);
+        }
         if (listMode === 'items') filterList(false);
-        showToast(`Matched ${matched.length} image(s), zip downloaded. Unzip into assets/.${unmatchedMsg}`, "success", 8000);
+        showListView('items');
+        const unassignedNote = batchImageResults.unassigned
+            ? (isSupa ? ` ${batchImageResults.unassigned} set aside — see Settings → 🗄️ Unassigned Images.`
+                      : ` ${batchImageResults.unassigned} unmatched (static mode has nowhere to store them — re-run once renamed or matched by hand).`)
+            : '';
+        showToast(`Batch image import: ${batchImageResults.assigned} assigned, ${batchImageResults.unassigned} unassigned.${unassignedNote}`, "success", 9000);
+        batchImageQueue = []; batchImageStaticZipEntries = []; batchImageUnassignedFiles = [];
+    }
+
+    function cancelBatchImageReview() {
+        const remaining = batchImageQueue.length - batchImageIndex;
+        showConfirmModal({
+            title: 'Stop reviewing?',
+            body: `${remaining} image(s) not yet reviewed will be discarded. Anything already confirmed is kept.`,
+            confirmLabel: '✕ Stop',
+            onConfirm: () => {
+                const imgEl = document.getElementById('batch-image-preview');
+                if (imgEl.dataset.objectUrl) { URL.revokeObjectURL(imgEl.dataset.objectUrl); imgEl.dataset.objectUrl = ''; }
+                if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') saveDraft(currentWarehouseId);
+                if (listMode === 'items') filterList(false);
+                showListView('items');
+                batchImageQueue = []; batchImageStaticZipEntries = []; batchImageUnassignedFiles = [];
+            }
+        });
+    }
+
+    // ── Unassigned Images (Supabase mode) — stored under the item-images bucket's own
+    // "unassigned/" prefix rather than a new table; the original filename is embedded directly in
+    // the object name (sanitized) so listing reveals it without needing Storage object metadata.
+    const UNASSIGNED_IMAGE_PREFIX = 'unassigned';
+    async function uploadUnassignedImage(file) {
+        const { full, thumb } = await resizeImage(file, 'UNASSIGNED');
+        if (!(await checkStorageBudget(full.size + thumb.size))) {
+            console.warn('Unassigned image not stored — storage budget would be exceeded:', file.name);
+            return;
+        }
+        const token = randomStorageToken();
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+        const base = `${token}__${safeName}`;
+        const up1 = await sb.storage.from(SUPABASE_STORAGE_BUCKET).upload(`${UNASSIGNED_IMAGE_PREFIX}/${base}__full.jpg`, full, { upsert: true, contentType: 'image/jpeg' });
+        if (up1.error) throw up1.error;
+        const up2 = await sb.storage.from(SUPABASE_STORAGE_BUCKET).upload(`${UNASSIGNED_IMAGE_PREFIX}/${base}__thumb.jpg`, thumb, { upsert: true, contentType: 'image/jpeg' });
+        if (up2.error) throw up2.error;
+    }
+
+    function openUnassignedImagesModal() {
+        document.getElementById('unassigned-images-modal').classList.add('open');
+        renderUnassignedImagesList();
+    }
+    function closeUnassignedImagesModal() { document.getElementById('unassigned-images-modal').classList.remove('open'); }
+    function handleUnassignedImagesModalOverlayClick(e) { if (e.target === document.getElementById('unassigned-images-modal')) closeUnassignedImagesModal(); }
+
+    async function renderUnassignedImagesList() {
+        const container = document.getElementById('unassigned-images-list');
+        container.innerHTML = 'Loading…';
+        const { data, error } = await sb.storage.from(SUPABASE_STORAGE_BUCKET).list(UNASSIGNED_IMAGE_PREFIX, { limit: 200, sortBy: { column: 'created_at', order: 'desc' } });
+        if (error) { container.innerHTML = `<p style="color:var(--danger);">Could not load unassigned images: ${escapeHtml(error.message)}</p>`; return; }
+        const thumbs = (data || []).filter(f => f.name.endsWith('__thumb.jpg'));
+        if (!thumbs.length) { container.innerHTML = '<p style="color:var(--text-muted);">No unassigned images.</p>'; return; }
+        container.innerHTML = thumbs.map(f => {
+            const base = f.name.replace(/__thumb\.jpg$/, '');
+            const originalName = base.split('__').slice(1).join('__') || base;
+            const thumbUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(`${UNASSIGNED_IMAGE_PREFIX}/${f.name}`).data.publicUrl;
+            return `<div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);">
+                <img src="${thumbUrl}" alt="" style="width:48px; height:48px; object-fit:cover; border-radius:6px; flex-shrink:0;">
+                <div style="flex:1; min-width:0; font-size:0.85rem; word-break:break-all;">${escapeHtml(originalName)}</div>
+                <button class="secondary" onclick="openAssignUnassignedImageModal('${escapeHtml(base)}')" style="padding:4px 8px; min-height:auto; font-size:0.78rem; flex-shrink:0;">🔗 Assign</button>
+                <button class="secondary" onclick="deleteUnassignedImage('${escapeHtml(base)}')" style="padding:4px 8px; min-height:auto; font-size:0.78rem; color:var(--danger); flex-shrink:0;">🗑️</button>
+            </div>`;
+        }).join('');
+    }
+
+    async function deleteUnassignedImage(base) {
+        const { error } = await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove([`${UNASSIGNED_IMAGE_PREFIX}/${base}__full.jpg`, `${UNASSIGNED_IMAGE_PREFIX}/${base}__thumb.jpg`]);
+        if (error) { showToast("Could not delete: " + error.message, "error"); return; }
+        renderUnassignedImagesList();
+    }
+
+    var assignUnassignedImageBase = null;
+    function openAssignUnassignedImageModal(base) {
+        assignUnassignedImageBase = base;
+        document.getElementById('assign-unassigned-search').value = '';
+        document.getElementById('assign-unassigned-results').innerHTML = '';
+        document.getElementById('assign-unassigned-image-modal').classList.add('open');
+    }
+    function closeAssignUnassignedImageModal() {
+        document.getElementById('assign-unassigned-image-modal').classList.remove('open');
+        assignUnassignedImageBase = null;
+    }
+    function handleAssignUnassignedImageModalOverlayClick(e) { if (e.target === document.getElementById('assign-unassigned-image-modal')) closeAssignUnassignedImageModal(); }
+    function searchAssignUnassignedImage() {
+        const q = document.getElementById('assign-unassigned-search').value.toLowerCase().trim();
+        const results = document.getElementById('assign-unassigned-results');
+        if (!q) { results.innerHTML = ''; return; }
+        const matches = globalInventory.filter(item => itemMatchesQuery(item, q)).slice(0, 8);
+        results.innerHTML = matches.map(item => `<div class="ai-list-item" onclick="confirmAssignUnassignedImage('${escapeHtml(item.BTKnumber)}')">
+            <div class="ai-list-item-name">${escapeHtml(item['itemname(english)'] || item.BTKnumber)}</div>
+            <div class="ai-list-item-meta">${escapeHtml(item.BTKnumber)}</div>
+        </div>`).join('') || '<p style="color:var(--text-muted); font-size:0.85rem;">No matches.</p>';
+    }
+    // Copies the already-resized full/thumb objects straight into the item's real (tokenized) path
+    // — no need to re-fetch-and-resize the original, since uploadUnassignedImage() already did that
+    // once when the image was first set aside.
+    async function confirmAssignUnassignedImage(btk) {
+        const base = assignUnassignedImageBase;
+        if (!base) return;
+        try {
+            const fullUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(`${UNASSIGNED_IMAGE_PREFIX}/${base}__full.jpg`).data.publicUrl;
+            const thumbUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(`${UNASSIGNED_IMAGE_PREFIX}/${base}__thumb.jpg`).data.publicUrl;
+            const [fullBlob, thumbBlob] = await Promise.all([fetch(fullUrl).then(r => r.blob()), fetch(thumbUrl).then(r => r.blob())]);
+            const { fullUrl: newFullUrl, thumbUrl: newThumbUrl } = await uploadItemPhotoToSupabase(btk, fullBlob, thumbBlob);
+            const item = globalInventory.find(i => i.BTKnumber === btk);
+            if (item) { item.imageFullUrl = newFullUrl; item.imageThumbUrl = newThumbUrl; }
+            await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove([`${UNASSIGNED_IMAGE_PREFIX}/${base}__full.jpg`, `${UNASSIGNED_IMAGE_PREFIX}/${base}__thumb.jpg`]);
+            closeAssignUnassignedImageModal();
+            renderUnassignedImagesList();
+            if (listMode === 'items') filterList(false);
+            showToast(`Image assigned to ${item ? (item['itemname(english)'] || btk) : btk}.`, "success");
+        } catch (e) {
+            showToast("Could not assign image: " + (e.message || e), "error");
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -3542,7 +3872,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function switchView(viewId) {
-        ['auth-view','list-view','item-view','kit-view','manufacturer-view','warehouse-view','pack-order-view','inventering-setup-view','inventering-view','preview-view','settings-view','merge-view','bin-locator-view','dashboard-view'].forEach(v => {
+        ['auth-view','list-view','item-view','kit-view','manufacturer-view','warehouse-view','pack-order-view','inventering-setup-view','inventering-view','preview-view','settings-view','merge-view','bin-locator-view','dashboard-view','batch-image-review-view'].forEach(v => {
             document.getElementById(v).classList.add('hidden');
         });
         document.getElementById(viewId).classList.remove('hidden');
@@ -9031,6 +9361,7 @@ ${css}
         document.getElementById('btn-activity-log').classList.toggle('hidden', !(isSupa && isAdmin));
         document.getElementById('btn-backorder-report').classList.toggle('hidden', !(isSupa && canEditItems()));
         document.getElementById('btn-pack-order-history').classList.toggle('hidden', !(isSupa && canEditItems()));
+        document.getElementById('btn-unassigned-images').classList.toggle('hidden', !(isSupa && canEditItems()));
         document.getElementById('display-name-row').classList.toggle('hidden', !isSupa);
         // Storage/database usage stats are admin-only — editors/maintainers/viewers don't need
         // (or, per the requested role model, shouldn't see) account-wide quota info.
