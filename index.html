@@ -356,6 +356,7 @@
         .toast { background: var(--card-bg); color: var(--text-main); padding: 14px 20px; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2); border-left: 5px solid var(--primary); opacity: 0; transform: translateY(-20px); transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55); display: flex; align-items: flex-start; gap: 12px; font-weight: 600; pointer-events: auto; cursor: pointer; font-size: 0.9rem; line-height: 1.4; }
         .toast.show { opacity: 1; transform: translateY(0); }
         .toast.success { border-left-color: var(--success); }
+        .toast-action { flex-shrink: 0; background: var(--primary); color: #fff; border: none; border-radius: 8px; padding: 5px 10px; font-size: 0.8rem; font-weight: 700; cursor: pointer; min-height: unset; }
         .toast.error { border-left-color: var(--danger); }
         .toast.warning { border-left-color: #f59e0b; }
 
@@ -897,7 +898,8 @@
         <div id="import-items-chooser">
             <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">How would you like to bring in a CSV?</p>
             <button class="full-width" onclick="triggerCSVImport()" style="margin-bottom:0.75rem;">📁 Upload a CSV File</button>
-            <button class="secondary full-width" onclick="showImportPasteBox()">📋 Paste CSV Text</button>
+            <button class="secondary full-width" onclick="showImportPasteBox()" style="margin-bottom:0.75rem;">📋 Paste CSV Text</button>
+            <button class="secondary full-width" onclick="showStockUpdatePasteBox()">📊 Quick Stock Update (quantities only)</button>
         </div>
         <div id="import-items-paste" class="hidden">
             <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:0.5rem;">Paste the CSV content below, headers and all.</p>
@@ -905,6 +907,17 @@
             <div class="modal-actions" style="margin-top:0.75rem;">
                 <button class="secondary" onclick="showImportChooser()">← Back</button>
                 <button style="flex:1;" onclick="submitPastedCSV()">Parse &amp; Continue</button>
+            </div>
+        </div>
+        <!-- A deliberately lighter path than the full import above: just BTK (or a part number) plus
+             a quantity column, matched against what's already here and applied directly — no
+             conflict/merge review, since a single-field overwrite has nothing else to merge. -->
+        <div id="import-items-stock-update" class="hidden">
+            <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:0.5rem;">Paste a CSV with a BTK or item-number column and a quantity column — e.g. from a stocktake export. Every matched item's quantity is set to the file's number; nothing else about it changes.</p>
+            <textarea id="stock-update-paste-textarea" rows="10" style="width:100%; font-family:monospace; font-size:0.8rem; min-height:200px;" placeholder="BTKnumber,quantity&#10;BTK000001,25"></textarea>
+            <div class="modal-actions" style="margin-top:0.75rem;">
+                <button class="secondary" onclick="showImportChooser()">← Back</button>
+                <button style="flex:1;" onclick="submitStockUpdateCSV()">Parse &amp; Continue</button>
             </div>
         </div>
         <button class="secondary full-width" onclick="closeImportItemsModal()" style="margin-top:1rem;">Cancel</button>
@@ -924,6 +937,84 @@
             <button class="secondary full-width" onclick="closeCsvMappingModal()">Cancel</button>
             <button class="full-width" onclick="confirmCsvMapping()">Looks Good — Continue</button>
         </div>
+    </div>
+</div>
+
+<!-- Pre-commit summary — a full breakdown of what a CSV import is about to do, shown before ANY
+     row is touched (whether or not anything actually needs one-by-one review afterward), so a big
+     or unfamiliar file's effect is clear up front rather than only surfacing as individual
+     conflicts. See finalizeCsvImportRows()/openCsvImportSummaryModal(). -->
+<div class="modal-overlay" id="csv-import-summary-modal" onclick="handleCsvImportSummaryModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:480px;">
+        <h3 style="margin-top:0;">📋 Import Summary</h3>
+        <div id="csv-import-summary-rows"></div>
+        <p id="csv-import-summary-note" style="color:var(--text-muted); font-size:0.85rem; margin-top:0.75rem;"></p>
+        <div class="modal-actions" style="margin-top:0.75rem;">
+            <button class="secondary full-width" onclick="cancelCsvImportSummary()">Cancel</button>
+            <button class="success-btn full-width" id="btn-csv-import-summary-continue" onclick="continueCsvImportFromSummary()">Continue</button>
+        </div>
+    </div>
+</div>
+
+<!-- Kits CSV import — brought up to the same paste-text + smart column matching standard as Items
+     CSV (see modules note in the README): "Spare-part-kit name"/"kitnumber" columns are matched by
+     alias the same way item columns are, every other column is a BTK-keyed quantity as before. A
+     kit already saved (matched by kitnumber, or by name when kitnumber's blank) with DIFFERENT
+     contents goes to the review list below rather than silently overwriting it; kits not mentioned
+     in the file are left untouched (the old handler used to just replace the entire kit list). -->
+<div class="modal-overlay" id="import-kits-modal" onclick="handleImportKitsModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:480px;">
+        <h3 style="margin-top:0;">📥 Import Kits</h3>
+        <div id="import-kits-chooser">
+            <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">How would you like to bring in a Kits CSV?</p>
+            <button class="full-width" onclick="triggerKitsCSVImport()" style="margin-bottom:0.75rem;">📁 Upload a CSV File</button>
+            <button class="secondary full-width" onclick="showKitsImportPasteBox()">📋 Paste CSV Text</button>
+        </div>
+        <div id="import-kits-paste" class="hidden">
+            <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:0.5rem;">Paste the CSV content below, headers and all — one row per kit, one column per item (BTK number as the header, quantity as the value).</p>
+            <textarea id="kits-import-paste-textarea" rows="10" style="width:100%; font-family:monospace; font-size:0.8rem; min-height:200px;" placeholder="Spare-part-kit name,kitnumber,BTK000001,BTK000002"></textarea>
+            <div class="modal-actions" style="margin-top:0.75rem;">
+                <button class="secondary" onclick="showKitsImportChooser()">← Back</button>
+                <button style="flex:1;" onclick="submitPastedKitsCSV()">Parse &amp; Continue</button>
+            </div>
+        </div>
+        <button class="secondary full-width" onclick="closeImportKitsModal()" style="margin-top:1rem;">Cancel</button>
+    </div>
+</div>
+
+<!-- One row per changed kit — new/unchanged kits need no review and aren't shown here at all. -->
+<div class="modal-overlay" id="kits-import-review-modal" onclick="handleKitsImportReviewModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:640px;">
+        <h3 style="margin-top:0;">🔀 Review Changed Kits</h3>
+        <p id="kits-import-review-intro" style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;"></p>
+        <div id="kits-import-review-list" style="max-height:50vh; overflow-y:auto;"></div>
+        <div class="modal-actions" style="margin-top:1rem;">
+            <button class="secondary full-width" onclick="cancelKitsImport()">Cancel</button>
+            <button class="success-btn full-width" onclick="commitKitsCSVImport()">✅ Apply Import</button>
+        </div>
+    </div>
+</div>
+
+<!-- Warehouses CSV import — same paste-text + smart column matching treatment, and now a merge by
+     `l` (warehouse ID) instead of a wholesale replace: an existing warehouse not mentioned in the
+     file keeps its current name/address rather than the whole list being thrown away. -->
+<div class="modal-overlay" id="import-warehouses-modal" onclick="handleImportWarehousesModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:480px;">
+        <h3 style="margin-top:0;">📥 Import Warehouses</h3>
+        <div id="import-warehouses-chooser">
+            <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">How would you like to bring in a Warehouses CSV?</p>
+            <button class="full-width" onclick="triggerWarehouseCSVImport()" style="margin-bottom:0.75rem;">📁 Upload a CSV File</button>
+            <button class="secondary full-width" onclick="showWarehousesImportPasteBox()">📋 Paste CSV Text</button>
+        </div>
+        <div id="import-warehouses-paste" class="hidden">
+            <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:0.5rem;">Paste the CSV content below, headers and all.</p>
+            <textarea id="warehouses-import-paste-textarea" rows="8" style="width:100%; font-family:monospace; font-size:0.8rem; min-height:160px;" placeholder="l,name,address"></textarea>
+            <div class="modal-actions" style="margin-top:0.75rem;">
+                <button class="secondary" onclick="showWarehousesImportChooser()">← Back</button>
+                <button style="flex:1;" onclick="submitPastedWarehousesCSV()">Parse &amp; Import</button>
+            </div>
+        </div>
+        <button class="secondary full-width" onclick="closeImportWarehousesModal()" style="margin-top:1rem;">Cancel</button>
     </div>
 </div>
 
@@ -1018,8 +1109,8 @@
             <div class="list-header-actions" id="list-actions">
                 <button id="btn-add-item" onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">➕ Add Item</button>
                 <button class="secondary" id="btn-items-csv" onclick="openImportItemsModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Import Items</button>
-                <button class="secondary" id="btn-kits-csv" onclick="triggerKitsCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Kits CSV</button>
-                <button class="secondary" id="btn-warehouse-csv" onclick="triggerWarehouseCSVImport()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Warehouses CSV</button>
+                <button class="secondary" id="btn-kits-csv" onclick="openImportKitsModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Kits CSV</button>
+                <button class="secondary" id="btn-warehouse-csv" onclick="openImportWarehousesModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Warehouses CSV</button>
                 <button class="secondary" id="btn-export-db" onclick="exportEncryptedDatabase()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">💾 Export</button>
                 <button class="secondary hidden" id="btn-export-csv" onclick="exportItemsCSV()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📤 Export CSV</button>
                 <button class="secondary hidden" id="btn-batch-images" onclick="triggerBatchImageUpload()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">🖼️ Batch Images</button>
@@ -1457,6 +1548,16 @@
             <p class="setting-desc">Off by default. When on, a 📊 button appears in the header with an at-a-glance view of stock, kits, and (in Supabase mode) open orders.</p>
         </div>
 
+        <div class="setting-row">
+            <label>📥 CSV Templates</label>
+            <p class="setting-desc" style="margin-bottom:0.5rem;">A blank CSV with the right column headers (and one filled-in example row) for each import, so there's no need to guess the expected format.</p>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="secondary" onclick="downloadCsvTemplate('items')" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📦 Items</button>
+                <button class="secondary" onclick="downloadCsvTemplate('kits')" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">🧰 Kits</button>
+                <button class="secondary" onclick="downloadCsvTemplate('warehouses')" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">🏬 Warehouses</button>
+            </div>
+        </div>
+
         <div class="setting-row" id="storage-usage-row">
             <label>Image Storage (Supabase)</label>
             <div style="background:var(--border); border-radius:8px; height:10px; overflow:hidden; margin-bottom:6px;">
@@ -1722,17 +1823,26 @@
     // ════════════════════════════════════════════════════════════════════════
     //  TOAST
     // ════════════════════════════════════════════════════════════════════════
-    function showToast(message, type = 'info', duration = 3500) {
+    // `action` (optional): { label, onClick } — renders a small button inside the toast (e.g.
+    // "↩️ Undo Import"). Its own click stops propagation so it doesn't also trigger the toast's
+    // click-to-dismiss, but still dismisses the toast right after running onClick.
+    function showToast(message, type = 'info', duration = 3500, action = null) {
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
         const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
-        toast.innerHTML = `<span aria-hidden="true" style="flex-shrink:0">${icons[type] || 'ℹ️'}</span><span>${message}</span>`;
-        toast.onclick = () => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); };
+        const dismiss = () => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); };
+        toast.innerHTML = `<span aria-hidden="true" style="flex-shrink:0">${icons[type] || 'ℹ️'}</span><span style="flex:1;">${message}</span>` +
+            (action ? `<button type="button" class="toast-action">${escapeHtml(action.label)}</button>` : '');
+        toast.onclick = dismiss;
+        if (action) {
+            const btn = toast.querySelector('.toast-action');
+            btn.onclick = (e) => { e.stopPropagation(); action.onClick(); dismiss(); };
+        }
         container.appendChild(toast);
         void toast.offsetWidth;
         toast.classList.add('show');
-        setTimeout(() => { if (toast.parentElement) { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); } }, duration);
+        setTimeout(() => { if (toast.parentElement) dismiss(); }, duration);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -3646,8 +3756,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     //  CSV IMPORT (ITEMS & KITS)
     // ════════════════════════════════════════════════════════════════════════
     function triggerCSVImport() { if (!requireAuth()) return; document.getElementById('csv-upload').click(); }
-    function triggerKitsCSVImport() { if (!requireAuth()) return; document.getElementById('kits-csv-upload').click(); }
-    function triggerWarehouseCSVImport() { if (!requireAuth()) return; document.getElementById('warehouse-csv-upload').click(); }
+    // Auth already checked by openImportKitsModal()/openImportWarehousesModal() before either of
+    // these chooser buttons is reachable — no need to re-check here.
+    function triggerKitsCSVImport() { document.getElementById('kits-csv-upload').click(); }
+    function triggerWarehouseCSVImport() { document.getElementById('warehouse-csv-upload').click(); }
 
     // ── Import Items — chooser (upload vs paste) ──────────────────────────────
     function openImportItemsModal() {
@@ -3658,21 +3770,78 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function closeImportItemsModal() {
         document.getElementById('import-items-modal').classList.remove('open');
         document.getElementById('import-paste-textarea').value = '';
+        document.getElementById('stock-update-paste-textarea').value = '';
     }
     function handleImportItemsModalOverlayClick(e) { if (e.target === document.getElementById('import-items-modal')) closeImportItemsModal(); }
     function showImportChooser() {
         document.getElementById('import-items-chooser').classList.remove('hidden');
         document.getElementById('import-items-paste').classList.add('hidden');
+        document.getElementById('import-items-stock-update').classList.add('hidden');
     }
     function showImportPasteBox() {
         document.getElementById('import-items-chooser').classList.add('hidden');
         document.getElementById('import-items-paste').classList.remove('hidden');
+        document.getElementById('import-items-stock-update').classList.add('hidden');
         document.getElementById('import-paste-textarea').focus();
+    }
+    function showStockUpdatePasteBox() {
+        document.getElementById('import-items-chooser').classList.add('hidden');
+        document.getElementById('import-items-paste').classList.add('hidden');
+        document.getElementById('import-items-stock-update').classList.remove('hidden');
+        document.getElementById('stock-update-paste-textarea').focus();
     }
     function submitPastedCSV() {
         const text = document.getElementById('import-paste-textarea').value;
         beginItemsCSVImport(text);
     }
+    function submitStockUpdateCSV() {
+        const text = document.getElementById('stock-update-paste-textarea').value;
+        beginStockUpdateImport(text);
+    }
+
+    // ── Import Kits — chooser (upload vs paste), same shape as Import Items ──────────────────
+    function openImportKitsModal() {
+        if (!requireAuth()) return;
+        showKitsImportChooser();
+        document.getElementById('import-kits-modal').classList.add('open');
+    }
+    function closeImportKitsModal() {
+        document.getElementById('import-kits-modal').classList.remove('open');
+        document.getElementById('kits-import-paste-textarea').value = '';
+    }
+    function handleImportKitsModalOverlayClick(e) { if (e.target === document.getElementById('import-kits-modal')) closeImportKitsModal(); }
+    function showKitsImportChooser() {
+        document.getElementById('import-kits-chooser').classList.remove('hidden');
+        document.getElementById('import-kits-paste').classList.add('hidden');
+    }
+    function showKitsImportPasteBox() {
+        document.getElementById('import-kits-chooser').classList.add('hidden');
+        document.getElementById('import-kits-paste').classList.remove('hidden');
+        document.getElementById('kits-import-paste-textarea').focus();
+    }
+    function submitPastedKitsCSV() { beginKitsCSVImport(document.getElementById('kits-import-paste-textarea').value); }
+
+    // ── Import Warehouses — chooser (upload vs paste), same shape as Import Items ────────────
+    function openImportWarehousesModal() {
+        if (!requireAuth()) return;
+        showWarehousesImportChooser();
+        document.getElementById('import-warehouses-modal').classList.add('open');
+    }
+    function closeImportWarehousesModal() {
+        document.getElementById('import-warehouses-modal').classList.remove('open');
+        document.getElementById('warehouses-import-paste-textarea').value = '';
+    }
+    function handleImportWarehousesModalOverlayClick(e) { if (e.target === document.getElementById('import-warehouses-modal')) closeImportWarehousesModal(); }
+    function showWarehousesImportChooser() {
+        document.getElementById('import-warehouses-chooser').classList.remove('hidden');
+        document.getElementById('import-warehouses-paste').classList.add('hidden');
+    }
+    function showWarehousesImportPasteBox() {
+        document.getElementById('import-warehouses-chooser').classList.add('hidden');
+        document.getElementById('import-warehouses-paste').classList.remove('hidden');
+        document.getElementById('warehouses-import-paste-textarea').focus();
+    }
+    function submitPastedWarehousesCSV() { beginWarehouseCSVImport(document.getElementById('warehouses-import-paste-textarea').value); }
 
     // Collapses same-BTK rows to the last occurrence (consistent with how the app treats BTK as
     // the only safe lookup key elsewhere) and reports which ones collided, rather than silently
@@ -3763,8 +3932,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             return out;
         });
         const presentColumns = new Set(mapping.filter(m => m.target).map(m => m.target));
-        const { rows: filledRows, autoAssignedCount } = assignMissingBTKs(remapped);
-        finalizeCsvImportRows(filledRows, presentColumns, autoAssignedCount);
+        const { rows: filledRows, autoAssignedCount, matchedByPartNumberCount } = assignMissingBTKs(remapped);
+        finalizeCsvImportRows(filledRows, presentColumns, autoAssignedCount, matchedByPartNumberCount);
     }
 
     // Looks for an EXISTING item — under a DIFFERENT BTK; same-BTK is already a hard conflict,
@@ -3808,7 +3977,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // merge-grid (see openCSVConflictMergeView) — a hard conflict must be resolved one way or
     // another, since it IS the same row; a possible duplicate additionally offers "these aren't
     // actually the same item" as an escape hatch.
-    function finalizeCsvImportRows(filledRows, presentColumns, autoAssignedCount) {
+    function finalizeCsvImportRows(filledRows, presentColumns, autoAssignedCount, matchedByPartNumberCount) {
         const items = normalizeItems(filledRows);
         if (!items.length) { showToast("No valid rows found.", "error"); return; }
         const { deduped, dupes } = dedupeByBTK(items);
@@ -3828,24 +3997,54 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         csvImportDupesReport = dupes;
         csvImportPresentColumns = presentColumns;
         csvImportAutoAssignedCount = autoAssignedCount;
-
-        const queue = [...conflicts, ...duplicates];
-        if (queue.length === 0) { commitCSVImport(); return; }
-
-        csvImportQueue = queue;
+        csvImportMatchedByPartNumberCount = matchedByPartNumberCount || 0;
+        csvImportQueue = [...conflicts, ...duplicates];
         csvImportIndex = 0;
         csvImportResolvedItems = [];
-        const parts = [];
-        if (conflicts.length) parts.push(`${conflicts.length} already-saved BTK number${conflicts.length > 1 ? 's' : ''}`);
-        if (duplicates.length) parts.push(`${duplicates.length} possible duplicate${duplicates.length > 1 ? 's' : ''} under a different BTK`);
-        showConfirmModal({
-            title: `${queue.length} item${queue.length > 1 ? 's' : ''} to review`,
-            body: `This CSV matches ${parts.join(' and ')}. You'll review each one individually — nothing is saved until you've gone through the whole list.` +
-                (stillNew.length ? ` ${stillNew.length} brand-new item(s) in the file will just be added, no review needed.` : '') +
-                `\n\nReview now?`,
-            confirmLabel: 'Review',
-            onConfirm: () => openCSVConflictMergeView()
-        });
+
+        openCsvImportSummaryModal();
+    }
+
+    // A full breakdown of what's about to happen, shown before ANY row is touched — whether or not
+    // anything actually needs one-by-one review afterward (previously a queue of zero just
+    // committed instantly with no chance to look it over first, and a non-empty queue only got a
+    // plain sentence, not row counts). "Continue" either commits directly (nothing to review) or
+    // walks into the same one-at-a-time conflict/duplicate review as before.
+    function openCsvImportSummaryModal() {
+        const conflictCount = csvImportQueue.filter(q => q.type === 'conflict').length;
+        const duplicateCount = csvImportQueue.filter(q => q.type === 'duplicate').length;
+        const rows = [
+            csvSummaryRow('🆕 New items', csvImportPendingNew.length, 'var(--success)'),
+            csvSummaryRow('✏️ Existing items to update', conflictCount, 'var(--primary)'),
+            csvSummaryRow('🔍 Possible duplicates to review', duplicateCount, '#f59e0b'),
+            csvSummaryRow('🔗 Matched to an existing item by part number', csvImportMatchedByPartNumberCount, 'var(--text-muted)'),
+            csvSummaryRow('🔢 Rows with no BTK — one assigned automatically', csvImportAutoAssignedCount, 'var(--text-muted)'),
+            csvSummaryRow('⚠️ Duplicate BTKs within the file (kept last row only)', csvImportDupesReport.length, 'var(--danger)'),
+        ].filter(Boolean).join('');
+        document.getElementById('csv-import-summary-rows').innerHTML = rows || '<p style="color:var(--text-muted);">Nothing to import.</p>';
+        const needsReview = csvImportQueue.length > 0;
+        document.getElementById('csv-import-summary-note').textContent = needsReview
+            ? `${csvImportQueue.length} item${csvImportQueue.length > 1 ? 's' : ''} need your review — nothing is saved until you've gone through the whole list.`
+            : 'Nothing needs review — ready to import.';
+        document.getElementById('btn-csv-import-summary-continue').textContent = needsReview ? 'Review & Continue' : '✅ Import';
+        document.getElementById('csv-import-summary-modal').classList.add('open');
+    }
+    function csvSummaryRow(label, count, color) {
+        if (!count) return '';
+        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); font-size:0.9rem;">
+            <span><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:8px;"></span>${escapeHtml(label)}</span>
+            <strong>${count}</strong>
+        </div>`;
+    }
+    function cancelCsvImportSummary() {
+        document.getElementById('csv-import-summary-modal').classList.remove('open');
+        resetCsvImportState();
+    }
+    function handleCsvImportSummaryModalOverlayClick(e) { if (e.target === document.getElementById('csv-import-summary-modal')) cancelCsvImportSummary(); }
+    function continueCsvImportFromSummary() {
+        document.getElementById('csv-import-summary-modal').classList.remove('open');
+        if (csvImportQueue.length === 0) { commitCSVImport(); return; }
+        openCSVConflictMergeView();
     }
 
     // A BTK only in the CSV is new — added directly, no review needed. A BTK that already exists
@@ -3865,43 +4064,274 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         event.target.value = '';
     }
 
+    // ── Quick Stock Update — a deliberately lighter CSV path than the full items import above: just
+    // a BTK-or-part-number column plus a quantity column (e.g. a stocktake export), matched against
+    // what's already here and the quantity set directly. No merge grid, since there's only one
+    // field involved — nothing else about a matched item changes, and nothing is added or removed.
+    const STOCK_QTY_ALIASES = ['quantity', 'qty', 'stock', 'count', 'amount', 'onhand', 'numberofitems'];
+    const STOCK_BTK_ALIASES = ['btk', 'btknumber', 'btknum', 'btkno', 'systemid', 'id'];
+    const STOCK_PART_ALIASES = ['itemnumber', 'itemnumber1', 'partnumber', 'partno', 'itemno', 'articlenumber', 'articleno', 'barcode', 'ean', 'upc'];
+    var stockUpdatePending = null; // [{ item, qty }] held between parse and confirm
+
+    function beginStockUpdateImport(csvText) {
+        if (!csvText || !csvText.trim()) { showToast("Nothing to import — paste a CSV first.", "error"); return; }
+        const parsed = Papa.parse(csvText.trim(), { header: true, skipEmptyLines: true });
+        const rawHeaders = parsed.meta.fields || [];
+        if (!rawHeaders.length || !parsed.data.length) { showToast("Couldn't find a header row and at least one data row in that CSV.", "error"); return; }
+
+        const qtyHeader = rawHeaders.find(h => STOCK_QTY_ALIASES.includes(normalizeHeaderName(h)));
+        const btkHeader = rawHeaders.find(h => STOCK_BTK_ALIASES.includes(normalizeHeaderName(h)));
+        const partHeader = rawHeaders.find(h => STOCK_PART_ALIASES.includes(normalizeHeaderName(h)));
+        if (!qtyHeader || (!btkHeader && !partHeader)) {
+            showToast("Couldn't find a quantity column plus a BTK or item-number column to match against.", "error", 7000);
+            return;
+        }
+
+        const matched = [];
+        const notFound = [];
+        parsed.data.forEach(row => {
+            const qty = parseInt((row[qtyHeader] || '').toString().trim(), 10);
+            if (isNaN(qty) || qty < 0) return; // no usable quantity on this row — silently skipped
+            let item = null;
+            if (btkHeader) {
+                const btk = (row[btkHeader] || '').toString().trim().toUpperCase();
+                if (btk) item = globalInventory.find(i => i.BTKnumber === btk);
+            }
+            if (!item && partHeader) {
+                const num = (row[partHeader] || '').toString().trim().toLowerCase();
+                if (num) item = globalInventory.find(i => [i.itemnumber, i.itemnumber2, i.itemnumber3].some(n => (n || '').trim().toLowerCase() === num));
+            }
+            if (item) matched.push({ item, qty });
+            else notFound.push((row[btkHeader] || row[partHeader] || '').toString().trim() || '(blank)');
+        });
+
+        if (!matched.length) { showToast("No rows matched an existing item in this warehouse.", "error"); return; }
+        closeImportItemsModal();
+        stockUpdatePending = matched;
+        const notFoundNote = notFound.length
+            ? ` ${notFound.length} row(s) didn't match any existing item and will be skipped: ${notFound.slice(0, 5).join(', ')}${notFound.length > 5 ? '…' : ''}.`
+            : '';
+        showConfirmModal({
+            title: `Update stock for ${matched.length} item(s)?`,
+            body: `This sets each matched item's quantity to the number in the file — nothing else about it changes.${notFoundNote}`,
+            confirmLabel: '✅ Update Stock',
+            onConfirm: commitStockUpdateImport
+        });
+    }
+
+    async function commitStockUpdateImport() {
+        if (!stockUpdatePending) return;
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        const batchId = (isSupa && window.crypto?.randomUUID) ? window.crypto.randomUUID() : null;
+        let updated = 0, failed = 0;
+        for (const { item, qty } of stockUpdatePending) {
+            try {
+                if (isSupa) {
+                    const beforeRow = await itemToSupabaseRow(item);
+                    const { error } = await sb.from('items').update({ numberofitems: qty }).eq('btk', item.BTKnumber);
+                    if (error) throw error;
+                    item.Numberofitems = String(qty);
+                    const afterRow = { ...beforeRow, numberofitems: qty };
+                    logActivity('update', item.BTKnumber, beforeRow, afterRow, `Stock update: ${summarizeItemChange('update', item.BTKnumber, beforeRow, afterRow)}`, batchId);
+                } else {
+                    item.Numberofitems = String(qty);
+                }
+                updated++;
+            } catch (e) { console.error('Stock update failed for', item.BTKnumber, e); failed++; }
+        }
+        const matchedCount = stockUpdatePending.length;
+        stockUpdatePending = null;
+        if (!isSupa) { saveDraft(currentWarehouseId); filterList(true); }
+        else await supabaseLoadList(currentWarehouseId);
+        const canUndo = isSupa && batchId && updated > 0;
+        showToast(`Updated ${updated} of ${matchedCount} item(s).${failed ? ` ${failed} failed — see console.` : ''}${!isSupa ? ' (draft autosaved).' : ''}`,
+            failed ? 'warning' : 'success', canUndo ? 15000 : 6000,
+            canUndo ? { label: '↩️ Undo', onClick: () => undoImportBatch(batchId) } : null);
+    }
+
     function handleKitsCSVUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = function(e) {
-            const kits = parseKitsCSVString(e.target.result);
-            if (!kits.length) { showToast("No valid kit rows (need 'Spare-part-kit name').", "error"); return; }
-            globalKits = kits;
-            saveDraft(currentWarehouseId);
-            renderKitsList();
-            showToast(`Imported ${kits.length} kits (draft autosaved).`, "success");
-        };
+        reader.onload = (e) => beginKitsCSVImport(e.target.result);
         reader.readAsText(file);
         event.target.value = '';
+    }
+
+    // ── Kits CSV "smart repair" — same idea as items' CSV_COLUMN_ALIASES/suggestColumnMapping,
+    // scoped to just the two metadata columns (every OTHER header is itself a BTK number, not a
+    // fixed field — nothing to alias-match there). Renames whichever header looks like the kit
+    // name/number column to parseKitsCSVString()'s expected exact names before parsing; a file
+    // with no recognizable name column at all is left alone, so that function's own "need a kit
+    // name column" error still fires with a clear reason instead of this failing silently first.
+    const KITS_NAME_ALIASES = ['sparepartkitname', 'kitname', 'kit', 'name', 'sparepartkit'];
+    const KITS_NUMBER_ALIASES = ['kitnumber', 'kitno', 'kitid', 'id', 'number'];
+    function remapKitsCsvHeaders(csvText) {
+        const probe = Papa.parse(csvText, { header: true, skipEmptyLines: true, preview: 1 });
+        const rawHeaders = probe.meta.fields || [];
+        if (rawHeaders.includes('Spare-part-kit name')) return csvText;
+        const nameHeader = rawHeaders.find(h => KITS_NAME_ALIASES.includes(normalizeHeaderName(h)));
+        if (!nameHeader) return csvText;
+        const numberHeader = rawHeaders.find(h => h !== nameHeader && KITS_NUMBER_ALIASES.includes(normalizeHeaderName(h)));
+        const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+        const renamedRows = parsed.data.map(row => {
+            const out = {};
+            Object.keys(row).forEach(h => {
+                if (h === nameHeader) out['Spare-part-kit name'] = row[h];
+                else if (numberHeader && h === numberHeader) out['kitnumber'] = row[h];
+                else out[h] = row[h];
+            });
+            return out;
+        });
+        return Papa.unparse(renamedRows);
+    }
+
+    var kitsImportPendingNew = [];  // brand-new kits, added as-is on commit — no review needed
+    var kitsImportQueue = [];       // [{ existing, incoming }] — same kit, different contents
+    var kitsImportChoices = [];     // 'csv' | 'existing' per queue entry, index-aligned
+    function resetKitsImportState() { kitsImportPendingNew = []; kitsImportQueue = []; kitsImportChoices = []; }
+
+    function kitsHaveSameItems(a, b) {
+        const ak = Object.keys(a.items || {}).sort();
+        const bk = Object.keys(b.items || {}).sort();
+        if (ak.length !== bk.length) return false;
+        return ak.every((k, i) => k === bk[i] && a.items[k] === b.items[k]);
+    }
+
+    // Matches an incoming kit against what's already saved by kitnumber first (if it has one),
+    // else by exact name — the same "BTK is the real key, name is the fallback" precedence items
+    // use. A kit matched with IDENTICAL contents needs no action at all (not even counted as
+    // "changed"); DIFFERENT contents go to the review list; no match at all is a brand-new kit.
+    // Kits already saved but not mentioned in this file are left completely untouched — the old
+    // handler used to just replace the whole kit list wholesale, silently discarding the rest.
+    function beginKitsCSVImport(csvText) {
+        if (!csvText || !csvText.trim()) { showToast("Nothing to import — paste or choose a CSV first.", "error"); return; }
+        const kits = parseKitsCSVString(remapKitsCsvHeaders(csvText.trim()));
+        if (!kits.length) { showToast("No valid kit rows found — need a kit-name column.", "error"); return; }
+        closeImportKitsModal();
+
+        const existingByNumber = new Map(globalKits.filter(k => k.kitnumber && k.kitnumber !== 'None').map(k => [k.kitnumber, k]));
+        const existingByName = new Map(globalKits.map(k => [(k.name || '').trim().toLowerCase(), k]));
+        resetKitsImportState();
+        kits.forEach(incoming => {
+            let existing = null;
+            if (incoming.kitnumber && incoming.kitnumber !== 'None') existing = existingByNumber.get(incoming.kitnumber);
+            if (!existing) existing = existingByName.get((incoming.name || '').trim().toLowerCase());
+            if (!existing) { kitsImportPendingNew.push(incoming); return; }
+            if (kitsHaveSameItems(existing, incoming)) return;
+            kitsImportQueue.push({ existing, incoming });
+        });
+
+        finalizeKitsCsvImport();
+    }
+
+    function finalizeKitsCsvImport() {
+        if (!kitsImportQueue.length) {
+            if (!kitsImportPendingNew.length) { showToast("Nothing new to import — every kit in this file already matches what's saved.", "warning"); return; }
+            showConfirmModal({
+                title: `Import ${kitsImportPendingNew.length} new kit(s)?`,
+                body: `Nothing needs review — every kit in this file is either brand new or already matches what's saved.`,
+                confirmLabel: '✅ Import',
+                onConfirm: commitKitsCSVImport
+            });
+            return;
+        }
+        kitsImportChoices = kitsImportQueue.map(() => 'csv');
+        document.getElementById('kits-import-review-intro').textContent =
+            `${kitsImportPendingNew.length} new kit(s) will be added with no review needed. These ${kitsImportQueue.length} already exist with different contents — choose which version to keep for each.`;
+        renderKitsImportReviewList();
+        document.getElementById('kits-import-review-modal').classList.add('open');
+    }
+
+    function renderKitsImportReviewList() {
+        document.getElementById('kits-import-review-list').innerHTML = kitsImportQueue.map((q, i) => {
+            const choice = kitsImportChoices[i] || 'csv';
+            const existingCount = Object.keys(q.existing.items || {}).length;
+            const csvCount = Object.keys(q.incoming.items || {}).length;
+            return `<div style="padding:8px 0; border-bottom:1px solid var(--border);">
+                <div style="font-weight:700;">${escapeHtml(q.incoming.name)}</div>
+                <div style="display:flex; gap:8px; margin-top:4px;">
+                    <button class="${choice === 'existing' ? '' : 'secondary'}" onclick="setKitsImportChoice(${i},'existing')" style="flex:1; padding:6px; min-height:auto; font-size:0.8rem;">Keep Existing (${existingCount} item${existingCount === 1 ? '' : 's'})</button>
+                    <button class="${choice === 'csv' ? '' : 'secondary'}" onclick="setKitsImportChoice(${i},'csv')" style="flex:1; padding:6px; min-height:auto; font-size:0.8rem;">Use CSV (${csvCount} item${csvCount === 1 ? '' : 's'})</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+    function setKitsImportChoice(i, choice) { kitsImportChoices[i] = choice; renderKitsImportReviewList(); }
+    function cancelKitsImport() {
+        document.getElementById('kits-import-review-modal').classList.remove('open');
+        resetKitsImportState();
+    }
+    function handleKitsImportReviewModalOverlayClick(e) { if (e.target === document.getElementById('kits-import-review-modal')) cancelKitsImport(); }
+
+    function commitKitsCSVImport() {
+        let updated = 0;
+        kitsImportQueue.forEach((q, i) => {
+            if ((kitsImportChoices[i] || 'csv') !== 'csv') return;
+            const idx = globalKits.indexOf(q.existing);
+            if (idx < 0) return;
+            globalKits[idx] = { ...q.incoming, kitnumber: (q.existing.kitnumber && q.existing.kitnumber !== 'None') ? q.existing.kitnumber : q.incoming.kitnumber };
+            updated++;
+        });
+        globalKits.push(...kitsImportPendingNew);
+        saveDraft(currentWarehouseId);
+        renderKitsList();
+        document.getElementById('kits-import-review-modal').classList.remove('open');
+        showToast(`Kits import: ${kitsImportPendingNew.length} new, ${updated} updated (draft autosaved).`, "success", 7000);
+        resetKitsImportState();
     }
 
     function handleWarehouseCSVUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = function(e) {
-            const res = Papa.parse(e.target.result, { header: true, skipEmptyLines: true });
-            const warehouses = res.data
-                .filter(r => r && (r.l || r.id || r.warehouse_id))
-                .map(r => ({
-                    l: (r.l || r.id || r.warehouse_id || '').toString().trim(),
-                    name: (r.name || r.warehouse_name || '').toString().trim(),
-                    address: (r.address || r.location || '').toString().trim()
-                }))
-                .filter(w => w.l !== '');
-            if (!warehouses.length) { showToast("No valid rows (need 'l' or 'id' column).", "error"); return; }
-            window.WAREHOUSES = warehouses;
-            showToast(`Imported ${warehouses.length} warehouses.`, "success");
-            renderWarehouseMeta();
-        };
+        reader.onload = (e) => beginWarehouseCSVImport(e.target.result);
         reader.readAsText(file);
         event.target.value = '';
+    }
+
+    // Warehouses CSV — same smart-header-matching + paste-text treatment as Items/Kits, and now a
+    // merge by `l` (warehouse ID) instead of a wholesale replace: an existing warehouse not
+    // mentioned in the file, or a blank cell for one that IS, keeps what it already had rather
+    // than the whole list being thrown away (the old handler's `window.WAREHOUSES = warehouses`).
+    const WAREHOUSE_ID_ALIASES = ['l', 'id', 'warehouseid', 'warehousenumber', 'number'];
+    const WAREHOUSE_NAME_ALIASES = ['name', 'warehousename'];
+    const WAREHOUSE_ADDRESS_ALIASES = ['address', 'location'];
+    function beginWarehouseCSVImport(csvText) {
+        if (!csvText || !csvText.trim()) { showToast("Nothing to import — paste or choose a CSV first.", "error"); return; }
+        const res = Papa.parse(csvText.trim(), { header: true, skipEmptyLines: true });
+        const rawHeaders = res.meta.fields || [];
+        if (!rawHeaders.length || !res.data.length) { showToast("Couldn't find a header row and at least one data row in that CSV.", "error"); return; }
+        const idHeader = rawHeaders.find(h => WAREHOUSE_ID_ALIASES.includes(normalizeHeaderName(h)));
+        const nameHeader = rawHeaders.find(h => WAREHOUSE_NAME_ALIASES.includes(normalizeHeaderName(h)));
+        const addressHeader = rawHeaders.find(h => WAREHOUSE_ADDRESS_ALIASES.includes(normalizeHeaderName(h)));
+        if (!idHeader) { showToast('Couldn\'t find an ID/warehouse-number column (e.g. "l" or "id").', "error", 6000); return; }
+
+        const incoming = res.data
+            .map(r => ({
+                l: (r[idHeader] || '').toString().trim(),
+                name: ((nameHeader ? r[nameHeader] : '') || '').toString().trim(),
+                address: ((addressHeader ? r[addressHeader] : '') || '').toString().trim()
+            }))
+            .filter(w => w.l !== '');
+        if (!incoming.length) { showToast("No valid rows found.", "error"); return; }
+        closeImportWarehousesModal();
+
+        let addedCount = 0, updatedCount = 0;
+        const merged = WAREHOUSES.slice();
+        incoming.forEach(w => {
+            const idx = merged.findIndex(m => m.l === w.l);
+            if (idx >= 0) {
+                merged[idx] = { ...merged[idx], name: w.name || merged[idx].name, address: w.address || merged[idx].address };
+                updatedCount++;
+            } else {
+                merged.push(w);
+                addedCount++;
+            }
+        });
+        window.WAREHOUSES = merged;
+        renderWarehouseMeta();
+        showToast(`Warehouses import: ${addedCount} added, ${updatedCount} updated. Warehouses not in this file were left untouched.`, "success", 7000);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -3952,6 +4382,36 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         URL.revokeObjectURL(url);
         showToast(`Exported ${globalInventory.length} items to CSV.`, "success");
+    }
+
+    function downloadTextFile(filename, text, mime) {
+        const blob = new Blob([text], { type: mime || 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    // Settings → "📥 CSV Templates" — a blank CSV with the exact headers each importer already
+    // auto-recognizes (COLUMNS_B for items, so export -> edit -> re-import needs no column mapping
+    // either), plus one filled-in example row so the expected shape is obvious without having to
+    // ask. type: 'items' | 'kits' | 'warehouses'.
+    function downloadCsvTemplate(type) {
+        if (type === 'items') {
+            const example = {
+                Manufacturer: 'Bosch', BTKnumber: '', itemnumber: 'ABC123', 'itemname(english)': 'Grease sticks',
+                'itemname(swedish)': 'Fettstavar', itemnumber2: '', itemnumber3: '', Numberofitems: '25',
+                UnitType: 'kg', Inventorylocation: 'Shelf A1', MapPosition: 'A', LocationCode: 'A-01-01', Comments: '', images: ''
+            };
+            downloadTextFile('items-template.csv', Papa.unparse([example], { columns: COLUMNS_B }), 'text/csv');
+        } else if (type === 'kits') {
+            const example = { 'Spare-part-kit name': 'Example Kit', kitnumber: '', BTK000001: '2', BTK000002: '1' };
+            downloadTextFile('kits-template.csv', Papa.unparse([example]), 'text/csv');
+        } else if (type === 'warehouses') {
+            const example = { l: '4', name: 'Example Warehouse', address: 'Example Street 1, Example City' };
+            downloadTextFile('warehouses-template.csv', Papa.unparse([example]), 'text/csv');
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -7857,31 +8317,59 @@ th { background: #eee; }
     var csvImportDupesReport = [];  // BTKs that collided within the CSV file itself
     var csvImportPresentColumns = new Set(); // header names actually present in the uploaded file
     var csvImportAutoAssignedCount = 0; // rows that had no BTK at all and got one minted for them
+    var csvImportMatchedByPartNumberCount = 0; // rows with no BTK matched to an existing item by itemnumber/2/3 instead
 
     function resetCsvImportState() {
         csvImportQueue = []; csvImportIndex = 0; csvImportResolvedItems = [];
         csvImportPendingNew = []; csvImportDupesReport = []; csvImportPresentColumns = new Set();
-        csvImportAutoAssignedCount = 0;
+        csvImportAutoAssignedCount = 0; csvImportMatchedByPartNumberCount = 0;
     }
 
-    // A row with no BTK number used to just be silently dropped by normalizeItems' filter — now it
-    // gets the next available one instead (generateUniqueBTK's vacant-number-first logic, so gaps
-    // left by Remove/Merge get reused), so a CSV of genuinely new stock doesn't need BTKs
-    // pre-assigned by hand. `reserved` is shared across the whole file so two blank rows in the
-    // same import don't get handed the same number before either is in globalInventory yet.
+    // A part-number/barcode index over the currently loaded inventory — itemnumber/2/3 are the
+    // fields a supplier's own export or a scanned manufacturer barcode actually identifies an item
+    // by, not our own BTK. Built once per import rather than per row.
+    function buildPartNumberIndex(inventory) {
+        const map = new Map();
+        inventory.forEach(item => {
+            [item.itemnumber, item.itemnumber2, item.itemnumber3].forEach(n => {
+                const norm = (n || '').trim().toLowerCase();
+                if (norm && norm !== 'none' && !map.has(norm)) map.set(norm, item);
+            });
+        });
+        return map;
+    }
+    function findItemByAnyPartNumber(row, index) {
+        const nums = [row.itemnumber, row.itemnumber2, row.itemnumber3]
+            .map(n => (n || '').trim().toLowerCase()).filter(n => n && n !== 'none');
+        for (const n of nums) { const hit = index.get(n); if (hit) return hit; }
+        return null;
+    }
+
+    // A row with no BTK number used to just be silently dropped by normalizeItems' filter — now,
+    // before minting a brand-new BTK for it, it's checked against the existing catalog's own
+    // itemnumber/2/3 (a supplier's export or a scanned barcode identifies an item that way, not by
+    // our BTK) — a match reuses that item's real BTK, so the row becomes a normal update instead of
+    // a spurious new item; only a genuinely unmatched row gets a freshly minted one
+    // (generateUniqueBTK's vacant-number-first logic, so gaps left by Remove/Merge get reused).
+    // `reserved` is shared across the whole file so two blank rows in the same import don't get
+    // handed the same freshly-minted number before either is in globalInventory yet.
     function assignMissingBTKs(rawRows) {
         const reserved = new Set();
         let autoAssignedCount = 0;
+        let matchedByPartNumberCount = 0;
+        const partIndex = buildPartNumberIndex(globalInventory);
         const rows = rawRows.map(r => {
             if (!r) return r;
             const has = r.BTKnumber && String(r.BTKnumber).trim() !== '' && r.BTKnumber !== 'None';
             if (has) return r;
+            const matched = findItemByAnyPartNumber(r, partIndex);
+            if (matched) { matchedByPartNumberCount++; return { ...r, BTKnumber: matched.BTKnumber }; }
             const assigned = generateUniqueBTK(reserved);
             reserved.add(parseInt(assigned.slice(3), 10));
             autoAssignedCount++;
             return { ...r, BTKnumber: assigned };
         });
-        return { rows, autoAssignedCount };
+        return { rows, autoAssignedCount, matchedByPartNumberCount };
     }
 
     function openCSVConflictMergeView() {
@@ -7961,15 +8449,37 @@ th { background: #eee; }
     // Never awaited by a caller's own success path — a logging failure shouldn't roll back or
     // block the actual mutation, just gets console-logged. before/after are full Supabase row
     // objects (see itemToSupabaseRow) so revert_activity_log_entry() can restore one directly.
-    async function logActivity(action, btk, beforeRow, afterRow, summary) {
+    // batchId (optional): shared across every entry written by one bulk operation (a CSV import, a
+    // stock-only update) — see schema_activity_log_batch_id.sql and undoImportBatch() below, which
+    // together let that whole operation be undone in one action instead of one row at a time.
+    async function logActivity(action, btk, beforeRow, afterRow, summary, batchId) {
         if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') return;
         const { data: { user } } = await sb.auth.getUser();
         const { error } = await sb.from('activity_log').insert({
             warehouse_id: currentWarehouseId, user_id: user ? user.id : null, action,
             entity_type: 'item', entity_id: btk, before_data: beforeRow || null, after_data: afterRow || null,
-            summary
+            summary, batch_id: batchId || null
         });
         if (error) console.error("Could not log activity:", error);
+    }
+
+    // Reverts every not-yet-reverted activity_log entry sharing one batch_id — the counterpart to a
+    // single-entry "↩️ Revert" in the Activity Log modal, but for a whole bulk operation at once.
+    // Reused revert_activity_log_entry() one row at a time (no new RPC) rather than a bespoke batch
+    // RPC, since each revert is already its own small, safe, independently-logged operation.
+    async function undoImportBatch(batchId) {
+        if (!batchId) return;
+        const { data, error } = await sb.from('activity_log').select('id')
+            .eq('batch_id', batchId).is('reverted_at', null).order('id', { ascending: false });
+        if (error) { showToast("Could not look up that import: " + error.message, "error"); return; }
+        if (!data || !data.length) { showToast("Nothing left to undo from that import.", "warning"); return; }
+        let ok = 0, fail = 0;
+        for (const row of data) {
+            const { error: revErr } = await sb.rpc('revert_activity_log_entry', { p_log_id: row.id });
+            if (revErr) { console.error('Revert failed for log entry', row.id, revErr); fail++; } else ok++;
+        }
+        showToast(`Undid ${ok} change(s) from that import.${fail ? ` ${fail} could not be undone — see console.` : ''}`, fail ? 'warning' : 'success', 6000);
+        await supabaseLoadList(currentWarehouseId);
     }
 
     // Short "field: old -> new" diff for an update's log summary — only the fields most likely to
@@ -7988,8 +8498,55 @@ th { background: #eee; }
         return `Updated ${name} (${btk})` + (diffs.length ? ' — ' + diffs.join(', ') : '');
     }
 
+    // Best-effort: if a CSV row's `images` column looks like a URL, fetch and attach it as the
+    // item's photo, the same Storage upload path a manual upload uses — just skipping the
+    // crop/rotate editor since there's no user present to drive it during a bulk import. Whether a
+    // given host allows this from a browser varies (CORS); a failure here (blocked, 404, etc.) is
+    // logged and skipped, never blocks the rest of the row or the import — a photo is a nice-to-have
+    // on an otherwise-successful item import, not a reason to fail it.
+    async function attachCsvImageIfUrl(btk, imageValue) {
+        const url = (imageValue || '').trim();
+        if (!/^https?:\/\//i.test(url)) return;
+        try {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const blob = await res.blob();
+            const { full, thumb } = await prepareImageBlobsFromBlob(blob);
+            if (!(await checkStorageBudget(full.size + thumb.size))) {
+                console.warn(`CSV image for ${btk} skipped — storage budget would be exceeded.`);
+                return;
+            }
+            const { fullUrl, thumbUrl } = await uploadItemPhotoToSupabase(btk, full, thumb);
+            const item = globalInventory.find(i => i.BTKnumber === btk);
+            if (item) { item.imageFullUrl = fullUrl; item.imageThumbUrl = thumbUrl; }
+        } catch (e) {
+            console.warn(`Could not attach image for ${btk} from "${url}":`, e.message || e);
+        }
+    }
+
+    // Downscales/compresses a fetched image Blob into full (max 1600px) and thumb (max 320px) JPEG
+    // blobs — the CSV-import counterpart to the manual photo editor's own resize step, minus the
+    // rotate/crop UI it offers a human.
+    async function prepareImageBlobsFromBlob(blob) {
+        const bitmap = await createImageBitmap(blob);
+        const toJpeg = (maxSide, quality) => {
+            const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+            const w = Math.round(bitmap.width * scale), h = Math.round(bitmap.height * scale);
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+            return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+        };
+        const [full, thumb] = await Promise.all([toJpeg(1600, 0.85), toJpeg(320, 0.8)]);
+        bitmap.close?.();
+        return { full, thumb };
+    }
+
     async function commitCSVImport() {
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        // One id shared by every activity_log entry this import writes, so the whole thing can be
+        // undone in one action later (see undoImportBatch()) instead of one row at a time.
+        const batchId = (isSupa && window.crypto?.randomUUID) ? window.crypto.randomUUID() : null;
         let writeErrors = 0;
 
         if (isSupa) {
@@ -7999,13 +8556,15 @@ th { background: #eee; }
                 if (error) { writeErrors++; console.error(`Could not update ${item.BTKnumber}:`, error); continue; }
                 const queueEntry = csvImportQueue.find(q => q.existing.BTKnumber === item.BTKnumber);
                 const beforeRow = queueEntry ? await itemToSupabaseRow(queueEntry.existing) : null;
-                logActivity('update', item.BTKnumber, beforeRow, row, `CSV import: ${summarizeItemChange('update', item.BTKnumber, beforeRow, row)}`);
+                logActivity('update', item.BTKnumber, beforeRow, row, `CSV import: ${summarizeItemChange('update', item.BTKnumber, beforeRow, row)}`, batchId);
+                if (item.images) await attachCsvImageIfUrl(item.BTKnumber, item.images);
             }
             for (const item of csvImportPendingNew) {
                 const row = await itemToSupabaseRow(item);
                 const { error } = await sb.from('items').insert({ ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: '' });
                 if (error) { writeErrors++; console.error(`Could not add ${item.BTKnumber}:`, error); continue; }
-                logActivity('create', item.BTKnumber, null, row, `CSV import: ${summarizeItemChange('create', item.BTKnumber, null, row)}`);
+                logActivity('create', item.BTKnumber, null, row, `CSV import: ${summarizeItemChange('create', item.BTKnumber, null, row)}`, batchId);
+                if (item.images) await attachCsvImageIfUrl(item.BTKnumber, item.images);
             }
             clearSelection();
             document.getElementById('search-box').value = '';
@@ -8031,15 +8590,19 @@ th { background: #eee; }
         const newCount = csvImportPendingNew.length;
         const dupes = csvImportDupesReport;
         const autoAssigned = csvImportAutoAssignedCount;
+        const matchedByPart = csvImportMatchedByPartNumberCount;
         let msg = `Imported ${newCount} new item(s)` + (conflictCount ? `, updated ${conflictCount} existing item(s)` : '') + '.';
-        if (autoAssigned) msg += ` ${autoAssigned} row(s) had no BTK number, so one was assigned automatically.`;
+        if (matchedByPart) msg += ` ${matchedByPart} row(s) with no BTK were matched to an existing item by part number instead of being added as new.`;
+        if (autoAssigned) msg += ` ${autoAssigned} row(s) had no BTK number or matching part number, so one was assigned automatically.`;
         if (dupes.length) {
             const preview = dupes.slice(0, 5).join(', ') + (dupes.length > 5 ? '…' : '');
             msg += ` ${dupes.length} duplicate BTK(s) within the file collapsed to their last row: ${preview}.`;
         }
         if (writeErrors) msg += ` ${writeErrors} row(s) failed to save — see console for details.`;
         if (!isSupa) msg += ' (draft autosaved).';
-        showToast(msg, (conflictCount || dupes.length || writeErrors) ? 'warning' : 'success', 9000);
+        const canUndo = isSupa && batchId && (conflictCount + newCount > writeErrors);
+        showToast(msg, (conflictCount || dupes.length || writeErrors) ? 'warning' : 'success', canUndo ? 15000 : 9000,
+            canUndo ? { label: '↩️ Undo Import', onClick: () => undoImportBatch(batchId) } : null);
         resetCsvImportState();
     }
 

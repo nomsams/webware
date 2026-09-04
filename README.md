@@ -10,24 +10,30 @@ A self-contained, single-file inventory management web app with encrypted storag
 
 ## Data Import Workflow
 
-### 1. Import Warehouses (CSV C)
-- Prepare a CSV with columns: `l` (warehouse ID), `name`, `address`
-- Click **📥 Warehouses CSV** in the header
-- Select your warehouse CSV file
+Every importer below (Items/Kits/Warehouses) shares the same shape: a **📁 Upload a CSV File** / **📋 Paste CSV Text** chooser, smart column-name matching so a differently-headed export still lands in the right fields, and a non-destructive merge — nothing already saved is ever silently dropped or blanked just because a file doesn't mention it. Not sure what a file should look like? Settings → **"📥 CSV Templates"** downloads a blank CSV with the right headers and one filled-in example row, for Items, Kits, or Warehouses.
 
-### 2. Import Items (CSV B)
-- Prepare a CSV with columns: `Manufacturer`, `BTKnumber`, `itemnumber`, `itemname(english)`, `itemname(swedish)`, `itemnumber2`, `itemnumber3`, `Numberofitems`, `Inventorylocation`, `Comments`, `images` — you don't need all of them; a shorter file with only some of these columns is fine (see below). A row with no `BTKnumber` at all isn't dropped either — it's given the lowest vacant `BTK######` in the warehouse (same gap-filling logic as Duplicate — see [Duplicate, Remove & Merge](#features)), so a CSV of brand-new stock doesn't need numbers assigned by hand first.
-- Click **📥 Import Items** in the header (editor/maintainer/admin; hidden for viewers in Supabase mode) — this opens a small chooser rather than going straight to a file picker: **📁 Upload a CSV File**, or **📋 Paste CSV Text** (a textarea for pasting a file's contents directly, e.g. from a spreadsheet's copy-as-CSV — same pipeline either way). Works in both static and Supabase-mode warehouses; in Supabase mode, resolved/new rows are written straight to the database instead of the local encrypted draft, everything else below is identical either way.
+### 1. Import Items (CSV B)
+- Prepare a CSV with columns: `Manufacturer`, `BTKnumber`, `itemnumber`, `itemname(english)`, `itemname(swedish)`, `itemnumber2`, `itemnumber3`, `Numberofitems`, `Inventorylocation`, `Comments`, `images` — you don't need all of them; a shorter file with only some of these columns is fine (see below).
+  - A row with no `BTKnumber` is first checked against the existing catalog's own `itemnumber`/`itemnumber2`/`itemnumber3` — a supplier's export or a scanned barcode identifies an item that way, not by your BTK — and matched to that item's real BTK if found, so it becomes a normal update instead of a spurious new item. Only a row that matches nothing gets a fresh `BTK######` minted for it (the lowest vacant number in the warehouse, same gap-filling logic as Duplicate — see [Duplicate, Remove & Merge](#features)), so a CSV of brand-new stock doesn't need numbers assigned by hand first either way.
+  - `images` (Supabase mode only): a value starting with `http://`/`https://` is fetched and attached as the item's photo automatically — same Storage upload path a manual upload uses, just resized/compressed without the crop/rotate editor since there's no one there to drive it. Best-effort: whether a given host allows this from a browser varies, and a failure (blocked, 404, etc.) is skipped silently rather than failing the row — a photo is a bonus on an otherwise-successful import, not a reason to fail it.
+- Click **📥 Import Items** in the header (editor/maintainer/admin; hidden for viewers in Supabase mode) — the chooser modal also has a third option, **📊 Quick Stock Update (quantities only)**, a deliberately lighter path for the common case of refreshing quantities from a stocktake export: paste just a BTK-or-part-number column plus a quantity column, and every matched item's quantity is set directly — no merge review, since there's only the one field involved. Works in both static and Supabase-mode warehouses; in Supabase mode, resolved/new rows are written straight to the database instead of the local encrypted draft, everything else below is identical either way.
 - **Column matching ("smart repair")**: if the file's headers don't already match our column names exactly, a mapping step appears before anything is imported — for each header found, it suggests a target column (exact name → a table of common alternate spellings like "Brand"/"Qty"/"Part Number" → a fuzzy typo-tolerant fallback), flags anything it's not confident about, and lets you correct any of it via dropdown before continuing. An exactly-matching file skips this step entirely.
+- **📋 Import Summary**: before anything is touched, a breakdown of exactly what's about to happen — new items, updates, possible duplicates, part-number matches, auto-assigned BTKs, in-file duplicate BTKs — each as its own color-coded count. "Continue" either imports directly (nothing needs review) or walks into the review below.
 - A row with no name/number overlap with anything already here is added as new, no review needed. Two things trigger a review, through the same merge-grid used for manually merging items ([Duplicate, Remove & Merge](#features)) — nothing is written until every one is resolved, and cancelling drops the whole import with no changes made:
   - **A conflict** — the same BTK number already exists. Pick per field whether the database's current value or the CSV's incoming value wins.
   - **A possible duplicate** — a different BTK, but the item name or another item number matches something already saved (e.g. "same item name" or "shares item number X"), shown with that reason spelled out. Resolving merges it into the *existing* BTK (the CSV row's own BTK is discarded); a dedicated **"↔️ Not the Same Item — Keep Both"** button is there for when it's a false match, adding the CSV row as its own new item instead.
   - Either way, a column your CSV doesn't have at all is never a conflict candidate — the database's existing value is kept automatically, so a shorter/older export can't blank out fields it was never aware of. A BTK in the database but not mentioned in the CSV is left completely untouched.
+- **↩️ Undo Import** (Supabase mode): the success toast after a commit carries an Undo button for about 15 seconds — every change that one import made (including the Quick Stock Update path) shares one batch ID under the hood, so it reverts as a single action instead of one item at a time from the Activity Log. Past that window, the same changes are still individually revertible from Settings → 📜 Activity Log, same as any other edit.
 
-### 3. Import Kits (CSV A)
-- Prepare a kit matrix CSV: first column `Spare-part-kit name`, second `kitnumber`, remaining columns are BTK numbers with quantities
-- Click **📥 Kits CSV** in the header
-- Select your kits CSV file
+### 2. Import Kits (CSV A)
+- Prepare a kit matrix CSV: first column `Spare-part-kit name` (or a close alias like "Kit Name"), second `kitnumber` (optional), remaining columns are BTK numbers with quantities.
+- Click **📥 Kits CSV** in the header (chooser + smart column matching, same as Items above).
+- A kit is matched to one already saved by `kitnumber` first, else by exact name. An unmatched kit is added as new, no review needed; a match with *identical* contents needs no action at all; a match with *different* contents goes to a **🔀 Review Changed Kits** list — one row per changed kit, "Keep Existing" vs "Use CSV" (defaults to CSV) — nothing is applied until you hit "✅ Apply Import". A kit already saved but not mentioned in the file at all is left completely untouched (previously, importing a Kits CSV replaced the *entire* kit list wholesale — a file missing a kit used to silently delete it; it no longer does).
+
+### 3. Import Warehouses (CSV C)
+- Prepare a CSV with columns: `l` (warehouse ID), `name`, `address` (chooser + smart column matching, same as above).
+- Click **📥 Warehouses CSV** in the header.
+- Merged by `l`: a warehouse already known but not mentioned in the file, or a blank cell for one that IS mentioned, keeps what it already had rather than being overwritten or dropped (previously this replaced the entire warehouse list wholesale).
 
 ### 4. Export Encrypted Database
 - Click **💾 Export** to download an encrypted `warehouse-<ID>-db.json`
@@ -59,7 +65,7 @@ A self-contained, single-file inventory management web app with encrypted storag
 | `MapPosition` | No | Warehouse locator grid cell, `A1`–`F6` (column letter + row number) |
 | `LocationCode` | No | Bin/picking location, `ZoneDepth-Level-Bin` plus optional `-Row` (e.g. `A1-4-07` or `A1-4-07-2`) — see [Bin Location Codes](#bin-location-codes) |
 | `Comments` | No | Free text notes |
-| `images` | No | Semicolon-separated filenames in `assets/` |
+| `images` | No | Static mode: semicolon-separated filenames in `assets/`. Supabase mode: an `http(s)://` URL is fetched and attached as the item's photo automatically (best-effort — see above). |
 
 ### CSV A — Kit Matrix
 | Column | Required | Description |
