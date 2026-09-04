@@ -13,6 +13,10 @@
          Firefox) — see the SCANNER section for how the two are chosen between. Not on cdnjs, so
          served from jsDelivr's npm mirror instead (unlike the other libraries on this list). -->
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" crossorigin="anonymous"></script>
+    <!-- OCR for the scanner's "Scan Text" capture (Swedish + English) — this script tag itself is
+         a few hundred KB; the actual recognition engine (wasm) and per-language traineddata are
+         fetched lazily by Tesseract.recognize() only the first time OCR is actually used. -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js" crossorigin="anonymous"></script>
 
@@ -650,6 +654,7 @@
         <p id="scanner-status" style="color:var(--text-muted); font-size:0.85rem; margin-top:0.75rem; min-height:1.2em;">Point the camera at a barcode or QR code.</p>
         <div id="scanner-last-result" class="hidden" style="margin-top:0.25rem; font-size:0.85rem;"></div>
         <div class="modal-actions">
+            <button class="secondary full-width" id="btn-scanner-ocr" onclick="scannerCaptureAndOcr()" title="Read a label full of text instead of a barcode/QR code">📝 Scan Text (OCR)</button>
             <button class="secondary full-width" onclick="closeBarcodeScanner()">Close</button>
         </div>
     </div>
@@ -1955,6 +1960,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     //  including Safari/Firefox which don't implement BarcodeDetector) — see the <script> tag
     //  near the top of <head>. If neither is available, the header button is hidden entirely at
     //  startup (see window.onload) rather than offered as something that can only fail.
+    //
+    //  The modal's "📝 Scan Text (OCR)" button is a separate, explicit capture (scannerCaptureAndOcr,
+    //  below onScannerCodeDetected) for a label that's mostly text rather than a barcode — reads it
+    //  with Tesseract.js (Swedish + English) and hands the result to aiHandleOcrCleanup(), which
+    //  tidies it up via the assistant's own Groq model and shows it in the AI panel.
     // ════════════════════════════════════════════════════════════════════════
     var scannerStream = null;
     var scannerMode = 'open';
@@ -2026,7 +2036,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             scannerShowStatus("This browser can't scan in-page — use your phone's own camera app on a printed label instead.", true);
             return;
         }
-        scannerShowStatus('Point the camera at a barcode or QR code.', false);
+        scannerShowStatus('Point the camera at a barcode/QR code, or tap 📝 Scan Text for a text label.', false);
         scannerTick();
     }
 
@@ -2111,6 +2121,40 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             closeBarcodeScanner();
             openItem(btk, { type: 'global' });
         }
+    }
+
+    // "Scan Text (OCR)" — a snapshot capture, unlike the continuous barcode/QR loop above (OCR is
+    // too slow to run every frame). Full camera resolution, not the downscaled canvas the jsQR
+    // fallback uses — OCR accuracy benefits from it far more than decode speed matters here.
+    // Swedish + English together (Tesseract's "swe+eng" combined model), then handed to
+    // aiHandleOcrCleanup() to tidy up via the same Groq model the rest of the assistant uses. The
+    // raw OCR text is always shown as-is in the AI panel even if that cleanup call itself fails, so
+    // nothing scanned is ever lost to a network hiccup.
+    async function scannerCaptureAndOcr() {
+        const video = document.getElementById('scanner-video');
+        if (!video || !video.videoWidth) { scannerShowStatus("Camera isn't ready yet — wait a moment and try again.", true); return; }
+        if (typeof Tesseract === 'undefined') { scannerShowStatus("Text scanning isn't available right now.", true); return; }
+
+        scannerShowStatus('📝 Reading text…', false);
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        let rawText;
+        try {
+            const result = await Tesseract.recognize(canvas, 'swe+eng');
+            rawText = ((result && result.data && result.data.text) || '').trim();
+        } catch (e) {
+            scannerShowStatus("Couldn't read text from that — try holding the camera steadier and closer.", true);
+            console.error("OCR error:", e);
+            return;
+        }
+
+        if (!rawText) { scannerShowStatus("No readable text found — try getting closer or reducing glare.", true); return; }
+
+        closeBarcodeScanner();
+        await aiHandleOcrCleanup(rawText);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -8333,6 +8377,13 @@ ${css}
         }
     }
 
+    // Opens the panel (running the same first-open init as toggleAiAssistant) only if it's
+    // currently closed — for flows that need to land a message there (e.g. OCR cleanup) without
+    // accidentally closing it if the user already had it open.
+    async function aiEnsurePanelOpen() {
+        if (document.getElementById('ai-panel').classList.contains('hidden')) await toggleAiAssistant();
+    }
+
     // Plain-language explanation of why the assistant can't run yet — worded differently for an
     // admin (who can actually fix it from Settings) vs. everyone else (who needs to ask one).
     // Personal-key users never see this — see aiRefreshKeyStatus(), checked first.
@@ -8882,6 +8933,35 @@ Respond with ONLY the JSON object, nothing else.`;
         } catch (e) {
             thinking.remove();
             aiAppendMessage('assistant', aiFriendlyError(e));
+        }
+    }
+
+    // Cleans up raw OCR output (from the barcode scanner's "Scan Text" capture — see the SCANNER
+    // section) into readable text via the same Groq chat model the rest of the assistant uses.
+    // Deliberately conservative: fix obvious misreads/spacing, never invent or translate content
+    // that isn't there, so a partly-illegible label degrades to "left as scanned" rather than a
+    // confident-looking guess.
+    const OCR_CLEANUP_SYSTEM_PROMPT = 'You clean up raw OCR text read from a warehouse or shipping label, which may be in Swedish, English, or a mix of both. Fix obvious OCR misreads (e.g. "0" vs "O", "1" vs "I", a word split across a stray line break) and restore sensible spacing/line breaks so it reads the way the label itself is laid out. Do not invent, translate, or add any content that is not in the original text — if a part is illegible, leave it as-is rather than guessing. Respond with ONLY the cleaned text, no commentary.';
+    async function aiHandleOcrCleanup(rawText) {
+        await aiEnsurePanelOpen();
+        aiAppendMessage('user', `📝 Scanned text:\n${rawText}`);
+        if (aiHasApiKey === null) await aiRefreshKeyStatus();
+        if (!aiHasApiKey) { aiAppendMessage('system', aiNoKeyMessage()); return; }
+        const thinking = aiAppendMessage('system', 'Cleaning up the scanned text…');
+        try {
+            const cleaned = await aiGetGroqClient().chat({
+                model: window.GROQ_MODELS.TEXT,
+                reasoningEffort: 'low',
+                messages: [
+                    { role: 'system', content: OCR_CLEANUP_SYSTEM_PROMPT },
+                    { role: 'user', content: rawText },
+                ],
+            });
+            thinking.remove();
+            aiAppendMessage('assistant', cleaned);
+        } catch (e) {
+            thinking.remove();
+            aiAppendMessage('assistant', "Couldn't clean that up — " + aiFriendlyError(e) + " (the raw scan is above.)");
         }
     }
 
