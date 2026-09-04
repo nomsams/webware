@@ -636,8 +636,45 @@
         <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">Stored on this device only. Tap one to fill the recipient fields.</p>
         <div id="saved-recipients-list-container" style="max-height:50vh; overflow-y:auto;"></div>
         <div class="modal-actions">
+            <button class="secondary" onclick="clearAllSavedRecipients()" style="color:var(--danger);">🗑️ Clear All</button>
             <button class="secondary full-width" onclick="closeSavedRecipientsModal()">Close</button>
         </div>
+    </div>
+</div>
+
+<!-- Compose Email — a "checkout" step for a Pack Order: notify the recipient it's packed. Send
+     (via send-email) needs a Supabase warehouse, editor+, and SMTP secrets actually configured —
+     "✉️ Mail App" (mailto:) always works instead, with zero deployment, since it just opens the
+     user's own mail client with everything prefilled; nothing is sent until they hit send there. -->
+<div class="modal-overlay" id="compose-email-modal" onclick="handleComposeEmailModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:560px;">
+        <h3>📧 Email Recipient</h3>
+        <div class="setting-row">
+            <label for="email-template-select">Template</label>
+            <select id="email-template-select" onchange="onEmailTemplateChange()">
+                <option value="packed">📦 Order Packed</option>
+                <option value="blank">✏️ Blank / Custom</option>
+            </select>
+        </div>
+        <div class="setting-row">
+            <label for="compose-email-to">To</label>
+            <input type="email" id="compose-email-to" placeholder="recipient@example.com">
+            <button type="button" class="secondary" onclick="openSavedRecipientsModal('composeEmail')" style="margin-top:0.5rem; padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📇 Pick Saved Recipient</button>
+        </div>
+        <div class="setting-row">
+            <label for="compose-email-subject">Subject</label>
+            <input type="text" id="compose-email-subject">
+        </div>
+        <div class="setting-row">
+            <label for="compose-email-body">Message</label>
+            <textarea id="compose-email-body" style="min-height:180px;"></textarea>
+        </div>
+        <p id="compose-email-status" class="hidden" style="font-size:0.85rem; font-weight:600;"></p>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeComposeEmailModal()">Cancel</button>
+            <button class="secondary full-width" onclick="sendViaMailApp()">✉️ Mail App</button>
+        </div>
+        <button class="success-btn full-width hidden" id="btn-send-email" onclick="sendComposedEmail()" style="margin-top:0.5rem;">📧 Send Email</button>
     </div>
 </div>
 
@@ -1238,8 +1275,10 @@
             <input type="text" id="pack-order-recipient-name" placeholder="Person's name" oninput="onPackRecipientInput()">
             <label class="modal-label" for="pack-order-recipient-address" style="margin-top:0.5rem;">Address</label>
             <textarea id="pack-order-recipient-address" placeholder="Street, city, postal code, country..." oninput="onPackRecipientInput()"></textarea>
+            <label class="modal-label" for="pack-order-recipient-email" style="margin-top:0.5rem;">Email <span style="font-weight:400; color:var(--text-muted);">(optional — for the 📧 Email Recipient button below; not saved with the order itself)</span></label>
+            <input type="email" id="pack-order-recipient-email" placeholder="recipient@example.com" oninput="onPackRecipientInput()">
             <div style="display:flex; gap:8px; margin-top:0.5rem; flex-wrap:wrap;">
-                <button type="button" class="secondary" onclick="openSavedRecipientsModal()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📇 Saved Recipients</button>
+                <button type="button" class="secondary" onclick="openSavedRecipientsModal('packOrder')" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📇 Saved Recipients</button>
                 <button type="button" class="secondary" onclick="saveCurrentRecipient()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">💾 Save This Recipient</button>
                 <button type="button" class="secondary" onclick="document.getElementById('vcard-file-input').click()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📥 Import .vcf</button>
                 <input type="file" id="vcard-file-input" accept=".vcf,text/vcard" class="hidden" onchange="handleVCardFileSelected(event)">
@@ -1248,6 +1287,7 @@
 
         <button class="full-width hidden" id="btn-save-pack-order" onclick="savePackOrder()" style="margin-top:0.5rem;">💾 Save Order</button>
         <p id="pack-order-saved-note" class="hidden" style="color:var(--success); font-weight:600; margin-top:0.75rem;"></p>
+        <button class="secondary full-width" id="btn-open-compose-email" onclick="openComposeEmailModal()" style="margin-top:0.5rem;">📧 Email Recipient</button>
         <button class="success-btn full-width hidden" id="btn-finalize-pack-order" onclick="confirmFinalizePackOrder()" style="margin-top:0.75rem;">✅ Finalize Order (Deduct Stock)</button>
     </section>
 
@@ -1545,7 +1585,7 @@
     var packOrderPreviousView = 'list-view';
     var packOrderEditMode = false;
     var packOrderBox = { preset: '', length: '', width: '', height: '', weight: '' };
-    var packOrderRecipient = { name: '', address: '' };
+    var packOrderRecipient = { name: '', address: '', email: '' }; // email: in-memory/local-only, never sent to the orders table — see savePackOrder()
     var packOrderSavedNumber = null; // set once savePackOrder() succeeds, e.g. "ORD000042"
     const PACK_BOX_PRESETS = {
         small:  { length: 200, width: 150, height: 100 },
@@ -5497,7 +5537,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!confirm("Clear the entire pack order? This can't be undone.")) return;
         packOrder = [];
         packOrderBox = { preset: '', length: '', width: '', height: '', weight: '' };
-        packOrderRecipient = { name: '', address: '' };
+        packOrderRecipient = { name: '', address: '', email: '' };
         packOrderSavedNumber = null;
         updatePackOrderBadge();
         renderPackOrderItems();
@@ -5542,6 +5582,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function syncPackOrderRecipientInputs() {
         document.getElementById('pack-order-recipient-name').value = packOrderRecipient.name || '';
         document.getElementById('pack-order-recipient-address').value = packOrderRecipient.address || '';
+        document.getElementById('pack-order-recipient-email').value = packOrderRecipient.email || '';
         const note = document.getElementById('pack-order-saved-note');
         if (packOrderSavedNumber) {
             note.textContent = `✅ Saved as ${packOrderSavedNumber}. Saving again will create a new order.`;
@@ -5554,12 +5595,20 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function onPackRecipientInput() {
         packOrderRecipient.name = document.getElementById('pack-order-recipient-name').value;
         packOrderRecipient.address = document.getElementById('pack-order-recipient-address').value;
+        packOrderRecipient.email = document.getElementById('pack-order-recipient-email').value;
     }
 
     // ── Saved Recipients — a small address book for Pack Order, stored in this browser only
     // (localStorage, never synced — same trust model as the draft/theme/etc. keys already there).
     // Backed by modules/contacts.js for .vcf import/export; the list itself is just plain objects,
     // not vCard text, so it's cheap to read/render without re-parsing on every open.
+    //
+    // Privacy note (this stores another person's name/address/email, not just app config): kept
+    // per-device only — never written to Supabase or any shared table, so it's not centrally
+    // pooled across users — and easy to walk back: each entry has its own 🗑️ Delete, and "🗑️ Clear
+    // All" wipes the whole list in one action, for a straightforward right-to-erasure request.
+    // Storing it in a browser doesn't itself decide GDPR compliance — that's a call for whoever
+    // runs this app to make — but the goal here is to make erasure trivial either way.
     const LS_SAVED_RECIPIENTS = 'webware-saved-recipients';
     function getSavedRecipients() {
         try { return JSON.parse(localStorage.getItem(LS_SAVED_RECIPIENTS) || '[]'); }
@@ -5568,7 +5617,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function setSavedRecipients(list) {
         try { localStorage.setItem(LS_SAVED_RECIPIENTS, JSON.stringify(list)); } catch { /* storage unavailable/full — silently skip */ }
     }
-    function openSavedRecipientsModal() {
+    // 'packOrder' (default) fills the Pack Order recipient fields; 'composeEmail' fills only the
+    // Compose Email modal's "To" field — see pickSavedRecipient().
+    var savedRecipientsPickTarget = 'packOrder';
+    function openSavedRecipientsModal(target) {
+        savedRecipientsPickTarget = target || 'packOrder';
         document.getElementById('saved-recipients-modal').classList.add('open');
         renderSavedRecipientsList();
     }
@@ -5587,6 +5640,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 <div style="cursor:pointer; flex:1; min-width:0;" onclick="pickSavedRecipient(${i})">
                     <div style="font-weight:700;">${escapeHtml(r.name || 'Unnamed')}</div>
                     ${r.address ? `<div style="color:var(--text-muted); font-size:0.82rem; white-space:pre-line;">${escapeHtml(r.address)}</div>` : ''}
+                    ${r.email ? `<div style="color:var(--text-muted); font-size:0.82rem;">✉️ ${escapeHtml(r.email)}</div>` : ''}
                 </div>
                 <div style="display:flex; gap:6px; flex-shrink:0;">
                     <button class="secondary" onclick="exportSavedRecipientVCard(${i})" title="Export as .vcf" style="padding:4px 8px; min-height:auto; font-size:0.78rem;">📤</button>
@@ -5598,19 +5652,25 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function pickSavedRecipient(i) {
         const r = getSavedRecipients()[i];
         if (!r) return;
-        packOrderRecipient = { name: r.name || '', address: r.address || '' };
-        syncPackOrderRecipientInputs();
+        if (savedRecipientsPickTarget === 'composeEmail') {
+            if (r.email) document.getElementById('compose-email-to').value = r.email;
+            else showToast(`"${r.name}" has no saved email — enter one manually.`, "warning");
+        } else {
+            packOrderRecipient = { name: r.name || '', address: r.address || '', email: r.email || '' };
+            syncPackOrderRecipientInputs();
+        }
         closeSavedRecipientsModal();
     }
 
     function saveCurrentRecipient() {
         const name = document.getElementById('pack-order-recipient-name').value.trim();
         const address = document.getElementById('pack-order-recipient-address').value.trim();
+        const email = document.getElementById('pack-order-recipient-email').value.trim();
         if (!name) { showToast("Enter a recipient name first.", "warning"); return; }
         const recipients = getSavedRecipients();
         const existingIdx = recipients.findIndex(r => r.name.toLowerCase() === name.toLowerCase());
-        if (existingIdx >= 0) recipients[existingIdx] = { name, address };
-        else recipients.push({ name, address });
+        if (existingIdx >= 0) recipients[existingIdx] = { name, address, email };
+        else recipients.push({ name, address, email });
         setSavedRecipients(recipients);
         showToast(`Saved "${name}" to Saved Recipients.`, "success");
     }
@@ -5622,10 +5682,21 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         renderSavedRecipientsList();
     }
 
+    function clearAllSavedRecipients() {
+        const recipients = getSavedRecipients();
+        if (!recipients.length) return;
+        showConfirmModal({
+            title: 'Clear all saved recipients?',
+            body: `This permanently deletes all ${recipients.length} saved recipient(s) from this device. This can't be undone.`,
+            confirmLabel: '🗑️ Clear All',
+            onConfirm: () => { setSavedRecipients([]); renderSavedRecipientsList(); showToast("Saved recipients cleared.", "success"); }
+        });
+    }
+
     function exportSavedRecipientVCard(i) {
         const r = getSavedRecipients()[i];
         if (!r || !window.generateVCard) return;
-        const vcard = window.generateVCard({ name: r.name, addressLines: r.address || '' });
+        const vcard = window.generateVCard({ name: r.name, addressLines: r.address || '', email: r.email || '' });
         const blob = new Blob([vcard], { type: 'text/vcard' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -5653,15 +5724,87 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const recipients = getSavedRecipients();
             withName.forEach(c => {
                 const address = (c.addresses && c.addresses[0]) ? c.addresses[0].value : '';
+                const email = (c.emails && c.emails[0]) ? c.emails[0].value : '';
                 const idx = recipients.findIndex(r => r.name.toLowerCase() === c.name.toLowerCase());
-                if (idx >= 0) recipients[idx] = { name: c.name, address };
-                else recipients.push({ name: c.name, address });
+                if (idx >= 0) recipients[idx] = { name: c.name, address, email };
+                else recipients.push({ name: c.name, address, email });
             });
             setSavedRecipients(recipients);
             showToast(`Imported ${withName.length} contact(s).`, "success", 5000);
             renderSavedRecipientsList();
         };
         reader.readAsText(file);
+    }
+
+    // ── Compose Email — a "checkout" step for a Pack Order: notify the recipient it's packed.
+    // "Send" needs a Supabase warehouse, editor+, and send-email actually deployed/configured with
+    // SMTP secrets (see supabase/functions/send-email); "✉️ Mail App" always works instead (zero
+    // deployment) by opening the user's own mail client with everything prefilled — nothing is
+    // sent until they hit send there. Neither path stores the recipient's email anywhere server-side:
+    // it only ever lives in this modal's own field (and, if the user chooses to save it, in the
+    // local-only Saved Recipients list above) — never in the orders table itself.
+    function openComposeEmailModal() {
+        if (!packOrder.length) { showToast("Nothing to email — the pack order is empty.", "warning"); return; }
+        document.getElementById('compose-email-to').value = packOrderRecipient.email || '';
+        document.getElementById('email-template-select').value = 'packed';
+        applyEmailTemplate('packed');
+        document.getElementById('compose-email-status').classList.add('hidden');
+        const canSend = getWarehouseMeta(currentWarehouseId).mode === 'supabase' && canEditItems();
+        document.getElementById('btn-send-email').classList.toggle('hidden', !canSend);
+        document.getElementById('compose-email-modal').classList.add('open');
+    }
+    function closeComposeEmailModal() { document.getElementById('compose-email-modal').classList.remove('open'); }
+    function handleComposeEmailModalOverlayClick(e) { if (e.target === document.getElementById('compose-email-modal')) closeComposeEmailModal(); }
+
+    function onEmailTemplateChange() { applyEmailTemplate(document.getElementById('email-template-select').value); }
+
+    function applyEmailTemplate(template) {
+        if (template === 'blank') {
+            document.getElementById('compose-email-subject').value = '';
+            document.getElementById('compose-email-body').value = '';
+            return;
+        }
+        const wh = getWarehouseMeta(currentWarehouseId);
+        const items = packOrder.map(line => {
+            const item = globalInventory.find(i => i.BTKnumber === line.btk);
+            return { quantity: line.qty, btk: line.btk, matchedName: item ? (item['itemname(english)'] || line.btk) : line.btk };
+        });
+        const { subject, text } = window.buildPackOrderEmailTemplate({
+            orderNumber: packOrderSavedNumber || null,
+            recipientName: packOrderRecipient.name || null,
+            items,
+            fromName: wh.name,
+        });
+        document.getElementById('compose-email-subject').value = subject;
+        document.getElementById('compose-email-body').value = text;
+    }
+
+    function sendViaMailApp() {
+        const to = document.getElementById('compose-email-to').value.trim();
+        if (!to) { showToast("Enter a recipient email first.", "warning"); return; }
+        const subject = document.getElementById('compose-email-subject').value;
+        const body = document.getElementById('compose-email-body').value;
+        window.open(window.buildMailtoLink({ to, subject, body }));
+    }
+
+    async function sendComposedEmail() {
+        const to = document.getElementById('compose-email-to').value.trim();
+        if (!to) { showToast("Enter a recipient email first.", "warning"); return; }
+        const subject = document.getElementById('compose-email-subject').value;
+        const text = document.getElementById('compose-email-body').value;
+        const statusEl = document.getElementById('compose-email-status');
+        statusEl.classList.remove('hidden');
+        statusEl.style.color = '';
+        statusEl.textContent = 'Sending…';
+        try {
+            await window.emailClient.sendEmail({ to, subject, text });
+            statusEl.textContent = '✅ Sent.';
+            showToast(`Email sent to ${to}.`, "success");
+            setTimeout(closeComposeEmailModal, 900);
+        } catch (e) {
+            statusEl.style.color = 'var(--danger)';
+            statusEl.textContent = e && e.message ? e.message : String(e);
+        }
     }
 
     // Order numbers (ORDxxxxxx, same shape as BTK numbers) are generated server-side by a
@@ -9119,9 +9262,20 @@ Respond with ONLY the JSON object, nothing else.`;
     import { webSearch, fetchPageText } from './modules/web-search.js';
     import { parseVCardFile, generateVCard } from './modules/contacts.js';
     import { parseOrderRequest } from './modules/order-parser.js';
+    import { createEmailClient, buildMailtoLink, buildPackOrderEmailTemplate } from './modules/email-sender.js';
     window.parseVCardFile = parseVCardFile;
     window.generateVCard = generateVCard;
     window.parseOrderRequest = parseOrderRequest;
+    window.buildMailtoLink = buildMailtoLink;
+    window.buildPackOrderEmailTemplate = buildPackOrderEmailTemplate;
+    // Built once at load, same as window.aiGroq — sendEmail() itself still fails cleanly (a plain
+    // {error: "..."} JSON from send-email) if SMTP secrets were never configured; see Settings/the
+    // Compose Email modal for how that surfaces to the user rather than a raw exception.
+    window.emailClient = createEmailClient({
+        supabaseUrl: window.SUPABASE_URL,
+        supabaseAnonKey: window.SUPABASE_ANON_KEY,
+        getAccessToken: window.getSupabaseAccessToken,
+    });
     window.GROQ_MODELS = GROQ_MODELS;
     // The pre-built proxy-mode client (needs groq-proxy deployed) — the fallback when no personal
     // key is set. window.createGroqClient itself is also exposed so aiGetGroqClient() can build a

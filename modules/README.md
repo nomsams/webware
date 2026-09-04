@@ -3,11 +3,12 @@
 Standalone JS building blocks for functionality discussed for the app. Most of these aren't
 imported by `index.html` yet — nothing changes until a module is deliberately wired in — except
 **`perspective-warp.js`**, **`groq-client.js`**, **`cors-proxy.js`**, **`web-search.js`**,
-**`order-parser.js`**, and **`contacts.js`**, which are (via the `<script type="module">` bridge
-near the end of `index.html`, since the rest of the app is one classic script) — the first four
-back the 🤖 AI Assistant chat bubble, `order-parser.js` backs its natural-language Pack Order
-action, and `contacts.js` backs the Saved Recipients picker on the Pack Order screen (see the
-README's Features list for all three). `img-square.js` and `email-sender.js` remain unwired. Each
+**`order-parser.js`**, **`contacts.js`**, and **`email-sender.js`**, which are (via the
+`<script type="module">` bridge near the end of `index.html`, since the rest of the app is one
+classic script) — the first four back the 🤖 AI Assistant chat bubble, `order-parser.js` backs its
+natural-language Pack Order action, `contacts.js` backs the Saved Recipients picker, and
+`email-sender.js` backs the "📧 Email Recipient" Compose Email modal — both on the Pack Order
+screen (see the README's Features list for all of these). `img-square.js` remains unwired. Each
 file has a `STATUS:` header comment saying which. Run all tests with:
 
 ```bash
@@ -84,20 +85,35 @@ node --test modules/tests/*.test.js
   autosave (plain `localStorage`) and "Google Calendar sync" (turned out to be a
   `calendar.google.com` deep link / `.ics` download, not a real API integration) weren't ported —
   neither is more than a few lines to add directly wherever this ends up wired in, if wanted.
-- **`email-sender.js`** + **`../supabase/functions/send-email/index.ts`** — sends email via SMTP
-  (Gmail/Outlook/one.com presets, or a custom host for your own server), credentials held as
-  Supabase secrets, same pattern as `GROQ_API_KEY`. The function requires editor/maintainer/admin
-  (checked server-side against `profiles.role`, not just "signed in" — sending mail as the org's
-  own SMTP identity to an arbitrary recipient is sensitive enough to need the same bar the rest of
-  the app uses for writes) and validates `to`/`subject` (a real email shape, no `\r\n`) before
-  handing anything to the SMTP client, as defense in depth against header injection. Also exports
-  `buildMailtoLink()`, a zero-backend fallback that just opens the user's own mail client with
-  everything prefilled, and `buildPackOrderEmailTemplate()`, which turns an `order-parser.js`-shaped
-  draft into a ready subject/body. **Not exercised against a live SMTP server** (no Deno runtime
-  available in this environment) — the `denomailer` usage follows its documented API but verify it
-  end-to-end once deployed. See the function's doc comment for the Gmail app-password requirement
-  and the Outlook basic-auth caveat (Microsoft has disabled it for most tenants since 2022–2023 —
-  confirm yours still allows it before relying on that preset).
+- **`email-sender.js`** + **`../supabase/functions/send-email/index.ts`** — **wired in**, as the
+  "📧 Email Recipient" Compose Email modal on the Pack Order screen (a template dropdown prefills
+  subject/body via `buildPackOrderEmailTemplate()`, both stay fully editable either way). Sends
+  email via SMTP (Gmail/Outlook/one.com presets, or a custom host for your own server), credentials
+  held as Supabase secrets, same pattern as `GROQ_API_KEY` — **requires `send-email` deployed and
+  those secrets set** (`supabase functions deploy send-email`, then the `supabase secrets set ...`
+  calls in the function's own doc comment) before "📧 Send Email" will work; until then it fails
+  with a clear "SMTP is not configured" message rather than a silent/opaque error. The function
+  requires editor/maintainer/admin (checked server-side against `profiles.role`, not just "signed
+  in" — sending mail as the org's own SMTP identity to an arbitrary recipient is sensitive enough to
+  need the same bar the rest of the app uses for writes) and validates `to`/`subject` (a real email
+  shape, no `\r\n`) before handing anything to the SMTP client, as defense in depth against header
+  injection. "✉️ Mail App" (`buildMailtoLink()`) is the zero-backend alternative next to it — always
+  available, no deployment needed, just opens the user's own mail client with everything prefilled;
+  nothing is sent until they hit send there themselves. **Not exercised against a live SMTP server**
+  (no Deno runtime available in this environment) — the `denomailer` usage follows its documented
+  API but verify it end-to-end once deployed. See the function's doc comment for the Gmail
+  app-password requirement and the Outlook basic-auth caveat (Microsoft has disabled it for most
+  tenants since 2022–2023 — confirm yours still allows it before relying on that preset).
+
+  **On the recipient's email address and GDPR**: index.html deliberately never adds it to the
+  `orders` table (which is already synced/backed-up/admin-visible across the org) — it only ever
+  lives in the Compose Email modal's own field for that one send, and, only if the user explicitly
+  chooses to, in the local-only Saved Recipients list (`localStorage`, per-device, never synced —
+  see the README's Saved Recipients entry) with its own per-entry Delete and a "Clear All" for an
+  easy right-to-erasure request. That design keeps the blast radius small, but storing a browser's
+  worth of contact data doesn't *by itself* decide GDPR compliance for a given deployment — that's
+  a call for whoever runs this app to make (lawful basis, retention, telling recipients their data
+  is held, etc.), not something a code comment can certify.
 
 - **`perspective-warp.js`** — **wired in** (see above), unlike everything else on this list. Straightens
   a rack/aisle photo taken at an angle into a flat top-down rectangle — mark the 4 corners of the
