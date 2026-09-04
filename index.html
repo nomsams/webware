@@ -304,6 +304,9 @@
         .img-thumb-wrap { position: relative; flex-shrink: 0; }
         .img-remove-btn { position: absolute; top: -8px; right: -8px; width: 26px; height: 26px; min-height: unset; padding: 0; border-radius: 50%; background: var(--danger); color: white; font-weight: 700; font-size: 0.9rem; box-shadow: 0 2px 6px rgba(0,0,0,0.3); z-index: 2; }
         .img-remove-btn:hover { background: #dc2626; transform: none; }
+        .img-main-badge { position: absolute; bottom: 4px; left: 4px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; pointer-events: none; z-index: 2; }
+        .img-make-main-btn { position: absolute; top: -8px; left: -8px; width: 26px; height: 26px; min-height: unset; padding: 0; border-radius: 50%; background: var(--card-bg); border: 2px solid #f59e0b; font-size: 0.85rem; box-shadow: 0 2px 6px rgba(0,0,0,0.3); z-index: 2; display: grid; place-items: center; }
+        .img-make-main-btn:hover { background: #fef3c7; transform: none; }
 
         /* Inline quantity stepper shown next to a selected kit item — appears/disappears with
            selection, defaulting to the kit's own quantity for that item. */
@@ -3014,8 +3017,31 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const { data, error } = await sb.from('items').select('*').eq('warehouse_id', wid);
         if (error) { showToast("Could not load items: " + error.message, "error"); throw error; }
         globalInventory = (data || []).map(supabaseRowToItem);
+        await supabaseLoadItemPhotos(wid);
         globalKits = await supabaseLoadKits(wid);
         await supabaseLoadManufacturers();
+    }
+
+    // Up to MAX_ITEM_PHOTOS photos per item (item_images, schema_item_images.sql) — one row per
+    // photo, grouped onto each in-memory item as item.photos (main photo first, then by
+    // sort_order). imageFullUrl/imageThumbUrl are kept as derived convenience fields pointing at
+    // the main photo, so any code that only ever cared about "the" photo keeps working unchanged.
+    async function supabaseLoadItemPhotos(wid) {
+        const { data, error } = await sb.from('item_images').select('*').eq('warehouse_id', wid).order('sort_order');
+        if (error) { console.error("Item photos load failed:", error); return; }
+        const byBtk = new Map();
+        (data || []).forEach(row => {
+            if (!byBtk.has(row.btk)) byBtk.set(row.btk, []);
+            byBtk.get(row.btk).push(row);
+        });
+        globalInventory.forEach(item => {
+            const rows = byBtk.get(item.BTKnumber) || [];
+            rows.sort((a, b) => (b.is_main ? 1 : 0) - (a.is_main ? 1 : 0) || a.sort_order - b.sort_order);
+            item.photos = rows.map(r => ({ id: r.id, fullUrl: r.full_url, thumbUrl: r.thumb_url, isMain: r.is_main }));
+            const main = item.photos.find(p => p.isMain) || item.photos[0] || null;
+            item.imageFullUrl = main ? main.fullUrl : '';
+            item.imageThumbUrl = main ? (main.thumbUrl || '') : '';
+        });
     }
 
     async function supabaseLoadList(wid) {
@@ -3205,19 +3231,28 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         } else {
             const item = candidate.item;
             const fieldLabel = { itemnumber: 'Item Number', itemnumber2: 'Item Number 2', itemnumber3: 'Item Number 3' }[candidate.field];
-            // Only one photo per item is kept — flag it if this same item is also the top guess for
-            // another file still in this batch, so confirming here isn't a silent surprise later.
+            // Items keep up to MAX_ITEM_PHOTOS photos (the first one confirmed becomes the main
+            // photo, the rest are gallery-only) — flag it when this same item is also the top guess
+            // for other files still in this batch, since together with what it already has that
+            // could run past the cap, in which case the extras just won't fit.
             const others = batchImageQueue.filter((e, i) => i !== batchImageIndex && e.candidates[0] && e.candidates[0].item.BTKnumber === item.BTKnumber).length;
+            const existingCount = (item.photos || []).length;
             const numLines = ['itemnumber', 'itemnumber2', 'itemnumber3']
                 .filter(f => item[f] && item[f] !== 'None')
                 .map(f => `${f === 'itemnumber' ? 'Item # 1' : f === 'itemnumber2' ? 'Item # 2' : 'Item # 3'}: ${escapeHtml(item[f])}`)
                 .join('<br>');
+            let multiNote = '';
+            if (others && existingCount + others + 1 > MAX_ITEM_PHOTOS) {
+                multiNote = `<div style="margin-top:6px; font-size:0.78rem; color:#f59e0b;">⚠️ ${others} other image${others === 1 ? '' : 's'} in this batch also matched this item — together with what it already has, that's more than the ${MAX_ITEM_PHOTOS}-photo limit, so some won't fit.</div>`;
+            } else if (others) {
+                multiNote = `<div style="margin-top:6px; font-size:0.78rem; color:var(--text-muted);">ℹ️ ${others} other image${others === 1 ? '' : 's'} in this batch also matched this item — they'll be added as separate photos for it.</div>`;
+            }
             infoEl.innerHTML = `
                 <div style="font-weight:700;">${escapeHtml(item['itemname(english)'] || item.BTKnumber)}</div>
                 <div style="color:var(--text-muted); font-size:0.85rem;">BTK ${escapeHtml(item.BTKnumber)}${item.Manufacturer && item.Manufacturer !== 'None' ? ' · ' + escapeHtml(item.Manufacturer) : ''}</div>
                 ${numLines ? `<div style="margin-top:6px; font-size:0.85rem;">${numLines}</div>` : ''}
                 <div style="margin-top:6px; font-size:0.8rem; color:var(--primary);">Matched on ${fieldLabel}${candidate.exact ? ' (exact)' : ''}</div>
-                ${others ? `<div style="margin-top:6px; font-size:0.78rem; color:#f59e0b;">⚠️ ${others} other image${others === 1 ? '' : 's'} in this batch also matched this item — only one photo per item is kept, so confirming here may replace it.</div>` : ''}
+                ${multiNote}
             `;
             btnConfirm.classList.remove('hidden');
             btnSkip.textContent = (entry.candidateIndex + 1 < entry.candidates.length) ? '⏭️ Skip — Try Next Suggestion' : '🗄️ Skip — Set Aside';
@@ -3275,14 +3310,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const { full, thumb, filename, thumbName } = await resizeImage(file, btk);
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
         if (isSupa) {
-            if (!(await checkStorageBudget(full.size + thumb.size))) {
-                showToast(`Storage budget exceeded — skipped photo for ${btk}.`, "warning", 6000);
-                return;
-            }
             try {
-                const { fullUrl, thumbUrl } = await uploadItemPhotoToSupabase(btk, full, thumb);
-                const item = globalInventory.find(i => i.BTKnumber === btk);
-                if (item) { item.imageFullUrl = fullUrl; item.imageThumbUrl = thumbUrl; }
+                const result = await addPhotoToItem(btk, full, thumb);
+                if (!result.ok) {
+                    const msg = result.reason === 'capacity'
+                        ? `${btk} already has ${MAX_ITEM_PHOTOS} photos — skipped.`
+                        : `Storage budget exceeded — skipped photo for ${btk}.`;
+                    showToast(msg, "warning", 6000);
+                }
             } catch (e) {
                 console.error(`Upload failed for ${btk}:`, e);
                 showToast(`Could not upload photo for ${btk}: ${e.message || e}`, "error");
@@ -3413,9 +3448,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const fullUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(`${UNASSIGNED_IMAGE_PREFIX}/${base}__full.jpg`).data.publicUrl;
             const thumbUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(`${UNASSIGNED_IMAGE_PREFIX}/${base}__thumb.jpg`).data.publicUrl;
             const [fullBlob, thumbBlob] = await Promise.all([fetch(fullUrl).then(r => r.blob()), fetch(thumbUrl).then(r => r.blob())]);
-            const { fullUrl: newFullUrl, thumbUrl: newThumbUrl } = await uploadItemPhotoToSupabase(btk, fullBlob, thumbBlob);
+            const result = await addPhotoToItem(btk, fullBlob, thumbBlob);
             const item = globalInventory.find(i => i.BTKnumber === btk);
-            if (item) { item.imageFullUrl = newFullUrl; item.imageThumbUrl = newThumbUrl; }
+            if (!result.ok) {
+                const msg = result.reason === 'capacity' ? `That item already has ${MAX_ITEM_PHOTOS} photos.` : "Storage budget would be exceeded.";
+                showToast(msg, "warning");
+                return;
+            }
             await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove([`${UNASSIGNED_IMAGE_PREFIX}/${base}__full.jpg`, `${UNASSIGNED_IMAGE_PREFIX}/${base}__thumb.jpg`]);
             closeAssignUnassignedImageModal();
             renderUnassignedImagesList();
@@ -3695,28 +3734,124 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // queue is empty — same "download + drop into assets/" convention as the rest of the app.
     // Uploads a single item's full+thumb blobs to Supabase Storage — each path carries a random
     // token (randomStorageToken()) rather than being purely BTK-derived, since the bucket is public
-    // and a deterministic path would let anyone enumerate every item's photo with zero credentials.
-    // Each upload therefore gets its own new path (upsert:true no longer replaces "in place" the
-    // way the old deterministic name did), so the previous photo's objects are explicitly cleaned
-    // up afterward instead of being left behind as storage-quota-eating orphans. The URL is
-    // inherently unique per upload now, so no separate cache-busting query param is needed.
-    async function uploadItemPhotoToSupabase(btk, full, thumb) {
-        const existingItem = globalInventory.find(i => i.BTKnumber === btk) || {};
-        const oldFullPath = storagePathFromPublicUrl(existingItem.imageFullUrl, SUPABASE_STORAGE_BUCKET);
-        const oldThumbPath = storagePathFromPublicUrl(existingItem.imageThumbUrl, SUPABASE_STORAGE_BUCKET);
+    // and a deterministic path would let anyone enumerate every item's photos with zero credentials.
+    //
+    // ── Multi-photo model (schema_item_images.sql) — up to MAX_ITEM_PHOTOS per item, one row per
+    // photo in item_images. Only the item's MAIN photo carries a thumb_url; the rest are full-res
+    // only (shown in the gallery, never used anywhere a small list-view thumbnail is needed, so
+    // there's no point paying for a second compressed copy of each one). item.photos holds the
+    // loaded rows (main first, then sort_order — see supabaseLoadItemPhotos()); item.imageFullUrl/
+    // imageThumbUrl are kept as derived convenience fields pointing at the main photo, so any older
+    // code that only ever cared about "the" photo keeps working unchanged.
+    const MAX_ITEM_PHOTOS = 5;
+
+    // Uploads one photo for an item. `thumb` is only actually uploaded when isMain is true — pass
+    // null for a non-main photo. Inserts the item_images row and returns it in in-memory shape.
+    async function uploadItemPhoto(btk, warehouseId, full, thumb, isMain) {
         const token = randomStorageToken();
-        const fullPath = `${btk}_${token}_full.jpg`, thumbPath = `${btk}_${token}_thumb.jpg`;
+        const fullPath = `${btk}_${token}_full.jpg`;
         const up1 = await sb.storage.from(SUPABASE_STORAGE_BUCKET).upload(fullPath, full, { upsert: true, contentType: 'image/jpeg' });
         if (up1.error) throw up1.error;
-        const up2 = await sb.storage.from(SUPABASE_STORAGE_BUCKET).upload(thumbPath, thumb, { upsert: true, contentType: 'image/jpeg' });
-        if (up2.error) throw up2.error;
         const fullUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(fullPath).data.publicUrl;
-        const thumbUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(thumbPath).data.publicUrl;
-        const { error } = await sb.from('items').update({ image_full_url: fullUrl, image_thumb_url: thumbUrl }).eq('btk', btk);
+
+        let thumbUrl = null;
+        if (isMain) {
+            const thumbPath = `${btk}_${token}_thumb.jpg`;
+            const up2 = await sb.storage.from(SUPABASE_STORAGE_BUCKET).upload(thumbPath, thumb, { upsert: true, contentType: 'image/jpeg' });
+            if (up2.error) throw up2.error;
+            thumbUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(thumbPath).data.publicUrl;
+        }
+
+        const item = globalInventory.find(i => i.BTKnumber === btk);
+        const sortOrder = (item?.photos || []).length;
+        const { data, error } = await sb.from('item_images').insert({
+            btk, warehouse_id: warehouseId, full_url: fullUrl, thumb_url: thumbUrl, is_main: !!isMain, sort_order: sortOrder
+        }).select().single();
         if (error) throw error;
-        const stale = [oldFullPath, oldThumbPath].filter(p => p && p !== fullPath && p !== thumbPath);
-        if (stale.length) await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove(stale).catch(() => {});
-        return { fullUrl, thumbUrl };
+        return { id: data.id, fullUrl: data.full_url, thumbUrl: data.thumb_url, isMain: data.is_main };
+    }
+
+    // Shared by every "add one photo to this item" entry point (the image editor queue, batch
+    // import, CSV image-URL import, assigning a stored unassigned image) — enforces the 5-photo
+    // cap and the storage budget, decides whether this becomes the item's main photo (only ever the
+    // very first photo an item gets), uploads, and keeps item.photos/imageFullUrl/imageThumbUrl in
+    // sync. Returns { ok: true, photo } or { ok: false, reason: 'capacity'|'budget'|'not_found' } —
+    // callers phrase their own message for a skip, since "skip one row in a batch" and "stop
+    // entirely" want different wording.
+    async function addPhotoToItem(btk, full, thumb) {
+        const item = globalInventory.find(i => i.BTKnumber === btk);
+        if (!item) return { ok: false, reason: 'not_found' };
+        item.photos = item.photos || [];
+        if (item.photos.length >= MAX_ITEM_PHOTOS) return { ok: false, reason: 'capacity' };
+        const isMain = item.photos.length === 0;
+        const bytes = full.size + (isMain ? thumb.size : 0);
+        if (!(await checkStorageBudget(bytes))) return { ok: false, reason: 'budget' };
+        const photo = await uploadItemPhoto(btk, currentWarehouseId, full, isMain ? thumb : null, isMain);
+        item.photos.push(photo);
+        if (isMain) { item.imageFullUrl = photo.fullUrl; item.imageThumbUrl = photo.thumbUrl; }
+        return { ok: true, photo };
+    }
+
+    // Removes one photo: its Storage object(s), then its item_images row. If it was the item's main
+    // photo, promotes the next remaining one (if any) to take its place.
+    async function deleteItemPhotoRow(photoId, btk) {
+        const item = globalInventory.find(i => i.BTKnumber === btk);
+        const photo = item?.photos?.find(p => p.id === photoId);
+        if (!item || !photo) return;
+
+        const paths = [storagePathFromPublicUrl(photo.fullUrl, SUPABASE_STORAGE_BUCKET), storagePathFromPublicUrl(photo.thumbUrl, SUPABASE_STORAGE_BUCKET)].filter(Boolean);
+        if (paths.length) await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove(paths).catch(() => {});
+        const { error } = await sb.from('item_images').delete().eq('id', photoId);
+        if (error) throw error;
+
+        item.photos = item.photos.filter(p => p.id !== photoId);
+        if (photo.isMain && item.photos.length) {
+            await promoteItemPhotoToMain(item.photos[0].id, btk);
+        } else {
+            const main = item.photos.find(p => p.isMain) || item.photos[0] || null;
+            item.imageFullUrl = main ? main.fullUrl : '';
+            item.imageThumbUrl = main ? (main.thumbUrl || '') : '';
+        }
+    }
+
+    // Promotes a non-main photo to main — demotes the current main first (clears is_main so the
+    // partial unique index on item_images never sees two rows both claiming it, even momentarily;
+    // also deletes its now-redundant thumbnail object, since a non-main photo never keeps one), then
+    // generates a fresh thumbnail for the newly-promoted photo from its own full-res copy (fetched
+    // back down — a non-main photo never had one stored to reuse).
+    async function promoteItemPhotoToMain(photoId, btk) {
+        const item = globalInventory.find(i => i.BTKnumber === btk);
+        if (!item) return;
+        const target = item.photos.find(p => p.id === photoId);
+        if (!target || target.isMain) return;
+        const currentMain = item.photos.find(p => p.isMain);
+
+        if (currentMain) {
+            const thumbPath = storagePathFromPublicUrl(currentMain.thumbUrl, SUPABASE_STORAGE_BUCKET);
+            if (thumbPath) await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove([thumbPath]).catch(() => {});
+            const { error: demoteErr } = await sb.from('item_images').update({ is_main: false, thumb_url: null }).eq('id', currentMain.id);
+            if (demoteErr) throw demoteErr;
+            currentMain.isMain = false;
+            currentMain.thumbUrl = null;
+        }
+
+        const res = await fetch(target.fullUrl);
+        if (!res.ok) throw new Error(`Could not fetch photo (HTTP ${res.status})`);
+        const blob = await res.blob();
+        const bmp = await createImageBitmap(blob);
+        const thumb = await drawToBlob(bmp, 320, 0.8);
+        const token = randomStorageToken();
+        const thumbPath = `${btk}_${token}_thumb.jpg`;
+        const up = await sb.storage.from(SUPABASE_STORAGE_BUCKET).upload(thumbPath, thumb, { upsert: true, contentType: 'image/jpeg' });
+        if (up.error) throw up.error;
+        const thumbUrl = sb.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(thumbPath).data.publicUrl;
+
+        const { error } = await sb.from('item_images').update({ is_main: true, thumb_url: thumbUrl }).eq('id', photoId);
+        if (error) throw error;
+        target.isMain = true;
+        target.thumbUrl = thumbUrl;
+        item.imageFullUrl = target.fullUrl;
+        item.imageThumbUrl = target.thumbUrl;
     }
 
     async function finishImageEditorQueue() {
@@ -3730,21 +3865,20 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
 
         if (isSupa) {
-            // One photo per item — only the last confirmed image in this batch is kept.
-            const last = accepted[accepted.length - 1];
-            try {
-                const totalBytes = last.full.size + last.thumb.size;
-                if (!(await checkStorageBudget(totalBytes))) {
-                    showToast("Storage budget would be exceeded — photo not uploaded. Check Settings for usage.", "error", 8000);
-                } else {
-                    const { fullUrl, thumbUrl } = await uploadItemPhotoToSupabase(currentItemBTK, last.full, last.thumb);
-                    item.imageFullUrl = fullUrl; item.imageThumbUrl = thumbUrl;
-                    showToast(accepted.length > 1 ? `Photo uploaded (only the last of ${accepted.length} is kept — one photo per item).` : "Photo uploaded.", "success");
-                }
-            } catch (e) {
-                console.error("Photo upload failed:", e);
-                showToast("Photo upload failed: " + e.message, "error");
+            let uploaded = 0, capacitySkipped = 0, budgetStopped = false, failed = 0;
+            for (const entry of accepted) {
+                try {
+                    const result = await addPhotoToItem(currentItemBTK, entry.full, entry.thumb);
+                    if (result.ok) uploaded++;
+                    else if (result.reason === 'capacity') capacitySkipped++;
+                    else if (result.reason === 'budget') { budgetStopped = true; break; }
+                } catch (e) { console.error("Photo upload failed:", e); failed++; }
             }
+            let msg = `${uploaded} photo${uploaded === 1 ? '' : 's'} uploaded.`;
+            if (capacitySkipped) msg += ` ${capacitySkipped} skipped — an item keeps at most ${MAX_ITEM_PHOTOS} photos.`;
+            if (budgetStopped) msg += ` Storage budget would be exceeded for the rest — check Settings for usage.`;
+            if (failed) msg += ` ${failed} failed — see console.`;
+            showToast(msg, (capacitySkipped || budgetStopped || failed) ? "warning" : "success", 7000);
         } else {
             let images = item.images || '';
             accepted.forEach(a => { images = appendImageFilename(images, a.filename); });
@@ -3761,7 +3895,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
         if (quickEditMode) {
             const filenames = renderItemGallery(item);
-            renderImageAddControls(filenames.length > 0);
+            renderImageAddControls(filenames.length);
         } else {
             openItem(currentItemBTK, navigationContext);
         }
@@ -7163,7 +7297,7 @@ th { background: #eee; }
         document.getElementById('btn-duplicate-item').classList.toggle('hidden', isViewer);
 
         const filenames = renderItemGallery(item);
-        renderImageAddControls(filenames.length > 0);
+        renderImageAddControls(filenames.length);
         renderItemFields(item, id);
 
         document.getElementById('btn-single-label').onclick = () => {
@@ -7172,16 +7306,19 @@ th { background: #eee; }
         renderBinLocationMap(item);
     }
 
-    // Read-only image gallery. In quick-edit mode each thumbnail gets a remove (✕) button.
-    // Returns the current filename list (callers use its length to decide add-controls placement).
-    // Supabase-mode items get a single cloud-stored photo (thumbnail shown, full-res on click);
-    // static-mode items keep the original multi-image assets/ gallery, unchanged.
+    // Read-only image gallery. In quick-edit mode each thumbnail gets a remove (✕) button, and a
+    // non-main Supabase photo also gets "⭐ Make Main". Returns the current photo/filename list
+    // (callers use its length to decide add-controls placement and the remaining-capacity count).
+    // Supabase-mode items get up to MAX_ITEM_PHOTOS cloud-stored photos, one marked main (shown
+    // first, with a badge — its thumbnail is used anywhere a small photo is needed); the rest are
+    // full-res only, gallery/lightbox-only. Static-mode items keep the original multi-image
+    // assets/ gallery, unchanged (no main/thumbnail distinction there).
     function renderItemGallery(item) {
         const imagesEl = document.getElementById('detail-images');
         imagesEl.innerHTML = '';
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
 
-        function addThumb(gallery, thumbSrc, fullSrc, alt, onRemove) {
+        function addThumb(gallery, thumbSrc, fullSrc, alt, onRemove, extra) {
             const wrap = document.createElement('div');
             wrap.className = 'img-thumb-wrap';
             const img = document.createElement('img');
@@ -7194,7 +7331,23 @@ th { background: #eee; }
             img.onerror = function() { console.error('Item photo failed to load:', thumbSrc); this.classList.add('img-load-error'); };
             img.onclick = () => openLightbox(fullSrc);
             wrap.appendChild(img);
+            if (extra?.badge) {
+                const badge = document.createElement('span');
+                badge.className = 'img-main-badge';
+                badge.textContent = extra.badge;
+                wrap.appendChild(badge);
+            }
             if (quickEditMode && canEditItems()) {
+                if (extra?.onMakeMain) {
+                    const star = document.createElement('button');
+                    star.type = 'button';
+                    star.className = 'img-make-main-btn';
+                    star.setAttribute('aria-label', 'Make main photo');
+                    star.title = 'Make main photo';
+                    star.innerText = '⭐';
+                    star.onclick = (e) => { e.stopPropagation(); extra.onMakeMain(); };
+                    wrap.appendChild(star);
+                }
                 const rm = document.createElement('button');
                 rm.type = 'button';
                 rm.className = 'img-remove-btn';
@@ -7207,12 +7360,18 @@ th { background: #eee; }
         }
 
         if (isSupa) {
-            if (!item.imageThumbUrl) return [];
+            const photos = item.photos || [];
+            if (!photos.length) return [];
             const gallery = document.createElement('div');
             gallery.className = 'item-image-gallery';
-            addThumb(gallery, item.imageThumbUrl, item.imageFullUrl || item.imageThumbUrl, 'Item photo', () => removeItemImage());
+            photos.forEach(photo => {
+                const thumbSrc = photo.thumbUrl || photo.fullUrl;
+                addThumb(gallery, thumbSrc, photo.fullUrl, photo.isMain ? 'Main photo' : 'Item photo',
+                    () => removeItemImage(photo.id),
+                    { badge: photo.isMain ? '★ Main' : null, onMakeMain: photo.isMain ? null : () => makeItemPhotoMain(photo.id) });
+            });
             imagesEl.appendChild(gallery);
-            return [item.imageThumbUrl];
+            return photos;
         }
 
         const rawImages = (item.images || '').trim();
@@ -7230,23 +7389,38 @@ th { background: #eee; }
     // as part of the same edit session as the fields), and only for admin/editor. Placed above the
     // field list when the item has no images yet, or below it (just before the map) once it does.
     // Available directly from the read-only item view — no need to enter quick-edit or press
-    // Edit first — since adding/replacing a photo is low-risk and shouldn't need extra clicks.
-    function renderImageAddControls(hasImages) {
+    // Edit first — since adding a photo is low-risk and shouldn't need extra clicks.
+    function renderImageAddControls(photoCount) {
         const top = document.getElementById('img-add-controls-top');
         const bottom = document.getElementById('img-add-controls-bottom');
         top.innerHTML = ''; bottom.innerHTML = '';
         top.classList.add('hidden'); bottom.classList.add('hidden');
         if (!canEditItems()) return;
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
-        // Supabase items get one photo (replaced on re-upload) — static items keep the multi-image gallery.
-        document.getElementById('editor-file-input').multiple = !isSupa;
-        const addLabel = (isSupa && hasImages) ? '🔁 Replace Photo' : '➕ Add Image';
+        const hasImages = photoCount > 0;
+        if (isSupa && photoCount >= MAX_ITEM_PHOTOS) return; // at the cap — nothing to add
+        document.getElementById('editor-file-input').multiple = true;
+        const addLabel = isSupa && hasImages ? `➕ Add Photo (${photoCount}/${MAX_ITEM_PHOTOS})` : '➕ Add Image';
         const target = hasImages ? bottom : top;
         target.innerHTML = `<div style="display:flex; gap:10px; flex-wrap:wrap;">
             <button class="secondary" onclick="document.getElementById('editor-file-input').click()">${addLabel}</button>
             <button class="secondary" onclick="document.getElementById('editor-camera-input').click()">📷 Take Picture</button>
         </div>`;
         target.classList.remove('hidden');
+    }
+
+    async function makeItemPhotoMain(photoId) {
+        const btk = currentItemBTK;
+        try {
+            await promoteItemPhotoToMain(photoId, btk);
+            const item = globalInventory.find(i => i.BTKnumber === btk);
+            const photos = renderItemGallery(item);
+            renderImageAddControls(photos.length);
+            showToast("Main photo updated.", "success");
+        } catch (e) {
+            console.error("Could not set main photo:", e);
+            showToast("Could not set main photo: " + (e.message || e), "error");
+        }
     }
 
     // Manufacturer field row: the 🔍 link searches other items with the same value (existing
@@ -7450,7 +7624,7 @@ th { background: #eee; }
         document.getElementById('quick-edit-bar').classList.add('visible');
         renderQuickEditFields(item);
         const filenames = renderItemGallery(item);
-        renderImageAddControls(filenames.length > 0);
+        renderImageAddControls(filenames.length);
     }
 
     function renderQuickEditFields(item) {
@@ -7543,7 +7717,7 @@ th { background: #eee; }
         const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
         if (!item) return;
         const filenames = renderItemGallery(item);
-        renderImageAddControls(filenames.length > 0);
+        renderImageAddControls(filenames.length);
         renderItemFields(item, currentItemBTK);
     }
 
@@ -7557,10 +7731,11 @@ th { background: #eee; }
         if (!fields['itemname(english)']) { showToast("English name is required.", "error"); return; }
         const btk = currentItemBTK;
         const existingItem = globalInventory.find(i => i.BTKnumber === btk) || {};
-        // Quick Edit's own fields never included the photo (it's managed separately, via the Add/
-        // Take Picture buttons) — carrying imageFullUrl/imageThumbUrl over explicitly, since this
-        // function patches globalInventory by hand instead of reloading from Supabase afterward,
-        // and a plain object replace would otherwise silently drop them from the item view.
+        // Quick Edit's own fields never included photos (managed separately, via the Add/Take
+        // Picture buttons and the gallery's own ⭐/✕ controls) — carrying imageFullUrl/imageThumbUrl/
+        // photos over explicitly, since this function patches globalInventory by hand instead of
+        // reloading from Supabase afterward, and a plain object replace would otherwise silently
+        // drop them from the item view.
         const updated = {
             Manufacturer: fields.Manufacturer || 'None',
             BTKnumber: btk,
@@ -7578,7 +7753,8 @@ th { background: #eee; }
             Comments: fields.Comments || 'None',
             images: existingItem.images || '',
             imageFullUrl: existingItem.imageFullUrl,
-            imageThumbUrl: existingItem.imageThumbUrl
+            imageThumbUrl: existingItem.imageThumbUrl,
+            photos: existingItem.photos || []
         };
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
@@ -7615,47 +7791,42 @@ th { background: #eee; }
         openItem(btk, navigationContext);
     }
 
-    // Unlinks an image from the item (the file itself is left in assets/ — this only edits the
-    // item's `images` field). Persists immediately, same as image add, rather than deferring to
-    // the quick-edit Save button.
-    // Static mode: unlinks one filename from the images text field (file stays in assets/).
-    // Supabase mode: clears the item's single photo (called with no filename) and deletes the
-    // stored objects, since there's only ever one slot to replace/clear.
-    async function removeItemImage(filename) {
+    // Unlinks/deletes one image from the item. Persists immediately, same as image add, rather
+    // than deferring to the quick-edit Save button.
+    // Static mode: unlinks one filename from the `images` text field (the file itself stays in
+    // assets/) — arg is that filename.
+    // Supabase mode: deletes one photo's Storage object(s) and its item_images row — arg is that
+    // photo's id. If it was the main photo, deleteItemPhotoRow() promotes the next one (if any).
+    async function removeItemImage(arg) {
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
-        const confirmMsg = isSupa
-            ? "Remove this item's photo? This deletes it from storage."
-            : "Remove this image from the item? (The file stays in assets/ — this only unlinks it.)";
-        if (!confirm(confirmMsg)) return;
         const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
         if (!item) return;
 
-        if (isSupa) {
-            try {
-                // Paths are tokenized (see uploadItemPhotoToSupabase), not reconstructible from the
-                // BTK alone — the item's own stored URL is the only source of truth for them now.
-                const paths = [
-                    storagePathFromPublicUrl(item.imageFullUrl, SUPABASE_STORAGE_BUCKET),
-                    storagePathFromPublicUrl(item.imageThumbUrl, SUPABASE_STORAGE_BUCKET),
-                ].filter(Boolean);
-                if (paths.length) await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove(paths);
-                const { error } = await sb.from('items').update({ image_full_url: null, image_thumb_url: null }).eq('btk', currentItemBTK);
-                if (error) throw error;
-                item.imageFullUrl = ''; item.imageThumbUrl = '';
-                showToast("Photo removed.", "success");
-            } catch (e) {
-                console.error("Photo removal failed:", e);
-                showToast("Could not remove photo: " + e.message, "error");
+        const doRemove = async () => {
+            if (isSupa) {
+                try {
+                    await deleteItemPhotoRow(arg, currentItemBTK);
+                    showToast("Photo removed.", "success");
+                } catch (e) {
+                    console.error("Photo removal failed:", e);
+                    showToast("Could not remove photo: " + (e.message || e), "error");
+                }
+            } else {
+                const images = (item.images || '').split(';').map(s => s.trim()).filter(f => f && f !== arg).join(';');
+                item.images = images;
+                try { saveDraft(currentWarehouseId); showToast("Image removed.", "success"); }
+                catch (e) { console.error("Image removal persist failed:", e); showToast("Could not save removal: " + e.message, "error"); }
             }
-        } else {
-            const images = (item.images || '').split(';').map(s => s.trim()).filter(f => f && f !== filename).join(';');
-            item.images = images;
-            try { saveDraft(currentWarehouseId); showToast("Image removed.", "success"); }
-            catch (e) { console.error("Image removal persist failed:", e); showToast("Could not save removal: " + e.message, "error"); }
-        }
+            const filenames = renderItemGallery(item);
+            renderImageAddControls(filenames.length);
+        };
 
-        const filenames = renderItemGallery(item);
-        renderImageAddControls(filenames.length > 0);
+        showConfirmModal({
+            title: 'Remove this image?',
+            body: isSupa ? "This deletes it from storage." : "The file stays in assets/ — this only unlinks it.",
+            confirmLabel: '🗑️ Remove',
+            onConfirm: doRemove
+        });
     }
 
     function backFromItem() {
@@ -8860,13 +9031,8 @@ th { background: #eee; }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const blob = await res.blob();
             const { full, thumb } = await prepareImageBlobsFromBlob(blob);
-            if (!(await checkStorageBudget(full.size + thumb.size))) {
-                console.warn(`CSV image for ${btk} skipped — storage budget would be exceeded.`);
-                return;
-            }
-            const { fullUrl, thumbUrl } = await uploadItemPhotoToSupabase(btk, full, thumb);
-            const item = globalInventory.find(i => i.BTKnumber === btk);
-            if (item) { item.imageFullUrl = fullUrl; item.imageThumbUrl = thumbUrl; }
+            const result = await addPhotoToItem(btk, full, thumb);
+            if (!result.ok) console.warn(`CSV image for ${btk} skipped (${result.reason}).`);
         } catch (e) {
             console.warn(`Could not attach image for ${btk} from "${url}":`, e.message || e);
         }
