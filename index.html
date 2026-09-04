@@ -431,6 +431,19 @@
         #ai-fab-mic:hover { transform: scale(1.06); }
         #ai-fab-mic.hidden { display: none; }
         #ai-fab-mic.recording { background: var(--danger); animation: aiPulse 1s ease-in-out infinite; }
+        /* Same gray/size/style as #ai-fab-mic, but the opposite visibility rule: stacked directly
+           above the main bubble (not beside it), where the AI panel itself opens — so this is shown
+           while the panel is CLOSED (a one-tap scan shortcut without opening the chat at all) and
+           hides the instant the panel opens and takes over that same space, rather than only
+           appearing once the panel's already open like the mic does. */
+        #ai-fab-ocr {
+            position: fixed; bottom: 84px; right: 20px; width: 48px; height: 48px; border-radius: 50%;
+            background: #6b7280; color: #fff; border: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.35);
+            font-size: 1.25rem; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
+            transition: transform 0.15s;
+        }
+        #ai-fab-ocr:hover { transform: scale(1.06); }
+        #ai-fab-ocr.hidden { display: none; }
         #ai-panel {
             position: fixed; bottom: 88px; right: 20px; width: 360px; max-width: calc(100vw - 2rem);
             max-height: min(70vh, 640px); background: var(--card-bg); border: 1px solid var(--border);
@@ -476,6 +489,7 @@
 
 <button id="ai-fab" onclick="toggleAiAssistant()" aria-label="Open AI Assistant" title="AI Assistant">🤖<span id="ai-fab-badge" class="ai-fab-badge hidden"></span></button>
 <button id="ai-fab-mic" class="hidden" onclick="aiChatToggleRecording()" aria-label="Speak to the AI Assistant" title="Voice input">🎤</button>
+<button id="ai-fab-ocr" onclick="openBarcodeScanner('open')" aria-label="Scan a barcode, QR code, or text label" title="Scan">📷</button>
 <script>if (!localStorage.getItem('ai-assistant-seen')) { var _aifb = document.getElementById('ai-fab-badge'); if (_aifb) _aifb.classList.remove('hidden'); }</script>
 <div id="ai-panel" class="hidden">
     <div class="ai-panel-header">
@@ -1573,6 +1587,7 @@
     var lowStockEnabled = false; // off by default — opt-in via Settings
     var lowStockThreshold = 5;
     var dashboardEnabled = false; // off by default — opt-in via Settings
+    var cameraScanSupported = true; // flipped off at startup if the browser has no camera API at all — see window.onload
     var manufacturerFilter = ''; // list-view filter — derived options, not a separate table
     var globalManufacturers = []; // Supabase-mode only — global (not warehouse-scoped) entity list
     var currentManufacturerId = null;
@@ -3319,10 +3334,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         initSettings();
         initImageEditorHandlers();
         // No camera API at all (very old browser, or a non-secure context where getUserMedia is
-        // unavailable) -> hide the entry point instead of offering a button that can only fail.
+        // unavailable) -> hide every entry point, including ai-fab-ocr (see toggleAiAssistant),
+        // instead of offering a button that can only fail.
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            cameraScanSupported = false;
             document.getElementById('btn-scan').classList.add('hidden');
             document.getElementById('btn-pack-order-scan').classList.add('hidden');
+            document.getElementById('ai-fab-ocr').classList.add('hidden');
         }
         await ensureDemoVault();
         window.addEventListener('hashchange', handleRoute);
@@ -8511,6 +8529,7 @@ ${css}
         const opening = panel.classList.contains('hidden');
         panel.classList.toggle('hidden');
         document.getElementById('ai-fab-mic').classList.toggle('hidden', !opening);
+        document.getElementById('ai-fab-ocr').classList.toggle('hidden', opening || !cameraScanSupported);
         if (!opening && aiIsRecording) aiStopRecordingManually(); // closing mid-recording shouldn't leave it running
         if (opening) {
             localStorage.setItem('ai-assistant-seen', '1');
@@ -8519,7 +8538,7 @@ ${css}
                 aiAssistantReady = true;
                 await aiRefreshKeyStatus();
                 aiAppendMessage('system', aiHasApiKey
-                    ? "Ask me things like \"find item 12345\", \"which items are from Bosch\", \"pack the grease sticks\", \"pack all the rings from the 310 kit\", or a factual question like a company's address. With an item open I can also change one of its fields. Type or tap 🎤 to speak."
+                    ? "Ask me things like \"find item 12345\", \"which items are from Bosch\", \"pack the grease sticks\", \"pack all the rings from the 310 kit\", \"what's in the 310 kit\", \"what needs reordering\", or a factual question like a company's address. I remember the last few things we talked about, so follow-ups like \"how many do we have\" work too. With an item open I can also change one of its fields. Type or tap 🎤 to speak, or 📷 to scan a label."
                     : aiNoKeyMessage());
                 if (aiHasApiKey) aiRenderSuggestions();
             }
@@ -8618,6 +8637,7 @@ ${css}
             { label: '🔍 Find an item', text: 'find ' },
             { label: '📦 Pack a kit', text: 'pack the kit for ' },
             { label: '📋 List items from...', text: 'which items are from ' },
+            { label: '⚠️ What needs reordering?', text: 'what needs reordering' },
         ];
         if (activeView === 'item-view' && currentItemBTK && canEditItems()) {
             chips.push({ label: '✏️ Rename this item', text: 'change the item name to ' });
@@ -8691,11 +8711,13 @@ ${css}
         comments: { elId: 'qe-comments', itemKey: 'Comments', label: 'Comments' },
     };
 
-    const AI_SYSTEM_PROMPT = `You are an assistant embedded in a warehouse inventory app. The user gives a short instruction (voice-transcribed or typed), possibly in English, Swedish, or Finnish. Classify it into EXACTLY ONE JSON object, no prose, matching one of:
+    const AI_SYSTEM_PROMPT = `You are an assistant embedded in a warehouse inventory app. The user gives a short instruction (voice-transcribed or typed), possibly in English, Swedish, or Finnish. You may also be shown the most recent turns of this conversation for context — use them to resolve references like "it", "that one", "those", or a follow-up question (e.g. after finding an item, "how many do we have" means that item's stock; after listing items, "pack the second one" means that item) — but still classify only the CURRENT instruction, as EXACTLY ONE JSON object, no prose, matching one of:
 {"action":"search_item","query":string}
 {"action":"pack_kit","query":string,"multiplier":number,"filter":string}
 {"action":"pack_order","text":string}
 {"action":"list_items","query":string}
+{"action":"list_kit_items","query":string}
+{"action":"low_stock_items"}
 {"action":"edit_field","field":"name_en"|"name_sv"|"manufacturer"|"itemnumber"|"itemnumber2"|"itemnumber3"|"quantity"|"unit_type"|"reorder_threshold"|"location"|"map_position"|"location_code"|"comments","value":string}
 {"action":"web_search","query":string}
 {"action":"chat","reply":string}
@@ -8703,7 +8725,9 @@ Rules:
 - "search_item": user wants to find/open ONE specific item by name, number, or manufacturer.
 - "pack_kit": user wants to start/pack an order from a whole or partial named KIT (e.g. "pack the kit for HANY IC310", "pack all the rings from the 310 kit"). "multiplier" is how many times over to pack every included item — 1 by default, or the number they said (e.g. "pack twice of everything" -> 2, "triple the kit" -> 3, "pack 4x IC310" -> 4). "filter" (optional) narrows it to only the items in that kit whose name matches a word/phrase — e.g. "pack all the rings from the 310 kit" -> query "310", filter "rings"; omit filter to pack the whole kit. If it's clearly just ONE item and not a kit (e.g. "pack the grease sticks"), use "pack_order" instead, not this.
 - "pack_order": user describes a pack order as one or more individual items (not a whole/partial named kit) — by name, BTK, or "item N" — each with an optional quantity, and optionally a recipient to send it to (e.g. "pack the grease sticks", "pack 2 bolts and 1 gasket for Anna Andersson", "send BTK000012 x3 to Acme AB, look up their address"). "text" is the instruction verbatim — it's parsed separately, so just copy it exactly.
-- "list_items": user wants to SEE/LIST several items matching something — a manufacturer, keyword, or category (e.g. "which items are from Bosch", "list items with grease", "what do we have from HÄNY") — not open one specific item (search_item) and not pack anything (pack_kit/pack_order).
+- "list_items": user wants to SEE/LIST several items matching something — a manufacturer, keyword, or category (e.g. "which items are from Bosch", "list items with grease", "what do we have from HÄNY") — not open one specific item (search_item) and not pack anything.
+- "list_kit_items": user wants to see what's INSIDE a kit without packing it — e.g. "what's in the 310 kit", "show me what's in HANY IC310".
+- "low_stock_items": user asks what's low on stock or needs reordering — e.g. "what needs reordering", "what's running low", "anything low on stock". No query needed.
 - "edit_field": ONLY when clearly asking to change one specific field's value on the item that's currently open (e.g. "change the item name to Grease sticks" -> field "name_en", value "Grease sticks").
 - "web_search": user asks a factual question that needs looking something up on the web — including things like a company's address, phone number, or registration/org number.
 - "chat": anything else — answer briefly yourself (or say you can't do that yet) in "reply". Keep
@@ -8716,8 +8740,24 @@ Respond with ONLY the JSON object, nothing else.`;
         return `Context: view=${activeView}${item ? `, item open: "${item['itemname(english)'] || ''}" (${item.BTKnumber})` : ', no item open'}.`;
     }
 
+    // Recent turns for the classifier's context (see AI_SYSTEM_PROMPT), read straight from the
+    // visible chat rather than kept as a separate log — whatever the user can see IS the history,
+    // so there's no separate state to keep in sync. "Thinking…"/other system rows are deliberately
+    // excluded (removed as soon as they resolve anyway, and not useful conversational content);
+    // an item-list card (.ai-msg-assistant) is included, so "pack the second one" can resolve
+    // against a list just shown. Must be captured BEFORE this turn's own message is appended.
+    // Each message is capped so one long list/reply can't balloon the prompt.
+    function aiRecentHistoryMessages(maxTurns) {
+        const nodes = Array.from(document.querySelectorAll('#ai-panel-messages .ai-msg-user, #ai-panel-messages .ai-msg-assistant'));
+        return nodes.slice(-(maxTurns * 2)).map(el => ({
+            role: el.classList.contains('ai-msg-user') ? 'user' : 'assistant',
+            content: el.textContent.trim().slice(0, 400),
+        }));
+    }
+
     async function aiHandleUtterance(text) {
         document.getElementById('ai-suggestions')?.remove();
+        const history = aiRecentHistoryMessages(3); // captured before this turn's own message below
         aiAppendMessage('user', text);
         if (aiHasApiKey === null) await aiRefreshKeyStatus();
         if (!aiHasApiKey) {
@@ -8732,6 +8772,7 @@ Respond with ONLY the JSON object, nothing else.`;
                 reasoningEffort: 'low',
                 messages: [
                     { role: 'system', content: AI_SYSTEM_PROMPT },
+                    ...history,
                     { role: 'user', content: `${aiBuildContextLine()}\n\nInstruction: ${text}` },
                 ],
             });
@@ -8748,6 +8789,8 @@ Respond with ONLY the JSON object, nothing else.`;
         if (reply.action === 'web_search') { await aiHandleWebSearch(reply.query); return; }
         if (reply.action === 'pack_order') { await aiHandlePackOrderRequest(reply.text || text); return; }
         if (reply.action === 'list_items') { aiHandleListItems(reply.query); return; }
+        if (reply.action === 'list_kit_items') { aiHandleListKitItems(reply.query); return; }
+        if (reply.action === 'low_stock_items') { aiHandleLowStockItems(); return; }
         if (reply.action === 'chat' || !reply.action) { aiAppendMessage('assistant', reply.reply || "I'm not sure how to help with that yet — try asking me to find an item, list items from a manufacturer, pack a kit, or (with an item open) change one of its fields."); return; }
 
         const built = aiBuildPendingAction(reply);
@@ -9106,25 +9149,55 @@ Respond with ONLY the JSON object, nothing else.`;
         const q = query.toLowerCase().trim();
         const matches = globalInventory.filter(item => itemMatchesQuery(item, q));
         if (!matches.length) { aiAppendMessage('assistant', `I couldn't find any items matching "${query}".`); return; }
-        aiRenderItemListMessage(query, matches);
+        const entries = matches.map(item => ({
+            btk: item.BTKnumber,
+            name: item['itemname(english)'] || item.BTKnumber,
+            meta: [(item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : null, item.BTKnumber].filter(Boolean).join(' · '),
+        }));
+        aiRenderItemListMessage(`Found ${matches.length} item${matches.length === 1 ? '' : 's'} matching "${query}":`, entries);
     }
 
-    function aiRenderItemListMessage(query, matches) {
-        const shown = matches.slice(0, AI_LIST_ITEMS_LIMIT);
-        const rows = shown.map(item => {
-            const name = escapeHtml(item['itemname(english)'] || item.BTKnumber);
-            const mfr = (item.Manufacturer && item.Manufacturer !== 'None') ? escapeHtml(item.Manufacturer) : '';
-            const btk = escapeHtml(item.BTKnumber);
-            return `<div class="ai-list-item" onclick="aiOpenListedItem('${btk}')">
-                <div class="ai-list-item-name">${name}</div>
-                <div class="ai-list-item-meta">${mfr ? mfr + ' · ' : ''}${btk}</div>
-            </div>`;
-        }).join('');
-        const more = matches.length > shown.length
-            ? `<div class="ai-list-item-more">+${matches.length - shown.length} more — try a more specific search.</div>` : '';
+    // "what's in the 310 kit" — see the recipe without starting a Pack Order from it.
+    function aiHandleListKitItems(query) {
+        if (!query || !query.trim()) { aiAppendMessage('assistant', "Which kit?"); return; }
+        const match = aiFuzzyFindKit(query);
+        if (!match) { aiAppendMessage('assistant', `I couldn't find a kit matching "${query}" — check the name and try again.`); return; }
+        const kit = match.kit;
+        const btks = Object.keys(kit.items || {}).filter(b => kit.items[b] > 0);
+        if (!btks.length) { aiAppendMessage('assistant', `"${kit.name}" doesn't have any items in it.`); return; }
+        const entries = btks.map(b => {
+            const it = globalInventory.find(i => i.BTKnumber === b);
+            return { btk: b, name: it ? (it['itemname(english)'] || b) : b, meta: `${kit.items[b]}x in this kit` };
+        });
+        aiRenderItemListMessage(`"${kit.name}" contains ${btks.length} item${btks.length === 1 ? '' : 's'}:`, entries);
+    }
+
+    // "what needs reordering" — isLowStock() is the same check the ⚠️ badge in the item list/item
+    // view uses (a per-item ReorderThreshold if one is set, else the global Settings toggle+value),
+    // so this always matches what's actually flagged elsewhere in the app, nothing extra.
+    function aiHandleLowStockItems() {
+        const matches = globalInventory.filter(isLowStock);
+        if (!matches.length) { aiAppendMessage('assistant', "Nothing looks low on stock right now."); return; }
+        const entries = matches.map(item => ({
+            btk: item.BTKnumber,
+            name: item['itemname(english)'] || item.BTKnumber,
+            meta: `${item.Numberofitems || 0} ${item.UnitType || 'st'} left`,
+        }));
+        aiRenderItemListMessage(`${matches.length} item${matches.length === 1 ? '' : 's'} low on stock:`, entries);
+    }
+
+    // Shared by all three "show several items" handlers above — entries: [{btk, name, meta}].
+    function aiRenderItemListMessage(headerText, entries) {
+        const shown = entries.slice(0, AI_LIST_ITEMS_LIMIT);
+        const rows = shown.map(e => `<div class="ai-list-item" onclick="aiOpenListedItem('${escapeHtml(e.btk)}')">
+            <div class="ai-list-item-name">${escapeHtml(e.name)}</div>
+            <div class="ai-list-item-meta">${escapeHtml(e.meta || '')}</div>
+        </div>`).join('');
+        const more = entries.length > shown.length
+            ? `<div class="ai-list-item-more">+${entries.length - shown.length} more — try a more specific search.</div>` : '';
         const card = document.createElement('div');
         card.className = 'ai-msg ai-msg-assistant ai-item-list';
-        card.innerHTML = `<div>Found ${matches.length} item${matches.length === 1 ? '' : 's'} matching "${escapeHtml(query)}":</div>${rows}${more}`;
+        card.innerHTML = `<div>${escapeHtml(headerText)}</div>${rows}${more}`;
         document.getElementById('ai-panel-messages').appendChild(card);
         card.scrollIntoView({ block: 'end' });
     }
