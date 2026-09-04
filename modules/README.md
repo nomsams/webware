@@ -2,11 +2,13 @@
 
 Standalone JS building blocks for functionality discussed for the app. Most of these aren't
 imported by `index.html` yet — nothing changes until a module is deliberately wired in — except
-**`perspective-warp.js`**, **`groq-client.js`**, **`cors-proxy.js`**, and **`web-search.js`**,
-which are (via the `<script type="module">` bridge near the end of `index.html`, since the rest of
-the app is one classic script) — they back the 🤖 AI Assistant chat bubble (see the README's
-Features list). `order-parser.js`, `img-square.js`, `contacts.js`, and `email-sender.js` remain
-unwired. Each file has a `STATUS:` header comment saying which. Run all tests with:
+**`perspective-warp.js`**, **`groq-client.js`**, **`cors-proxy.js`**, **`web-search.js`**,
+**`order-parser.js`**, and **`contacts.js`**, which are (via the `<script type="module">` bridge
+near the end of `index.html`, since the rest of the app is one classic script) — the first four
+back the 🤖 AI Assistant chat bubble, `order-parser.js` backs its natural-language Pack Order
+action, and `contacts.js` backs the Saved Recipients picker on the Pack Order screen (see the
+README's Features list for all three). `img-square.js` and `email-sender.js` remain unwired. Each
+file has a `STATUS:` header comment saying which. Run all tests with:
 
 ```bash
 node --test modules/tests/*.test.js
@@ -44,35 +46,42 @@ node --test modules/tests/*.test.js
   `github.com/nomsams/crawly` (the text extraction). Depends on `cors-proxy.js`. Backs the AI
   Assistant's web-search action, as `window.duckySearch`/`window.crawly` — bounded to one search
   page and one page fetch each, no pagination or recursive crawling.
-- **`order-parser.js`** — the actual feature behind "a box where we can write or paste something
-  like 'plocka item 1 and item 2...'": turns free text into a structured
-  `{ items, recipient, from }` pack-order draft via `groq-client.js`. Each item reference is
-  resolved to a real BTK + quantity in order: an exact match against a pre-loaded item list, a
-  bare BTK number used as-is, or a live database search via a caller-supplied
-  `searchItemCandidates(text)` function (scoped to the current warehouse), scored by
-  `bestCandidateMatch()` to find the closest hit. Optionally uses `web-search.js` to look up a
-  recipient's address when the text names them but doesn't give one. `fromAddress` is passed
-  straight through (it's the app's own known data — the warehouse's address — not something to
-  infer from free text).
+- **`order-parser.js`** — **wired in**, as the AI Assistant's `pack_order` action (alongside
+  `pack_kit`, for a single named kit): "pack 2 bolts and 1 gasket for Anna Andersson, look up her
+  address" turns into a structured `{ items, recipient, from }` pack-order draft via
+  `groq-client.js`. Each item reference is resolved to a real BTK + quantity in order: an exact
+  match against the currently loaded item list, a bare BTK number used as-is, or (in index.html)
+  `aiFuzzyFindItem()` — the same fuzzy matcher `search_item`/`pack_kit` use — as
+  `searchItemCandidates`, scored by `bestCandidateMatch()` to find the closest hit. This works
+  offline too, since it's scored against the already-loaded catalog rather than a live query.
+  Recipient address lookup is wired to `web-search.js` (`window.duckySearch`/`window.crawly`) —
+  the same DuckDuckGo path the assistant's own `web_search` action uses — so a named recipient
+  with no address gets one searched for automatically. `fromAddress` is the current warehouse's
+  own name/address (via `getWarehouseMeta()`), not inferred from the text.
 
   **Multi-warehouse handling**: orders are already single-warehouse (`orders.warehouse_id`) and,
   per the user, pack orders are only ever sent from one warehouse at a time — so item resolution
-  deliberately never crosses warehouses; `searchItemCandidates` should always filter
-  `.eq('warehouse_id', currentWarehouseId)`. The same physical product existing as a separate row
-  in another warehouse is still visible, though: an optional `searchOtherWarehouses(text)`
-  callback (querying `.neq('warehouse_id', currentWarehouseId)`) attaches a non-blocking
-  `elsewhere: { btk, name, warehouseId, quantity }` note to an otherwise-unresolved item — e.g.
-  "not here, but 12 in Warehouse 2" — for a human to act on, never an automatic substitution. No
-  schema change was needed for this: items already carry `manufacturer` + `itemnumber` (the
-  manufacturer's own part number), which is what actually identifies "the same product" across
-  warehouses if you want to match on that instead of by name.
+  deliberately never crosses warehouses; index.html's `searchItemCandidates` only ever looks at
+  `globalInventory` for the currently open warehouse. The module also accepts an optional
+  `searchOtherWarehouses(text)` callback (querying `.neq('warehouse_id', currentWarehouseId)`) that
+  would attach a non-blocking `elsewhere: { btk, name, warehouseId, quantity }` note to an
+  otherwise-unresolved item — e.g. "not here, but 12 in Warehouse 2" — for a human to act on, never
+  an automatic substitution; **not currently wired from index.html** (would need a live
+  cross-warehouse Supabase query, which the static/offline warehouses can't do anyway), so an
+  unresolved item today just stays unresolved for the user to fix by hand. No schema change is
+  needed to add it later: items already carry `manufacturer` + `itemnumber` (the manufacturer's own
+  part number), which is what actually identifies "the same product" across warehouses if you want
+  to match on that instead of by name.
 - **`img-square.js`** — pads an image to a square, filling the new space with a solid color or a
   color sampled from the image's own edges. Ported from `github.com/nomsams/imgsquare`. Intended
   to slot into the existing item-photo/manufacturer-logo canvas editor as an extra step.
-- **`contacts.js`** — minimal hand-rolled vCard (`.vcf`) parse/export, same approach as
-  `github.com/nomsams/contactview`. Intended for a future "saved recipients" picker on Pack
-  Order — import contacts from a phone's exported `.vcf`, pick one to fill the recipient fields.
-  contactview's autosave (plain `localStorage`) and "Google Calendar sync" (turned out to be a
+- **`contacts.js`** — **wired in**, as the Saved Recipients picker on the Pack Order screen: minimal
+  hand-rolled vCard (`.vcf`) parse/export, same approach as `github.com/nomsams/contactview`.
+  `window.parseVCardFile`/`window.generateVCard` import a phone-exported `.vcf` (adding/updating
+  recipients by name) and export one saved recipient back out; the saved list itself is plain
+  `{name, address}` objects in `localStorage` (`webware-saved-recipients`, per-device, never
+  synced), not vCard text, so the picker doesn't need to reparse on every open. contactview's
+  autosave (plain `localStorage`) and "Google Calendar sync" (turned out to be a
   `calendar.google.com` deep link / `.ics` download, not a real API integration) weren't ported —
   neither is more than a few lines to add directly wherever this ends up wired in, if wanted.
 - **`email-sender.js`** + **`../supabase/functions/send-email/index.ts`** — sends email via SMTP

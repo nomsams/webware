@@ -9,6 +9,10 @@
     <!-- External Libraries (CryptoJS removed — native WebCrypto used instead) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
+    <!-- QR-only camera-scan fallback for browsers without the native BarcodeDetector API (Safari,
+         Firefox) — see the SCANNER section for how the two are chosen between. Not on cdnjs, so
+         served from jsDelivr's npm mirror instead (unlike the other libraries on this list). -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js" crossorigin="anonymous"></script>
 
@@ -367,6 +371,11 @@
 
         /* --- EMPTY STATE --- */
         .empty-state { text-align: center; padding: 3rem 1rem; color: var(--text-muted); }
+        .dashboard-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+        .dashboard-stat-card { background: var(--background); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+        .dashboard-stat-card .stat-value { font-size: 1.6rem; font-weight: 800; color: var(--primary); line-height: 1.1; }
+        .dashboard-stat-card .stat-value.warn { color: var(--danger); }
+        .dashboard-stat-card .stat-label { font-size: 0.76rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; margin-top: 4px; }
         .empty-state svg { width: 64px; height: 64px; margin-bottom: 1rem; opacity: 0.5; color: var(--text-muted); }
 
         /* --- SETTINGS --- */
@@ -591,6 +600,57 @@
         <div id="backorder-report-list-container" style="max-height:55vh; overflow-y:auto;">Loading…</div>
         <div class="modal-actions">
             <button class="secondary full-width" onclick="closeBackorderReportModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Pack Order History (editor/maintainer/admin, Supabase mode only) -->
+<div class="modal-overlay" id="pack-order-history-modal" onclick="handlePackOrderHistoryModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:680px;">
+        <h3>🧾 Pack Order History</h3>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem;">Every order saved from Pack Order in this warehouse, most recent first.</p>
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:1rem;">
+            <label for="poh-status-filter" style="margin:0; font-size:0.8rem; font-weight:600; color:var(--text-muted);">Status</label>
+            <select id="poh-status-filter" onchange="renderPackOrderHistoryList()" style="margin:0; width:auto; padding:6px 10px; min-height:unset; font-size:0.8rem;">
+                <option value="">All</option>
+                <option value="open">Open</option>
+                <option value="fulfilled">Fulfilled</option>
+            </select>
+        </div>
+        <div id="pack-order-history-list-container" style="max-height:55vh; overflow-y:auto;">Loading…</div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closePackOrderHistoryModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Saved Recipients (Pack Order) — stored in this browser only (localStorage), same as a
+     phone's own contact list; import from a .vcf via the button on the Pack Order view. -->
+<div class="modal-overlay" id="saved-recipients-modal" onclick="handleSavedRecipientsModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:560px;">
+        <h3>📇 Saved Recipients</h3>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">Stored on this device only. Tap one to fill the recipient fields.</p>
+        <div id="saved-recipients-list-container" style="max-height:50vh; overflow-y:auto;"></div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeSavedRecipientsModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Barcode/QR Scanner — device camera. Two modes (see openBarcodeScanner): "open" (single scan,
+     opens the matched item and closes) and "pack" (keeps scanning, adding each match to the
+     current Pack Order — for working through a shelf of boxes quickly). -->
+<div class="modal-overlay" id="scanner-modal" onclick="handleScannerModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:420px;">
+        <h3 id="scanner-modal-title">📷 Scan</h3>
+        <div style="position:relative; background:#000; border-radius:10px; overflow:hidden; aspect-ratio:1;">
+            <video id="scanner-video" playsinline muted style="width:100%; height:100%; object-fit:cover; display:block;"></video>
+            <div style="position:absolute; inset:12%; border:2px solid rgba(255,255,255,0.6); border-radius:10px; pointer-events:none;"></div>
+        </div>
+        <p id="scanner-status" style="color:var(--text-muted); font-size:0.85rem; margin-top:0.75rem; min-height:1.2em;">Point the camera at a barcode or QR code.</p>
+        <div id="scanner-last-result" class="hidden" style="margin-top:0.25rem; font-size:0.85rem;"></div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeBarcodeScanner()">Close</button>
         </div>
     </div>
 </div>
@@ -844,6 +904,12 @@
         </button>
         <button class="icon-btn" id="btn-inventering" onclick="openInventeringSetup()" aria-label="Stocktaking" title="Stocktaking">
             📋
+        </button>
+        <button class="icon-btn hidden" id="btn-dashboard" onclick="openDashboardView()" aria-label="Dashboard" title="Dashboard">
+            📊
+        </button>
+        <button class="icon-btn" id="btn-scan" onclick="openBarcodeScanner('open')" aria-label="Scan Barcode or QR" title="Scan">
+            📷
         </button>
         <button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle Dark Mode" title="Toggle Theme">
             <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
@@ -1124,6 +1190,7 @@
     <section id="pack-order-view" class="card hidden">
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
             <button class="secondary" onclick="closePackOrderView()">← Back</button>
+            <button class="secondary" id="btn-pack-order-scan" onclick="openBarcodeScanner('pack')" style="flex-shrink:0;">📷 Scan to Add</button>
             <button class="secondary" id="btn-pack-order-edit" onclick="togglePackOrderEditMode()" style="flex-shrink:0;">✏️ Edit Order</button>
             <button class="secondary" onclick="printPackOrder()" style="flex-shrink:0;" title="Print (or Save as PDF) on A4">🖨️ Print</button>
             <button class="secondary" onclick="clearPackOrder()" style="color:var(--danger); flex-shrink:0;">🗑️ Clear Order</button>
@@ -1166,6 +1233,12 @@
             <input type="text" id="pack-order-recipient-name" placeholder="Person's name" oninput="onPackRecipientInput()">
             <label class="modal-label" for="pack-order-recipient-address" style="margin-top:0.5rem;">Address</label>
             <textarea id="pack-order-recipient-address" placeholder="Street, city, postal code, country..." oninput="onPackRecipientInput()"></textarea>
+            <div style="display:flex; gap:8px; margin-top:0.5rem; flex-wrap:wrap;">
+                <button type="button" class="secondary" onclick="openSavedRecipientsModal()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📇 Saved Recipients</button>
+                <button type="button" class="secondary" onclick="saveCurrentRecipient()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">💾 Save This Recipient</button>
+                <button type="button" class="secondary" onclick="document.getElementById('vcard-file-input').click()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📥 Import .vcf</button>
+                <input type="file" id="vcard-file-input" accept=".vcf,text/vcard" class="hidden" onchange="handleVCardFileSelected(event)">
+            </div>
         </div>
 
         <button class="full-width hidden" id="btn-save-pack-order" onclick="savePackOrder()" style="margin-top:0.5rem;">💾 Save Order</button>
@@ -1274,6 +1347,16 @@
         </div>
     </section>
 
+    <!-- Dashboard (optional, off by default — turned on from Settings) -->
+    <section id="dashboard-view" class="card hidden">
+        <div class="list-header">
+            <h2 style="margin:0;">📊 Dashboard</h2>
+            <button class="secondary" onclick="closeDashboardView()" style="padding:0.5rem 1rem; min-height:38px; font-size:0.9rem;">✕ Close</button>
+        </div>
+        <div id="dashboard-stats-grid" class="dashboard-stats-grid"></div>
+        <div id="dashboard-quicklinks" style="margin-top:1.5rem; display:flex; flex-wrap:wrap; gap:8px;"></div>
+    </section>
+
     <!-- View 5: Settings -->
     <section id="settings-view" class="card hidden">
         <h2 style="margin-bottom: 1.5rem;">App Settings</h2>
@@ -1300,6 +1383,14 @@
             <p class="setting-desc">Off by default. When on, items below the threshold get a ⚠️ badge in the list and item view.</p>
         </div>
 
+        <div class="setting-row">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="dashboard-enabled" onchange="onDashboardSettingChange()" style="width:auto; min-height:unset; margin:0;">
+                📊 Dashboard
+            </label>
+            <p class="setting-desc">Off by default. When on, a 📊 button appears in the header with an at-a-glance view of stock, kits, and (in Supabase mode) open orders.</p>
+        </div>
+
         <div class="setting-row" id="storage-usage-row">
             <label>Image Storage (Supabase)</label>
             <div style="background:var(--border); border-radius:8px; height:10px; overflow:hidden; margin-bottom:6px;">
@@ -1319,6 +1410,7 @@
         <button class="secondary full-width hidden" id="btn-manage-warehouses" onclick="openManageWarehousesModal()" style="margin-bottom:1rem;">🏬 Manage Warehouses</button>
         <button class="secondary full-width hidden" id="btn-activity-log" onclick="openActivityLogModal()" style="margin-bottom:1rem;">📜 Activity Log</button>
         <button class="secondary full-width hidden" id="btn-backorder-report" onclick="openBackorderReportModal()" style="margin-bottom:1rem;">📋 Backorder Report</button>
+        <button class="secondary full-width hidden" id="btn-pack-order-history" onclick="openPackOrderHistoryModal()" style="margin-bottom:1rem;">🧾 Pack Order History</button>
 
         <div class="setting-row">
             <label>🔑 Your Personal Groq API Key (optional)</label>
@@ -1428,6 +1520,7 @@
     var labelWide68Height = 28; // mm — the adjustable dimension for the wide68 paper type
     var lowStockEnabled = false; // off by default — opt-in via Settings
     var lowStockThreshold = 5;
+    var dashboardEnabled = false; // off by default — opt-in via Settings
     var manufacturerFilter = ''; // list-view filter — derived options, not a separate table
     var globalManufacturers = []; // Supabase-mode only — global (not warehouse-scoped) entity list
     var currentManufacturerId = null;
@@ -1845,6 +1938,182 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     // ════════════════════════════════════════════════════════════════════════
+    //  BARCODE/QR SCANNER (device camera) — the inverse of the label QR codes generated above:
+    //  those encode #<compressed>/<warehouseId> deep links, so scanning one of webware's own
+    //  printed labels resolves straight back to the item without a round trip through the URL bar.
+    //  A code that ISN'T one of ours (a real manufacturer EAN/UPC barcode, printed on the box) is
+    //  matched by exact BTK, then exact itemnumber/itemnumber2/itemnumber3 — the fields those
+    //  barcodes actually get stored in.
+    //
+    //  Two modes (openBarcodeScanner(mode)):
+    //    'open' — single scan: resolves, opens the item, closes the scanner. Header 📷 button.
+    //    'pack' — stays open, adds each match to the live Pack Order (bumping qty on a repeat
+    //             scan) so a whole shelf can be scanned in a row. Pack Order view's own button.
+    //
+    //  Prefers the native BarcodeDetector API (Chrome/Edge/Android — zero dependencies, decodes
+    //  both QR and common 1D formats) and falls back to jsQR (QR-only, works everywhere else,
+    //  including Safari/Firefox which don't implement BarcodeDetector) — see the <script> tag
+    //  near the top of <head>. If neither is available, the header button is hidden entirely at
+    //  startup (see window.onload) rather than offered as something that can only fail.
+    // ════════════════════════════════════════════════════════════════════════
+    var scannerStream = null;
+    var scannerMode = 'open';
+    var scannerRafId = null;
+    var scannerDetector = null; // native BarcodeDetector instance, when supported
+    var scannerCanvas = null;   // offscreen canvas used only by the jsQR fallback
+    var scannerBusy = false;    // guards against overlapping detect() calls (it's async)
+    var scannerLastCode = null;
+    var scannerLastCodeAt = 0;
+    const SCANNER_DEBOUNCE_MS = 2500; // ignore the same code again this soon (held steady in frame)
+    const SCANNER_BARCODE_FORMATS = ['qr_code', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'codabar'];
+
+    function openBarcodeScanner(mode) {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            showToast("Camera scanning isn't supported in this browser.", "warning");
+            return;
+        }
+        scannerMode = mode;
+        scannerLastCode = null;
+        scannerLastCodeAt = 0;
+        document.getElementById('scanner-modal-title').textContent = mode === 'pack' ? '📷 Scan to Add' : '📷 Scan';
+        scannerShowStatus('Starting camera…', false);
+        document.getElementById('scanner-modal').classList.add('open');
+        startScannerCamera();
+    }
+
+    function closeBarcodeScanner() {
+        document.getElementById('scanner-modal').classList.remove('open');
+        stopScannerCamera();
+    }
+    function handleScannerModalOverlayClick(e) { if (e.target === document.getElementById('scanner-modal')) closeBarcodeScanner(); }
+
+    function scannerShowStatus(msg, isError) {
+        const el = document.getElementById('scanner-status');
+        if (!el) return;
+        el.textContent = msg;
+        el.style.color = isError ? 'var(--danger)' : '';
+    }
+
+    function stopScannerCamera() {
+        if (scannerRafId) { cancelAnimationFrame(scannerRafId); scannerRafId = null; }
+        if (scannerStream) { scannerStream.getTracks().forEach(t => t.stop()); scannerStream = null; }
+        scannerDetector = null;
+        scannerBusy = false;
+        const video = document.getElementById('scanner-video');
+        if (video) video.srcObject = null;
+    }
+
+    async function startScannerCamera() {
+        try {
+            scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        } catch (e) {
+            scannerShowStatus("Couldn't access the camera — check permissions and try again.", true);
+            console.error("Scanner camera error:", e);
+            return;
+        }
+        const video = document.getElementById('scanner-video');
+        video.srcObject = scannerStream;
+        await video.play();
+
+        if (window.BarcodeDetector) {
+            try {
+                const supported = await BarcodeDetector.getSupportedFormats();
+                const formats = SCANNER_BARCODE_FORMATS.filter(f => supported.includes(f));
+                scannerDetector = new BarcodeDetector({ formats: formats.length ? formats : undefined });
+            } catch (e) { scannerDetector = null; }
+        }
+        if (!scannerDetector && typeof jsQR !== 'function') {
+            scannerShowStatus("This browser can't scan in-page — use your phone's own camera app on a printed label instead.", true);
+            return;
+        }
+        scannerShowStatus('Point the camera at a barcode or QR code.', false);
+        scannerTick();
+    }
+
+    function scannerTick() {
+        scannerRafId = requestAnimationFrame(scannerTick);
+        const video = document.getElementById('scanner-video');
+        if (!video || video.readyState < 2) return;
+
+        if (scannerDetector) {
+            if (scannerBusy) return;
+            scannerBusy = true;
+            scannerDetector.detect(video)
+                .then(codes => { scannerBusy = false; if (codes && codes.length) onScannerCodeDetected(codes[0].rawValue); })
+                .catch(() => { scannerBusy = false; });
+            return;
+        }
+
+        // jsQR fallback: draw the current frame to an offscreen canvas (downscaled — full camera
+        // resolution makes per-frame decoding needlessly slow) and decode its raw pixels.
+        if (!video.videoWidth || !video.videoHeight) return;
+        const maxW = 480;
+        const scale = video.videoWidth > maxW ? maxW / video.videoWidth : 1;
+        const w = Math.round(video.videoWidth * scale), h = Math.round(video.videoHeight * scale);
+        if (!scannerCanvas) scannerCanvas = document.createElement('canvas');
+        scannerCanvas.width = w; scannerCanvas.height = h;
+        const ctx = scannerCanvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, w, h);
+        let imageData;
+        try { imageData = ctx.getImageData(0, 0, w, h); } catch (e) { return; }
+        const result = jsQR(imageData.data, w, h);
+        if (result && result.data) onScannerCodeDetected(result.data);
+    }
+
+    async function onScannerCodeDetected(raw) {
+        const code = (raw || '').trim();
+        if (!code) return;
+        const now = Date.now();
+        if (code === scannerLastCode && now - scannerLastCodeAt < SCANNER_DEBOUNCE_MS) return;
+        scannerLastCode = code;
+        scannerLastCodeAt = now;
+
+        // Our own printed label encodes a deep link (#<compressed>/<warehouseId>, see the QR label
+        // generator) — decode that directly instead of treating it as an opaque barcode value.
+        let btk = null;
+        if (code.toLowerCase().startsWith(BASE_URL.toLowerCase() + '#')) {
+            const parts = code.slice(BASE_URL.length + 1).split('/');
+            if (parts.length === 2) {
+                const [compressed, wid] = parts;
+                if (String(wid).toLowerCase() === String(currentWarehouseId).toLowerCase()) {
+                    btk = decompressId(compressed);
+                    if (!globalInventory.find(i => i.BTKnumber === btk)) btk = null;
+                } else if (scannerMode === 'open') {
+                    closeBarcodeScanner();
+                    await itemRoute(compressed, wid);
+                    return;
+                } else {
+                    scannerShowStatus(`That label is from a different warehouse (${wid}) — switch warehouses first.`, true);
+                    return;
+                }
+            }
+        }
+
+        if (!btk) {
+            const upper = code.toUpperCase();
+            const item = globalInventory.find(i => (i.BTKnumber || '').toUpperCase() === upper)
+                || globalInventory.find(i => [i.itemnumber, i.itemnumber2, i.itemnumber3].some(n => n && n !== 'None' && String(n).trim().toUpperCase() === upper));
+            btk = item ? item.BTKnumber : null;
+        }
+
+        if (!btk) { scannerShowStatus(`No item found for "${code}".`, true); return; }
+
+        const item = globalInventory.find(i => i.BTKnumber === btk);
+        const name = item ? (item['itemname(english)'] || btk) : btk;
+
+        if (scannerMode === 'pack') {
+            const existing = packOrder.find(o => o.btk === btk);
+            if (existing) existing.qty += 1; else packOrder.push({ btk, qty: 1, packed: false });
+            updatePackOrderBadge();
+            renderPackOrderItems();
+            scannerShowStatus(`✅ Added "${name}" — scan another, or Close when done.`, false);
+        } else {
+            closeBarcodeScanner();
+            openItem(btk, { type: 'global' });
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     //  SUPABASE — row <-> app-shape conversion, session/list/item loading
     // ════════════════════════════════════════════════════════════════════════
     function supabaseRowToItem(row) {
@@ -2211,6 +2480,82 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 ${rows}
             </div>`;
         }).join('');
+    }
+
+    // ── Pack Order History — every saved order (any status), not just backordered ones. Same
+    // table/query shape as the Backorder Report above; "Reload" copies a past order's lines,
+    // recipient, and box info back into the live (session-local) packOrder so it can be resumed,
+    // reprinted, or re-finalized without retyping anything.
+    var packOrderHistoryCache = [];
+    function openPackOrderHistoryModal() {
+        if (!canEditItems()) { showToast("Editor or admin only.", "warning"); return; }
+        document.getElementById('pack-order-history-modal').classList.add('open');
+        renderPackOrderHistoryList();
+    }
+    function closePackOrderHistoryModal() { document.getElementById('pack-order-history-modal').classList.remove('open'); }
+    function handlePackOrderHistoryModalOverlayClick(e) { if (e.target === document.getElementById('pack-order-history-modal')) closePackOrderHistoryModal(); }
+
+    async function renderPackOrderHistoryList() {
+        const container = document.getElementById('pack-order-history-list-container');
+        container.innerHTML = 'Loading…';
+        const { data, error } = await sb.from('orders')
+            .select('*')
+            .eq('warehouse_id', currentWarehouseId)
+            .order('created_at', { ascending: false })
+            .limit(200);
+        if (error) { container.innerHTML = `<p style="color:var(--danger);">Could not load orders: ${escapeHtml(error.message)}</p>`; return; }
+        packOrderHistoryCache = data || [];
+
+        const filter = document.getElementById('poh-status-filter').value;
+        const filtered = filter ? packOrderHistoryCache.filter(o => o.status === filter) : packOrderHistoryCache;
+        if (!filtered.length) { container.innerHTML = `<p style="color:var(--text-muted);">No orders${filter ? ` with status "${escapeHtml(filter)}"` : ''} yet.</p>`; return; }
+
+        const userIds = Array.from(new Set(filtered.map(o => o.created_by).filter(Boolean)));
+        const names = {};
+        await Promise.all(userIds.map(async id => { names[id] = await resolveDisplayName(id); }));
+
+        container.innerHTML = filtered.map(order => {
+            const lines = order.items || [];
+            const who = order.created_by ? (names[order.created_by] || 'Someone') : 'Unknown';
+            const when = new Date(order.created_at).toLocaleString();
+            const statusBadge = order.status === 'fulfilled'
+                ? `<span style="color:var(--success); font-weight:600;">✅ Fulfilled</span>`
+                : `<span style="color:var(--text-muted); font-weight:600;">🕐 Open</span>`;
+            return `<div style="padding:10px 0; border-bottom:1px solid var(--border);">
+                <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start; flex-wrap:wrap;">
+                    <div>
+                        <div style="font-weight:700;">${escapeHtml(order.order_number)} <span style="font-size:0.78rem;">${statusBadge}</span></div>
+                        <div style="color:var(--text-muted); font-size:0.8rem; margin-top:2px;">${order.recipient_name ? escapeHtml(order.recipient_name) + ' · ' : ''}${lines.length} item${lines.length === 1 ? '' : 's'} · ${escapeHtml(who)} · ${when}</div>
+                    </div>
+                    <button class="secondary" onclick="reloadSavedOrderIntoPackOrder('${escapeHtml(order.order_number)}')" style="padding:4px 10px; min-height:auto; font-size:0.78rem; flex-shrink:0;">🔁 Reload</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function reloadSavedOrderIntoPackOrder(orderNumber) {
+        const order = packOrderHistoryCache.find(o => o.order_number === orderNumber);
+        if (!order) return;
+        const doReload = () => {
+            packOrder = (order.items || []).map(l => ({ btk: l.btk, qty: l.qty, packed: !!l.packed }));
+            packOrderRecipient = { name: order.recipient_name || '', address: order.recipient_address || '' };
+            packOrderBox = { preset: '', length: order.box_length || '', width: order.box_width || '', height: order.box_height || '', weight: order.box_weight || '' };
+            packOrderSavedNumber = order.order_number;
+            closePackOrderHistoryModal();
+            updatePackOrderBadge();
+            openPackOrderView();
+            showToast(`Reloaded ${order.order_number} into Pack Order.`, "success");
+        };
+        if (packOrder.length) {
+            showConfirmModal({
+                title: 'Replace current Pack Order?',
+                body: `This replaces the ${packOrder.length} item(s) currently in your Pack Order with ${order.order_number}'s ${(order.items || []).length} item(s).`,
+                confirmLabel: '🔁 Reload',
+                onConfirm: doReload
+            });
+        } else {
+            doReload();
+        }
     }
 
     // "Last updated by" — resolves via get_display_name() (their own chosen name, or their
@@ -2882,6 +3227,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         initTheme();
         initSettings();
         initImageEditorHandlers();
+        // No camera API at all (very old browser, or a non-secure context where getUserMedia is
+        // unavailable) -> hide the entry point instead of offering a button that can only fail.
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            document.getElementById('btn-scan').classList.add('hidden');
+            document.getElementById('btn-pack-order-scan').classList.add('hidden');
+        }
         await ensureDemoVault();
         window.addEventListener('hashchange', handleRoute);
         await handleRoute();
@@ -2972,7 +3323,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function switchView(viewId) {
-        ['auth-view','list-view','item-view','kit-view','manufacturer-view','warehouse-view','pack-order-view','inventering-setup-view','inventering-view','preview-view','settings-view','merge-view','bin-locator-view'].forEach(v => {
+        ['auth-view','list-view','item-view','kit-view','manufacturer-view','warehouse-view','pack-order-view','inventering-setup-view','inventering-view','preview-view','settings-view','merge-view','bin-locator-view','dashboard-view'].forEach(v => {
             document.getElementById(v).classList.add('hidden');
         });
         document.getElementById(viewId).classList.remove('hidden');
@@ -5161,6 +5512,114 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         packOrderRecipient.address = document.getElementById('pack-order-recipient-address').value;
     }
 
+    // ── Saved Recipients — a small address book for Pack Order, stored in this browser only
+    // (localStorage, never synced — same trust model as the draft/theme/etc. keys already there).
+    // Backed by modules/contacts.js for .vcf import/export; the list itself is just plain objects,
+    // not vCard text, so it's cheap to read/render without re-parsing on every open.
+    const LS_SAVED_RECIPIENTS = 'webware-saved-recipients';
+    function getSavedRecipients() {
+        try { return JSON.parse(localStorage.getItem(LS_SAVED_RECIPIENTS) || '[]'); }
+        catch { return []; }
+    }
+    function setSavedRecipients(list) {
+        try { localStorage.setItem(LS_SAVED_RECIPIENTS, JSON.stringify(list)); } catch { /* storage unavailable/full — silently skip */ }
+    }
+    function openSavedRecipientsModal() {
+        document.getElementById('saved-recipients-modal').classList.add('open');
+        renderSavedRecipientsList();
+    }
+    function closeSavedRecipientsModal() { document.getElementById('saved-recipients-modal').classList.remove('open'); }
+    function handleSavedRecipientsModalOverlayClick(e) { if (e.target === document.getElementById('saved-recipients-modal')) closeSavedRecipientsModal(); }
+
+    function renderSavedRecipientsList() {
+        const container = document.getElementById('saved-recipients-list-container');
+        const recipients = getSavedRecipients();
+        if (!recipients.length) {
+            container.innerHTML = `<p style="color:var(--text-muted);">No saved recipients yet — save one from the Pack Order screen, or import a .vcf file.</p>`;
+            return;
+        }
+        container.innerHTML = recipients.map((r, i) => `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; padding:10px 0; border-bottom:1px solid var(--border);">
+                <div style="cursor:pointer; flex:1; min-width:0;" onclick="pickSavedRecipient(${i})">
+                    <div style="font-weight:700;">${escapeHtml(r.name || 'Unnamed')}</div>
+                    ${r.address ? `<div style="color:var(--text-muted); font-size:0.82rem; white-space:pre-line;">${escapeHtml(r.address)}</div>` : ''}
+                </div>
+                <div style="display:flex; gap:6px; flex-shrink:0;">
+                    <button class="secondary" onclick="exportSavedRecipientVCard(${i})" title="Export as .vcf" style="padding:4px 8px; min-height:auto; font-size:0.78rem;">📤</button>
+                    <button class="secondary" onclick="deleteSavedRecipient(${i})" title="Delete" style="padding:4px 8px; min-height:auto; font-size:0.78rem; color:var(--danger);">🗑️</button>
+                </div>
+            </div>`).join('');
+    }
+
+    function pickSavedRecipient(i) {
+        const r = getSavedRecipients()[i];
+        if (!r) return;
+        packOrderRecipient = { name: r.name || '', address: r.address || '' };
+        syncPackOrderRecipientInputs();
+        closeSavedRecipientsModal();
+    }
+
+    function saveCurrentRecipient() {
+        const name = document.getElementById('pack-order-recipient-name').value.trim();
+        const address = document.getElementById('pack-order-recipient-address').value.trim();
+        if (!name) { showToast("Enter a recipient name first.", "warning"); return; }
+        const recipients = getSavedRecipients();
+        const existingIdx = recipients.findIndex(r => r.name.toLowerCase() === name.toLowerCase());
+        if (existingIdx >= 0) recipients[existingIdx] = { name, address };
+        else recipients.push({ name, address });
+        setSavedRecipients(recipients);
+        showToast(`Saved "${name}" to Saved Recipients.`, "success");
+    }
+
+    function deleteSavedRecipient(i) {
+        const recipients = getSavedRecipients();
+        recipients.splice(i, 1);
+        setSavedRecipients(recipients);
+        renderSavedRecipientsList();
+    }
+
+    function exportSavedRecipientVCard(i) {
+        const r = getSavedRecipients()[i];
+        if (!r || !window.generateVCard) return;
+        const vcard = window.generateVCard({ name: r.name, addressLines: r.address || '' });
+        const blob = new Blob([vcard], { type: 'text/vcard' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${r.name.replace(/[^a-z0-9]+/gi, '_') || 'contact'}.vcf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    // Imports every card in the chosen .vcf, adding new recipients and updating existing ones
+    // (matched by name — same rule saveCurrentRecipient() uses) rather than duplicating.
+    function handleVCardFileSelected(e) {
+        const file = e.target.files?.[0];
+        e.target.value = ''; // allow re-selecting the same file later
+        if (!file || !window.parseVCardFile) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            let cards;
+            try { cards = window.parseVCardFile(String(reader.result)); }
+            catch (err) { showToast("Could not parse that .vcf file: " + err.message, "error"); return; }
+            const withName = cards.filter(c => c.name);
+            if (!withName.length) { showToast("No contacts with a name found in that file.", "warning"); return; }
+            const recipients = getSavedRecipients();
+            withName.forEach(c => {
+                const address = (c.addresses && c.addresses[0]) ? c.addresses[0].value : '';
+                const idx = recipients.findIndex(r => r.name.toLowerCase() === c.name.toLowerCase());
+                if (idx >= 0) recipients[idx] = { name: c.name, address };
+                else recipients.push({ name: c.name, address });
+            });
+            setSavedRecipients(recipients);
+            showToast(`Imported ${withName.length} contact(s).`, "success", 5000);
+            renderSavedRecipientsList();
+        };
+        reader.readAsText(file);
+    }
+
     // Order numbers (ORDxxxxxx, same shape as BTK numbers) are generated server-side by a
     // sequence-backed column default — see supabase/schema_orders.sql — so there's no client-side
     // coordination or collision risk even with multiple people saving orders at once.
@@ -6525,6 +6984,54 @@ th { background: #eee; }
     var binLocatorSelectedDepth = null;
     var binLocatorSelectedLevel = null;
 
+    // ── Dashboard — optional (off by default, Settings → 📊 Dashboard), purely additive: doesn't
+    // change the default landing view or any existing navigation, just adds a reachable summary.
+    function openDashboardView() {
+        if (!requireAuth()) return;
+        if (activeView !== 'dashboard-view') previousView = activeView;
+        switchView('dashboard-view');
+        renderDashboard();
+    }
+    function closeDashboardView() { switchView(previousView || 'list-view'); }
+
+    async function renderDashboard() {
+        const grid = document.getElementById('dashboard-stats-grid');
+        grid.innerHTML = '<p style="color:var(--text-muted); grid-column:1/-1;">Loading…</p>';
+        const manufacturerCount = new Set(globalInventory.map(i => i.Manufacturer).filter(m => m && m !== 'None')).size;
+        const lowStockCount = globalInventory.filter(isLowStock).length;
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+
+        // Fetched (if applicable) before the grid is rendered once, rather than appended after the
+        // fact — avoids a duplicate card if the view is closed/reopened while this is in flight.
+        let openOrdersCount = null;
+        if (isSupa) {
+            const { count, error } = await sb.from('orders').select('id', { count: 'exact', head: true })
+                .eq('warehouse_id', currentWarehouseId).eq('status', 'open');
+            if (!error) openOrdersCount = count ?? 0;
+        }
+        if (activeView !== 'dashboard-view') return; // navigated away while the count was loading
+
+        const cards = [
+            { label: 'Items', value: globalInventory.length },
+            { label: 'Kits', value: globalKits.length },
+            { label: 'Manufacturers', value: manufacturerCount },
+        ];
+        if (lowStockEnabled) cards.push({ label: 'Low Stock', value: lowStockCount, warn: lowStockCount > 0 });
+        if (openOrdersCount !== null) cards.push({ label: 'Open Orders', value: openOrdersCount });
+        grid.innerHTML = cards.map(c => `<div class="dashboard-stat-card"><div class="stat-value${c.warn ? ' warn' : ''}">${c.value}</div><div class="stat-label">${escapeHtml(c.label)}</div></div>`).join('');
+
+        const links = [];
+        if (getAvailableZones().length) links.push({ label: '📍 Bin Locator', fn: 'openBinLocatorView()' });
+        if (isSupa && canEditItems()) {
+            links.push({ label: '📋 Backorder Report', fn: 'openBackorderReportModal()' });
+            links.push({ label: '🧾 Pack Order History', fn: 'openPackOrderHistoryModal()' });
+        }
+        if (isSupa && currentUserRole === 'admin') links.push({ label: '📜 Activity Log', fn: 'openActivityLogModal()' });
+        document.getElementById('dashboard-quicklinks').innerHTML = links.length
+            ? links.map(l => `<button class="secondary" onclick="${l.fn}" style="padding:0.5rem 1rem; min-height:38px; font-size:0.85rem;">${l.label}</button>`).join('')
+            : '';
+    }
+
     function openBinLocatorView() {
         if (!requireAuth()) return;
         const zones = getAvailableZones();
@@ -7702,12 +8209,24 @@ ${css}
         document.getElementById('lowstock-threshold').value = lowStockThreshold;
         document.getElementById('lowstock-threshold-row').classList.toggle('hidden', !lowStockEnabled);
 
+        dashboardEnabled = localStorage.getItem('dashboard-enabled') === '1';
+        document.getElementById('dashboard-enabled').checked = dashboardEnabled;
+        document.getElementById('btn-dashboard').classList.toggle('hidden', !dashboardEnabled);
+
         // The actual corsFetch() behavior is already applied at page load (see the module bridge
         // script, which reads this same key) — this just syncs the checkbox to match.
         document.getElementById('cors-public-fallback-enabled').checked = localStorage.getItem('cors-allow-public-fallback') === '1';
     }
     function onLowStockSettingChange() {
         document.getElementById('lowstock-threshold-row').classList.toggle('hidden', !document.getElementById('lowstock-enabled').checked);
+    }
+    // Applied immediately (not just on Save Settings) so turning it on/off shows/hides the header
+    // button right away — matching how the personal Groq key and low-stock badge already behave.
+    function onDashboardSettingChange() {
+        dashboardEnabled = document.getElementById('dashboard-enabled').checked;
+        localStorage.setItem('dashboard-enabled', dashboardEnabled ? '1' : '0');
+        document.getElementById('btn-dashboard').classList.toggle('hidden', !dashboardEnabled);
+        if (!dashboardEnabled && activeView === 'dashboard-view') switchView(previousView || 'list-view');
     }
     function onCorsPublicFallbackChange() {
         const enabled = document.getElementById('cors-public-fallback-enabled').checked;
@@ -7736,6 +8255,7 @@ ${css}
         document.getElementById('btn-manage-warehouses').classList.toggle('hidden', !(isSupa && isAdmin));
         document.getElementById('btn-activity-log').classList.toggle('hidden', !(isSupa && isAdmin));
         document.getElementById('btn-backorder-report').classList.toggle('hidden', !(isSupa && canEditItems()));
+        document.getElementById('btn-pack-order-history').classList.toggle('hidden', !(isSupa && canEditItems()));
         document.getElementById('display-name-row').classList.toggle('hidden', !isSupa);
         // Storage/database usage stats are admin-only — editors/maintainers/viewers don't need
         // (or, per the requested role model, shouldn't see) account-wide quota info.
@@ -7972,12 +8492,14 @@ ${css}
     const AI_SYSTEM_PROMPT = `You are an assistant embedded in a warehouse inventory app. The user gives a short instruction (voice-transcribed or typed), possibly in English, Swedish, or Finnish. Classify it into EXACTLY ONE JSON object, no prose, matching one of:
 {"action":"search_item","query":string}
 {"action":"pack_kit","query":string,"multiplier":number}
+{"action":"pack_order","text":string}
 {"action":"edit_field","field":"name_en"|"name_sv"|"manufacturer"|"itemnumber"|"itemnumber2"|"itemnumber3"|"quantity"|"unit_type"|"reorder_threshold"|"location"|"map_position"|"location_code"|"comments","value":string}
 {"action":"web_search","query":string}
 {"action":"chat","reply":string}
 Rules:
 - "search_item": user wants to find/open an item by name, number, or manufacturer.
-- "pack_kit": user wants to start/pack an order from a kit by name or number (e.g. "pack the kit for HANY IC310"). "multiplier" is how many times over to pack every item in the kit — 1 by default, or the number they said (e.g. "pack twice of everything" -> 2, "triple the kit" -> 3, "pack 4x IC310" -> 4).
+- "pack_kit": user wants to start/pack an order from ONE named kit (e.g. "pack the kit for HANY IC310"). "multiplier" is how many times over to pack every item in the kit — 1 by default, or the number they said (e.g. "pack twice of everything" -> 2, "triple the kit" -> 3, "pack 4x IC310" -> 4).
+- "pack_order": user describes a pack order as a list of items (not a single named kit) — by name, BTK, or "item N" — each with an optional quantity, and optionally a recipient to send it to (e.g. "pack 2 bolts and 1 gasket for Anna Andersson" or "send BTK000012 x3 to Acme AB, look up their address"). "text" is the instruction verbatim — it's parsed separately, so just copy it exactly.
 - "edit_field": ONLY when clearly asking to change one specific field's value on the item that's currently open (e.g. "change the item name to Grease sticks" -> field "name_en", value "Grease sticks").
 - "web_search": user asks a factual question that needs looking something up on the web.
 - "chat": anything else — answer briefly yourself (or say you can't do that yet) in "reply". Keep
@@ -8020,6 +8542,7 @@ Respond with ONLY the JSON object, nothing else.`;
         thinking.remove();
 
         if (reply.action === 'web_search') { await aiHandleWebSearch(reply.query); return; }
+        if (reply.action === 'pack_order') { await aiHandlePackOrderRequest(reply.text || text); return; }
         if (reply.action === 'chat' || !reply.action) { aiAppendMessage('assistant', reply.reply || "I'm not sure how to help with that yet — try asking me to find an item, pack a kit, or (with an item open) change one of its fields."); return; }
 
         const built = aiBuildPendingAction(reply);
@@ -8166,6 +8689,20 @@ Respond with ONLY the JSON object, nothing else.`;
             }
             infoHtml = (bits.length ? `<div class="ai-action-diff">${bits.join(' · ')}</div>` : '')
                 + `<button type="button" class="ai-action-link" onclick="aiPeekPendingKit()">👁️ View kit — I'll come right back here</button>`;
+        } else if (action.type === 'pack_order_draft') {
+            const lines = [];
+            action.items.forEach(it => {
+                lines.push(it.btk
+                    ? `${escapeHtml(it.matchedName || it.btk)} × ${it.quantity}`
+                    : `<span style="color:var(--danger);">❓ "${escapeHtml(it.reference)}" — no match found</span>`);
+            });
+            let recipientLine = '';
+            if (action.recipientName) {
+                recipientLine = action.recipientAddress
+                    ? `📍 ${escapeHtml(action.recipientAddress)}`
+                    : `<span style="color:var(--text-muted);">No address ${action.lowConfidence ? 'found' : 'given'} for ${escapeHtml(action.recipientName)}</span>`;
+            }
+            infoHtml = `<div class="ai-action-diff">${lines.join('<br>')}${recipientLine ? `<div style="margin-top:4px;">${recipientLine}</div>` : ''}</div>`;
         }
         const confirmLabel = action.lowConfidence ? "Yes, that one ✓" : "We'll do this ✓";
         const cancelLabel = action.lowConfidence ? "No, not that" : "Cancel";
@@ -8226,6 +8763,10 @@ Respond with ONLY the JSON object, nothing else.`;
                 aiStartPackOrderFromKit(action);
                 const multNote = action.multiplier > 1 ? ` (×${action.multiplier} each)` : '';
                 aiAppendMessage('assistant', `Started a Pack Order from "${action.kitName}"${multNote}.`);
+            } else if (action.type === 'pack_order_draft') {
+                aiApplyPackOrderDraft(action);
+                const skipNote = action.unresolvedCount ? ` ${action.unresolvedCount} item(s) I couldn't match are left out — add them yourself.` : '';
+                aiAppendMessage('assistant', `Started a Pack Order with ${action.resolvedCount} item(s).${skipNote}`);
             } else if (action.type === 'edit_field') {
                 const el = document.getElementById(action.elId);
                 if (el) { el.value = action.newValue; el.classList.remove('ai-highlight-pulse'); }
@@ -8254,6 +8795,67 @@ Respond with ONLY the JSON object, nothing else.`;
         });
         updatePackOrderBadge();
         openPackOrderView();
+    }
+
+    // Applies a parseOrderRequest() draft the same way aiStartPackOrderFromKit applies a kit's
+    // recipe — pushes each resolved line into the live pack order and fills the recipient fields
+    // if the draft named one, then opens Pack Order for review before Save/Finalize.
+    function aiApplyPackOrderDraft(action) {
+        action.items.forEach(it => {
+            if (!it.btk) return;
+            const existing = packOrder.find(o => o.btk === it.btk);
+            if (existing) existing.qty = it.quantity;
+            else packOrder.push({ btk: it.btk, qty: it.quantity, packed: false });
+        });
+        if (action.recipientName) packOrderRecipient = { name: action.recipientName, address: action.recipientAddress || '' };
+        updatePackOrderBadge();
+        openPackOrderView();
+        syncPackOrderRecipientInputs();
+    }
+
+    // Turns free text describing multiple items (and optionally a recipient) into a pack order via
+    // modules/order-parser.js — the natural-language counterpart to pack_kit, for "pack 2 bolts and
+    // 1 gasket for Anna Andersson" rather than a single named kit. Item references resolve against
+    // the currently loaded catalog first (aiFuzzyFindItem, so it works offline too), and a named
+    // recipient with no address gets one looked up via the same DuckDuckGo web-search path the
+    // assistant's own web_search action uses.
+    async function aiHandlePackOrderRequest(text) {
+        if (!text || !text.trim()) { aiAppendMessage('assistant', "What should I pack, and for who?"); return; }
+        const thinking = aiAppendMessage('system', 'Working out the order…');
+        try {
+            const knownItems = globalInventory.map(i => ({ btk: i.BTKnumber, name: i['itemname(english)'] || i.BTKnumber }));
+            const searchItemCandidates = async (reference) => {
+                const match = aiFuzzyFindItem(reference);
+                return match ? [{ btk: match.item.BTKnumber, name: match.item['itemname(english)'] || match.item.BTKnumber }] : [];
+            };
+            const wh = getWarehouseMeta(currentWarehouseId);
+            const draft = await window.parseOrderRequest(aiGetGroqClient(), text, {
+                knownItems,
+                searchItemCandidates,
+                webSearch: window.duckySearch,
+                fetchPageText: window.crawly,
+                fromAddress: { name: wh.name, address: wh.address },
+            });
+            thinking.remove();
+            const resolved = draft.items.filter(it => it.btk);
+            if (!resolved.length) { aiAppendMessage('assistant', "I couldn't match any of that to an item in this warehouse — try naming them more specifically."); return; }
+            const built = {
+                type: 'pack_order_draft',
+                items: draft.items,
+                resolvedCount: resolved.length,
+                unresolvedCount: draft.items.length - resolved.length,
+                recipientName: draft.recipient.name,
+                recipientAddress: draft.recipient.address,
+                lowConfidence: draft.items.length > resolved.length || draft.recipient.confidence === 'not_found',
+                summary: `Pack ${resolved.length} item${resolved.length === 1 ? '' : 's'}` + (draft.recipient.name ? ` for ${draft.recipient.name}` : ''),
+            };
+            if (aiPendingAction) aiRemoveLastActionCard();
+            aiPendingAction = built;
+            aiRenderActionCard(built);
+        } catch (e) {
+            thinking.remove();
+            aiAppendMessage('assistant', "I couldn't build that order — " + aiFriendlyError(e));
+        }
     }
 
     // Bounded per the app's own policy: webSearch() fetches exactly one DuckDuckGo results page (no
@@ -8435,6 +9037,11 @@ Respond with ONLY the JSON object, nothing else.`;
     import { createGroqClient, GROQ_MODELS } from './modules/groq-client.js';
     import { configureCorsProxy, setAllowPublicFallback } from './modules/cors-proxy.js';
     import { webSearch, fetchPageText } from './modules/web-search.js';
+    import { parseVCardFile, generateVCard } from './modules/contacts.js';
+    import { parseOrderRequest } from './modules/order-parser.js';
+    window.parseVCardFile = parseVCardFile;
+    window.generateVCard = generateVCard;
+    window.parseOrderRequest = parseOrderRequest;
     window.GROQ_MODELS = GROQ_MODELS;
     // The pre-built proxy-mode client (needs groq-proxy deployed) — the fallback when no personal
     // key is set. window.createGroqClient itself is also exposed so aiGetGroqClient() can build a
