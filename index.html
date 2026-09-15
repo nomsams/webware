@@ -8539,15 +8539,20 @@ th { background: #eee; }
     // warehouses" identity — the vacant-number scan below still only looks at globalInventory
     // (the currently loaded warehouse), so two different warehouses picking the same base number
     // for two unrelated new items is expected and fine; nothing implies they're the same product.
-    function generateUniqueBTK(reserved) {
+    // `existingItems`/`warehouseId` default to globalInventory/currentWarehouseId (every ordinary
+    // call site — CSV import, Duplicate, Add Item — just wants "the current warehouse" and never
+    // passes these) but can be overridden explicitly, which is what lets a bulk import that writes
+    // into SEVERAL warehouses in one run (e.g. the Visma importer) reuse this one function instead
+    // of maintaining a second, near-identical copy just to avoid the current-warehouse assumption.
+    function generateUniqueBTK(reserved, { existingItems = globalInventory, warehouseId = currentWarehouseId } = {}) {
         const used = new Set(reserved || []);
         let maxN = 0;
-        globalInventory.forEach(i => {
-            const m = String(i.BTKnumber || '').trim().toUpperCase().match(/^BTK0*(\d+)(?:W\d+)?$/);
+        (existingItems || []).forEach(i => {
+            const m = String(i.BTKnumber || i.btk || '').trim().toUpperCase().match(/^BTK0*(\d+)(?:W\d+)?$/);
             if (m) { const n = parseInt(m[1], 10); used.add(n); maxN = Math.max(maxN, n); }
         });
         used.forEach(n => { maxN = Math.max(maxN, n); });
-        const suffix = 'W' + String(currentWarehouseId).padStart(2, '0');
+        const suffix = 'W' + String(warehouseId).padStart(2, '0');
         for (let n = 1; n <= maxN; n++) { if (!used.has(n)) return 'BTK' + String(n).padStart(6, '0') + suffix; }
         let n = maxN + 1;
         while (used.has(n)) n++;
@@ -9073,11 +9078,19 @@ th { background: #eee; }
     // batchId (optional): shared across every entry written by one bulk operation (a CSV import, a
     // stock-only update) — see schema_activity_log_batch_id.sql and undoImportBatch() below, which
     // together let that whole operation be undone in one action instead of one row at a time.
-    async function logActivity(action, btk, beforeRow, afterRow, summary, batchId) {
-        if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') return;
-        const { data: { user } } = await sb.auth.getUser();
+    // warehouseId defaults to currentWarehouseId — only a bulk import writing into SEVERAL
+    // warehouses in one run (e.g. the Visma importer) needs to pass it explicitly. userId defaults
+    // to a fresh sb.auth.getUser() lookup; a caller looping over many items in one run (same import)
+    // resolves it once up front and passes it through instead of re-fetching the same signed-in
+    // user from the network on every single entry.
+    async function logActivity(action, btk, beforeRow, afterRow, summary, batchId, { warehouseId = currentWarehouseId, userId } = {}) {
+        if (getWarehouseMeta(warehouseId).mode !== 'supabase') return;
+        if (userId === undefined) {
+            const { data: { user } } = await sb.auth.getUser();
+            userId = user ? user.id : null;
+        }
         const { error } = await sb.from('activity_log').insert({
-            warehouse_id: currentWarehouseId, user_id: user ? user.id : null, action,
+            warehouse_id: warehouseId, user_id: userId, action,
             entity_type: 'item', entity_id: btk, before_data: beforeRow || null, after_data: afterRow || null,
             summary, batch_id: batchId || null
         });
@@ -9227,10 +9240,10 @@ th { background: #eee; }
     //  suffix-routing logic (pure, unit-tested). Everything here is UI + the Supabase writes,
     //  following the same "stage in memory, review, commit in one batch, log for undo" convention
     //  as commitCSVImport() above — the one real difference is this import can write into SEVERAL
-    //  warehouses in one run (a brand-new one per recognized company/city suffix), which is why it
-    //  needs generateUniqueBTKFor()/logActivityFor() below instead of the plain
-    //  generateUniqueBTK()/logActivity() (both of those implicitly assume "the currently open
-    //  warehouse" via globalInventory/currentWarehouseId).
+    //  warehouses in one run (a brand-new one per recognized company/city suffix), so every
+    //  generateUniqueBTK()/logActivity() call below passes an explicit warehouseId/existingItems
+    //  (and, for logActivity, a pre-resolved userId) instead of relying on their
+    //  currentWarehouseId/globalInventory/fresh-auth-lookup defaults.
     // ════════════════════════════════════════════════════════════════════════
     var vismaImportDraft = null;          // buildVismaImportDraft()'s return value — groups[].items[] are edited in place by the row handlers below
     var vismaImportBestExistingItems = []; // raw Supabase rows for Best's current catalog, fetched once at parse time — both the wipe-count shown in review and the before_data for each delete's activity_log entry
@@ -9373,43 +9386,6 @@ th { background: #eee; }
         vismaImportBestExistingItems = [];
     }
 
-    // Same lowest-vacant-number + "W##" warehouse-tag logic as generateUniqueBTK() (used by CSV
-    // import/Duplicate), just parameterized on an explicit items array and warehouse id instead of
-    // reading globalInventory/currentWarehouseId — every destination warehouse this import touches
-    // starts empty (a brand-new warehouse, or Best right after being wiped), so existingItems is
-    // always [] at the call sites below and numbering simply starts at 1.
-    function generateUniqueBTKFor(existingItems, reserved, warehouseId) {
-        const used = new Set(reserved || []);
-        let maxN = 0;
-        (existingItems || []).forEach(i => {
-            const m = String(i.BTKnumber || i.btk || '').trim().toUpperCase().match(/^BTK0*(\d+)(?:W\d+)?$/);
-            if (m) { const n = parseInt(m[1], 10); used.add(n); maxN = Math.max(maxN, n); }
-        });
-        used.forEach(n => { maxN = Math.max(maxN, n); });
-        const suffix = 'W' + String(warehouseId).padStart(2, '0');
-        for (let n = 1; n <= maxN; n++) { if (!used.has(n)) return 'BTK' + String(n).padStart(6, '0') + suffix; }
-        let n = maxN + 1;
-        while (used.has(n)) n++;
-        return 'BTK' + String(n).padStart(6, '0') + suffix;
-    }
-
-    // Same insert shape as logActivity() (used everywhere else), with warehouse_id passed
-    // explicitly instead of read from currentWarehouseId — this import writes into several
-    // warehouses in one run, not just whichever one happens to be open right now. Fire-and-forget,
-    // same as logActivity() itself: a logging failure shouldn't roll back or block the real write.
-    // Takes userId as a plain argument rather than calling sb.auth.getUser() itself — that call
-    // hits the Auth server over the network, and the caller (one commitVismaImport() run) already
-    // knows it's the same signed-in user across every one of the (possibly 1000+) entries it logs,
-    // so the caller resolves it once and passes it through instead of re-fetching it per item.
-    async function logActivityFor(warehouseId, action, btk, beforeRow, afterRow, summary, batchId, userId) {
-        const { error } = await sb.from('activity_log').insert({
-            warehouse_id: warehouseId, user_id: userId || null, action,
-            entity_type: 'item', entity_id: btk, before_data: beforeRow || null, after_data: afterRow || null,
-            summary, batch_id: batchId || null
-        });
-        if (error) console.error("Could not log activity:", error);
-    }
-
     async function commitVismaImport() {
         const draft = vismaImportDraft;
         if (!draft) return;
@@ -9448,14 +9424,14 @@ th { background: #eee; }
             if (delErr) {
                 console.error("Could not wipe Best's items:", delErr);
                 // Best's old rows are still there — inserting the reviewed set on top would collide
-                // with (or duplicate) their BTKs, since generateUniqueBTKFor() assumes this warehouse
-                // starts empty. Skip Best entirely for this run rather than risk that.
+                // with (or duplicate) their BTKs, since generateUniqueBTK() below is called assuming
+                // this warehouse starts empty. Skip Best entirely for this run rather than risk that.
                 bestGroup.skip = true;
                 bestWipeFailed = true;
             } else {
                 vismaImportBestExistingItems.forEach(row => {
                     deleted++;
-                    logActivityFor('1', 'delete', row.btk, row, null, `Visma import: removed ${row.itemname_en || row.btk} (${row.btk}) before re-import`, batchId, userId);
+                    logActivity('delete', row.btk, row, null, `Visma import: removed ${row.itemname_en || row.btk} (${row.btk}) before re-import`, batchId, { warehouseId: '1', userId });
                 });
             }
         }
@@ -9488,7 +9464,7 @@ th { background: #eee; }
             if (!warehouseId) continue; // that warehouse's own creation failed above
             // Every OTHER destination genuinely starts empty (brand new, or Best just wiped above)
             // — but a group reusing a warehouse a PRIOR run already created (step 2) is not empty,
-            // so generateUniqueBTKFor must scan its real current items, not assume none exist.
+            // so generateUniqueBTK() must scan its real current items, not assume none exist.
             let existingItemsForBtk = [];
             if (group.reusedExisting) {
                 const { data, error } = await sb.from('items').select('btk').eq('warehouse_id', warehouseId);
@@ -9497,7 +9473,7 @@ th { background: #eee; }
             }
             const reserved = new Set();
             for (const item of group.items) {
-                const btk = generateUniqueBTKFor(existingItemsForBtk, reserved, warehouseId);
+                const btk = generateUniqueBTK(reserved, { existingItems: existingItemsForBtk, warehouseId });
                 reserved.add(parseInt(btk.slice(3), 10));
                 // Shaped into the same legacy item object every other write path builds (Add Item,
                 // CSV import, Delivery Note) so itemToSupabaseRow() — which resolves the
@@ -9516,7 +9492,7 @@ th { background: #eee; }
                 const { error } = await sb.from('items').insert({ ...row, btk, warehouse_id: warehouseId, images: '' });
                 if (error) { createFailed++; console.error(`Could not create item "${item.name}":`, error); continue; }
                 created++;
-                logActivityFor(warehouseId, 'create', btk, null, row, `Visma import: added ${item.name} (${btk})`, batchId, userId);
+                logActivity('create', btk, null, row, `Visma import: added ${item.name} (${btk})`, batchId, { warehouseId, userId });
             }
         }
 
