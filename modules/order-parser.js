@@ -1,9 +1,9 @@
 // Turns free-text like "plocka BTK000012 och item 2 till Acme AB, sök upp adressen" into a
 // structured pack-order draft: which items to pick (resolved to real BTKs, with a quantity),
-// plus a recipient name/address and (optionally) a from-address — using an LLM (via
-// groq-client.js) for the extraction, modules/web-search.js to look up a recipient's
-// address/phone when the text names them but gives no address, and a live items-table lookup to
-// resolve item references the pre-loaded catalog doesn't already cover.
+// plus a recipient name/address/organization-number and (optionally) a from-address — using an
+// LLM (via groq-client.js) for the extraction, modules/web-search.js to look up a recipient's
+// address/org number when the text names them but gives no address, and a live items-table
+// lookup to resolve item references the pre-loaded catalog doesn't already cover.
 //
 // This is the actual feature behind the "box where we can write or paste something like
 // 'plocka item 1 and item 2...'" request. STATUS: standalone, not wired into the Pack Order UI
@@ -56,7 +56,7 @@
 //   });
 //   // draft: {
 //   //   items: [{ reference, quantity, btk, matchedName, elsewhere }],
-//   //   recipient: { name, address, confidence },
+//   //   recipient: { name, address, orgNumber, confidence },
 //   //   from: { name, address } | null,
 //   // }
 
@@ -104,14 +104,17 @@ export async function parseOrderRequest(groqClient, text, {
     recipient: {
       name: extracted.recipientName || null,
       address: extracted.recipientAddressHint || null,
+      orgNumber: null,
       confidence: extracted.recipientAddressHint ? 'given' : 'unknown',
     },
     from: fromAddress || null,
   };
 
   if (extracted.needsAddressLookup && extracted.recipientName && webSearch && fetchPageText) {
-    draft.recipient.address = await lookupAddress(extracted.recipientName, { webSearch, fetchPageText });
-    draft.recipient.confidence = draft.recipient.address ? 'searched' : 'not_found';
+    const found = await lookupCompanyInfo(extracted.recipientName, { webSearch, fetchPageText });
+    draft.recipient.address = found.address;
+    draft.recipient.orgNumber = found.orgNumber;
+    draft.recipient.confidence = found.address ? 'searched' : 'not_found';
   }
 
   return draft;
@@ -199,18 +202,25 @@ function nameSimilarity(a, b) {
   return overlap / Math.max(aTokens.size, bTokens.size);
 }
 
-async function lookupAddress(name, { webSearch, fetchPageText }) {
-  const results = await webSearch(`${name} address contact`, { limit: 3 });
+// Searches up to 3 result pages (rather than stopping at the first) so an address found on one
+// page and an org number found on another can both be picked up for the same recipient — a
+// company's own "Contact" page often has the address while its "About"/imprint page has the
+// registration number, or vice versa.
+async function lookupCompanyInfo(name, { webSearch, fetchPageText }) {
+  const results = await webSearch(`${name} address contact org number`, { limit: 3 });
+  let address = null;
+  let orgNumber = null;
   for (const result of results) {
+    if (address && orgNumber) break;
     try {
       const text = await fetchPageText(result.url, { maxChars: 3000 });
-      const addressLine = guessAddressLine(text);
-      if (addressLine) return addressLine;
+      if (!address) address = guessAddressLine(text);
+      if (!orgNumber) orgNumber = guessOrgNumber(text);
     } catch {
       // that result didn't pan out — try the next one
     }
   }
-  return null;
+  return { address, orgNumber };
 }
 
 // Rough heuristic (a line containing a postal-code-then-city shape, e.g. "123 45 Stockholm" or
@@ -220,4 +230,25 @@ async function lookupAddress(name, { webSearch, fetchPageText }) {
 export function guessAddressLine(text) {
   const line = text.split('\n').find((l) => /\b\d{3}\s?\d{2}\s+[A-ZÅÄÖ][a-zåäö]/.test(l) && l.length < 200);
   return line ? line.trim() : null;
+}
+
+// Looks for a Swedish-style organization number (NNNNNN-NNNN, e.g. "556677-8899") — the format
+// most recipients this app would search for actually use. Prefers a line that labels the number
+// (org.nr, organisationsnummer, orgnr, VAT/momsreg, business/registration/company number — a
+// handful of languages since a recipient's own site may be in English) so a stray phone number
+// or invoice number in the same shape doesn't get picked up by accident; falls back to a bare
+// match anywhere in the text only if no labeled one is found.
+const ORG_NUMBER_RE = /\b(\d{6}-\d{4})\b/;
+// The "org(anisation)" branch's number-shaped suffix (nr/nummer/number/no) is deliberately
+// required, not optional — an earlier version left it optional, so the bare word "org" alone
+// (e.g. "our org chart", "org overview") satisfied this regex and let guessOrgNumber() confidently
+// return an unrelated number-shaped value (an invoice ref, a phone number) that merely happened to
+// share a line with the word "org".
+const ORG_NUMBER_LABEL_RE = /\b(org(anisation)?s?\.?\s*(nr|nummer|number|no)|vat|moms(reg)?|business\s*(reg(istration)?)?\s*(no|number)|company\s*(reg(istration)?)?\s*(no|number))\b/i;
+export function guessOrgNumber(text) {
+  const lines = text.split('\n');
+  const labeled = lines.find((l) => ORG_NUMBER_LABEL_RE.test(l) && ORG_NUMBER_RE.test(l));
+  if (labeled) return labeled.match(ORG_NUMBER_RE)[1];
+  const match = text.match(ORG_NUMBER_RE);
+  return match ? match[1] : null;
 }

@@ -40,6 +40,16 @@ test('buildPackOrderEmailTemplate falls back to a generic subject and greeting w
   assert.equal(subject, 'New pack order');
   assert.match(text, /^Hi,/);
   assert.doesNotMatch(text, /From:/);
+  assert.doesNotMatch(text, /Ship to:/);
+  assert.doesNotMatch(text, /Org\. no:/);
+});
+
+test('buildPackOrderEmailTemplate adds a Ship to/Org. no block only when given', () => {
+  const { text } = buildPackOrderEmailTemplate({
+    recipientName: 'Acme AB', recipientAddress: '123 45 Stockholm', recipientOrgNumber: '556677-8899', items: [],
+  });
+  assert.match(text, /Ship to: 123 45 Stockholm/);
+  assert.match(text, /Org\. no: 556677-8899/);
 });
 
 test('sendEmail() posts to the send-email function with auth headers and returns the response', async () => {

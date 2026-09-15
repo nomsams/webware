@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseOrderRequest, parseJsonReply, looksLikeBtk, matchKnownItem, bestCandidateMatch, guessAddressLine,
+  parseOrderRequest, parseJsonReply, looksLikeBtk, matchKnownItem, bestCandidateMatch, guessAddressLine, guessOrgNumber,
 } from '../order-parser.js';
 
 const KNOWN_ITEMS = [
@@ -63,6 +63,24 @@ test('guessAddressLine finds a postal-code-shaped line, ignoring long paragraphs
 
 test('guessAddressLine returns null when nothing matches', () => {
   assert.equal(guessAddressLine('no postal codes here at all'), null);
+});
+
+test('guessOrgNumber prefers a labeled line over a bare match elsewhere', () => {
+  const text = 'Invoice ref: 111111-1111\nAcme AB\nOrg.nr: 556677-8899\n123 45 Stockholm';
+  assert.equal(guessOrgNumber(text), '556677-8899');
+});
+
+test('guessOrgNumber does not treat the bare word "org" (with no nr/number/no suffix) as a genuine label', () => {
+  const text = 'Ref 111111-1111, see our org page for details.\nContact: Acme AB\nOrg.nr: 556677-8899';
+  assert.equal(guessOrgNumber(text), '556677-8899');
+});
+
+test('guessOrgNumber falls back to a bare match when no label is present', () => {
+  assert.equal(guessOrgNumber('Acme AB\n556677-8899\n123 45 Stockholm'), '556677-8899');
+});
+
+test('guessOrgNumber returns null when nothing matches', () => {
+  assert.equal(guessOrgNumber('no numbers shaped like that here'), null);
 });
 
 test('parseOrderRequest resolves item ordinals, defaults quantity to 1, and skips lookup when no address tools are given', async () => {
@@ -221,7 +239,7 @@ test('parseOrderRequest searches for an address when the model asks for one and 
   };
   const fetchPageText = async (url) => {
     assert.equal(url, 'https://acme.example/contact');
-    return 'Acme AB head office\n123 45 Stockholm\nPhone: 08-1234567';
+    return 'Acme AB head office\n123 45 Stockholm\nOrg.nr: 556677-8899\nPhone: 08-1234567';
   };
 
   const draft = await parseOrderRequest(fakeGroq, 'plocka BTK000001 till Acme AB, sök upp adressen', {
@@ -229,7 +247,28 @@ test('parseOrderRequest searches for an address when the model asks for one and 
   });
 
   assert.equal(draft.recipient.address, '123 45 Stockholm');
+  assert.equal(draft.recipient.orgNumber, '556677-8899');
   assert.equal(draft.recipient.confidence, 'searched');
+});
+
+test('parseOrderRequest picks up an address and an org number from different result pages', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [], recipientName: 'Acme AB', recipientAddressHint: null, needsAddressLookup: true,
+    }),
+  };
+  const webSearch = async () => [
+    { title: 'Acme AB — Contact', url: 'https://acme.example/contact', snippet: '' },
+    { title: 'Acme AB — About', url: 'https://acme.example/about', snippet: '' },
+  ];
+  const fetchPageText = async (url) => (url.endsWith('/contact')
+    ? 'Acme AB\n123 45 Stockholm\nPhone: 08-1234567'
+    : 'Acme AB was founded in 1990.\nOrg.nr: 556677-8899');
+
+  const draft = await parseOrderRequest(fakeGroq, 'find Acme AB', { webSearch, fetchPageText });
+
+  assert.equal(draft.recipient.address, '123 45 Stockholm');
+  assert.equal(draft.recipient.orgNumber, '556677-8899');
 });
 
 test('parseOrderRequest marks not_found when the search never turns up an address', async () => {
@@ -249,6 +288,7 @@ test('parseOrderRequest marks not_found when the search never turns up an addres
   });
 
   assert.equal(draft.recipient.address, null);
+  assert.equal(draft.recipient.orgNumber, null);
   assert.equal(draft.recipient.confidence, 'not_found');
 });
 

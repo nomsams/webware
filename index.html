@@ -760,9 +760,31 @@
         </div>
         <p id="scanner-status" style="color:var(--text-muted); font-size:0.85rem; margin-top:0.75rem; min-height:1.2em;">Point the camera at a barcode or QR code.</p>
         <div id="scanner-last-result" class="hidden" style="margin-top:0.25rem; font-size:0.85rem;"></div>
-        <div class="modal-actions">
+        <div class="modal-actions" style="flex-wrap:wrap;">
             <button class="secondary full-width" id="btn-scanner-ocr" onclick="scannerCaptureAndOcr()" title="Read a label full of text instead of a barcode/QR code">📝 Scan Text (OCR)</button>
+            <button class="secondary full-width" id="btn-scanner-delivery-note" onclick="scannerCaptureDeliveryNote()" title="Read a delivery note (följsedel) and update stock from it">🧾 Delivery Note</button>
             <button class="secondary full-width" onclick="closeBarcodeScanner()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Delivery Note ("Följsedel") import — 📷 photo -> a multimodal Groq model reads the manufacturer,
+     ship-to address, and line items directly from the image (modules/delivery-note-parser.js;
+     deliberately NOT the Tesseract-OCR-then-cleanup path "📝 Scan Text" uses, since a vision model
+     keeps the note's own layout/context — which column is qty vs. item number, which address block
+     is the ship-to vs. the supplier's own letterhead). Two-step review before anything is written:
+     Step 1 lists items matched against the current inventory with an editable delivered-quantity;
+     Step 2 (only reached once Step 1 is applied) lists unrecognized lines as editable new-item
+     proposals. Every write from both steps shares one activity_log batch_id, so the whole note can
+     be undone in one action afterward — see undoImportBatch(), same mechanism a CSV import uses. -->
+<div class="modal-overlay" id="delivery-note-modal" onclick="handleDeliveryNoteModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:600px;">
+        <h3 id="delivery-note-modal-title" style="margin-top:0;">🧾 Delivery Note</h3>
+        <p id="delivery-note-modal-intro" style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem;"></p>
+        <div id="delivery-note-modal-body" style="max-height:52vh; overflow-y:auto;"></div>
+        <div class="modal-actions" style="margin-top:0.75rem;">
+            <button class="secondary full-width" onclick="cancelDeliveryNoteReview()">Cancel</button>
+            <button class="success-btn full-width" id="btn-delivery-note-continue" onclick="continueDeliveryNoteReview()">Continue</button>
         </div>
     </div>
 </div>
@@ -988,6 +1010,51 @@
     </div>
 </div>
 
+<!-- Visma Article Import — two source files: Visma's own article export (manufacturer/name/qty,
+     unreliable stock counts) and a physical inventory-count file for Best's own bin locations. See
+     modules/visma-import.js for the actual parsing/matching/routing logic; everything here is just
+     getting both files' text into that module and reviewing/committing what it returns. Admin-only
+     (see renderWarehouseMeta) since this can create warehouses and, for Best, wipes the current
+     catalog first. -->
+<div class="modal-overlay" id="visma-import-modal" onclick="handleVismaImportModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:560px;">
+        <h3 style="margin-top:0;">📥 Import from Visma</h3>
+        <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">Paste or upload the Visma article export. The physical inventory-count file is optional but strongly recommended — it's the only source of Best's real bin locations and actual counted quantities; without it, everything falls back to Visma's own (often unreliable) stock figure.</p>
+        <div class="setting-row">
+            <label for="visma-import-articles-textarea">Visma article export (required)</label>
+            <textarea id="visma-import-articles-textarea" rows="6" style="width:100%; font-family:monospace; font-size:0.8rem; min-height:120px;" placeholder="page,article_uuid,article_number,...,artikelnr,artikelnamn,enhet,..."></textarea>
+            <button type="button" class="secondary" onclick="document.getElementById('visma-import-articles-upload').click()" style="margin-top:0.4rem; padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">📁 Upload CSV instead</button>
+            <input type="file" id="visma-import-articles-upload" accept=".csv" class="hidden" onchange="handleVismaImportFileUpload(event, 'visma-import-articles-textarea')" aria-label="Upload Visma article export CSV">
+        </div>
+        <div class="setting-row">
+            <label for="visma-import-inventering-textarea">Physical inventory-count file (optional)</label>
+            <textarea id="visma-import-inventering-textarea" rows="6" style="width:100%; font-family:monospace; font-size:0.8rem; min-height:120px;" placeholder="visma_artikelnummer,Artikelnummer,Företag,Lager,Produktnamn,Plats,Antal,..."></textarea>
+            <button type="button" class="secondary" onclick="document.getElementById('visma-import-inventering-upload').click()" style="margin-top:0.4rem; padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">📁 Upload CSV instead</button>
+            <input type="file" id="visma-import-inventering-upload" accept=".csv" class="hidden" onchange="handleVismaImportFileUpload(event, 'visma-import-inventering-textarea')" aria-label="Upload inventory-count CSV">
+        </div>
+        <p id="visma-import-parse-error" class="hidden" style="color:var(--danger); font-size:0.85rem;"></p>
+        <div class="modal-actions" style="margin-top:0.75rem;">
+            <button class="secondary full-width" onclick="closeVismaImportModal()">Cancel</button>
+            <button class="full-width" onclick="parseVismaImportFiles()">Parse &amp; Review</button>
+        </div>
+    </div>
+</div>
+
+<!-- Review/commit — nothing is written until "Confirm & Import" below is pressed. Grouped by
+     destination warehouse (renderVismaImportSummary()); Best's group carries an extra, harder
+     confirmation (typed text) since choosing to import wipes Best's current items first. -->
+<div class="modal-overlay" id="visma-import-summary-modal" onclick="handleVismaImportSummaryModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:900px;">
+        <h3 style="margin-top:0;">📥 Review Visma Import</h3>
+        <div id="visma-import-summary-counts" style="margin-bottom:0.75rem;"></div>
+        <div id="visma-import-summary-body" style="max-height:55vh; overflow-y:auto;"></div>
+        <div class="modal-actions" style="margin-top:0.75rem;">
+            <button class="secondary full-width" onclick="cancelVismaImportSummary()">Cancel</button>
+            <button class="full-width" id="btn-visma-import-confirm" onclick="commitVismaImport()" disabled>✅ Confirm &amp; Import</button>
+        </div>
+    </div>
+</div>
+
 <!-- Pre-commit summary — a full breakdown of what a CSV import is about to do, shown before ANY
      row is touched (whether or not anything actually needs one-by-one review afterward), so a big
      or unfamiliar file's effect is clear up front rather than only surfacing as individual
@@ -1157,6 +1224,7 @@
             <div class="list-header-actions" id="list-actions">
                 <button id="btn-add-item" onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">➕ Add Item</button>
                 <button class="secondary" id="btn-items-csv" onclick="openImportItemsModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Import Items</button>
+                <button class="secondary hidden" id="btn-visma-import" onclick="openVismaImportModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;" title="Import a Visma article export, matched against a physical inventory-count file">📥 Import from Visma</button>
                 <button class="secondary" id="btn-kits-csv" onclick="openImportKitsModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Kits CSV</button>
                 <button class="secondary" id="btn-warehouse-csv" onclick="openImportWarehousesModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Warehouses CSV</button>
                 <button class="secondary" id="btn-export-db" onclick="exportEncryptedDatabase()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">💾 Export</button>
@@ -1435,6 +1503,8 @@
             <input type="text" id="pack-order-recipient-name" placeholder="Person's name" oninput="onPackRecipientInput()">
             <label class="modal-label" for="pack-order-recipient-address" style="margin-top:0.5rem;">Address</label>
             <textarea id="pack-order-recipient-address" placeholder="Street, city, postal code, country..." oninput="onPackRecipientInput()"></textarea>
+            <label class="modal-label" for="pack-order-recipient-orgnr" style="margin-top:0.5rem;">Org. number <span style="font-weight:400; color:var(--text-muted);">(optional — for the email template below; not saved with the order itself)</span></label>
+            <input type="text" id="pack-order-recipient-orgnr" placeholder="e.g. 556677-8899" oninput="onPackRecipientInput()">
             <label class="modal-label" for="pack-order-recipient-email" style="margin-top:0.5rem;">Email <span style="font-weight:400; color:var(--text-muted);">(optional — for the 📧 Email Recipient button below; not saved with the order itself)</span></label>
             <input type="email" id="pack-order-recipient-email" placeholder="recipient@example.com" oninput="onPackRecipientInput()">
             <div style="display:flex; gap:8px; margin-top:0.5rem; flex-wrap:wrap;">
@@ -1784,7 +1854,7 @@
     var packOrderPreviousView = 'list-view';
     var packOrderEditMode = false;
     var packOrderBox = { preset: '', length: '', width: '', height: '', weight: '' };
-    var packOrderRecipient = { name: '', address: '', email: '' }; // email: in-memory/local-only, never sent to the orders table — see savePackOrder()
+    var packOrderRecipient = { name: '', address: '', email: '', orgNumber: '' }; // email/orgNumber: in-memory/local-only, never sent to the orders table — see savePackOrder()
     var packOrderSavedNumber = null; // set once savePackOrder() succeeds, e.g. "ORD000042"
     const PACK_BOX_PRESETS = {
         small:  { length: 200, width: 150, height: 100 },
@@ -2405,6 +2475,27 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         await aiHandleOcrCleanup(rawText);
     }
 
+    // "🧾 Delivery Note" — a snapshot capture like the OCR one above, but sent straight to a
+    // multimodal Groq model (modules/delivery-note-parser.js) instead of Tesseract: a vision model
+    // reads the note's own layout/context (which column is quantity vs. item number, which address
+    // block is the ship-to vs. the supplier's own letterhead) rather than working from flattened
+    // OCR text. Downscaled before sending, unlike the OCR capture — a delivery note's printed text
+    // is legible well below full camera resolution, and the payload goes out over the network as
+    // JSON here, so keeping it small actually matters.
+    async function scannerCaptureDeliveryNote() {
+        const video = document.getElementById('scanner-video');
+        if (!video || !video.videoWidth) { scannerShowStatus("Camera isn't ready yet — wait a moment and try again.", true); return; }
+        scannerShowStatus('🧾 Reading delivery note…', false);
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, 1600 / Math.max(video.videoWidth, video.videoHeight));
+        canvas.width = Math.round(video.videoWidth * scale);
+        canvas.height = Math.round(video.videoHeight * scale);
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+        closeBarcodeScanner();
+        await aiHandleDeliveryNoteScan(dataUrl);
+    }
+
     // ════════════════════════════════════════════════════════════════════════
     //  SUPABASE — row <-> app-shape conversion, session/list/item loading
     // ════════════════════════════════════════════════════════════════════════
@@ -2830,7 +2921,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!order) return;
         const doReload = () => {
             packOrder = (order.items || []).map(l => ({ btk: l.btk, qty: l.qty, packed: !!l.packed }));
-            packOrderRecipient = { name: order.recipient_name || '', address: order.recipient_address || '' };
+            packOrderRecipient = { name: order.recipient_name || '', address: order.recipient_address || '', email: '', orgNumber: '' };
             packOrderBox = { preset: '', length: order.box_length || '', width: order.box_width || '', height: order.box_height || '', weight: order.box_weight || '' };
             packOrderSavedNumber = order.order_number;
             closePackOrderHistoryModal();
@@ -4968,6 +5059,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             document.getElementById(id).classList.toggle('hidden', isSupa);
         });
         document.getElementById('btn-items-csv').classList.toggle('hidden', isSupa && currentUserRole === 'viewer');
+        // Admin-only, not just editor+ — this import can create new warehouses and (for Best)
+        // wipes the current catalog first, both already admin-only actions elsewhere (Manage
+        // Warehouses' own "+ Add Warehouse").
+        document.getElementById('btn-visma-import').classList.toggle('hidden', !isSupa || currentUserRole !== 'admin');
         document.getElementById('btn-batch-images').classList.toggle('hidden', !isSupa || currentUserRole === 'viewer');
         document.getElementById('btn-export-csv').classList.toggle('hidden', !isSupa);
         document.getElementById('seg-manufacturers').classList.toggle('hidden', !isSupa);
@@ -6504,7 +6599,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!confirm("Clear the entire pack order? This can't be undone.")) return;
         packOrder = [];
         packOrderBox = { preset: '', length: '', width: '', height: '', weight: '' };
-        packOrderRecipient = { name: '', address: '', email: '' };
+        packOrderRecipient = { name: '', address: '', email: '', orgNumber: '' };
         packOrderSavedNumber = null;
         updatePackOrderBadge();
         renderPackOrderItems();
@@ -6549,6 +6644,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function syncPackOrderRecipientInputs() {
         document.getElementById('pack-order-recipient-name').value = packOrderRecipient.name || '';
         document.getElementById('pack-order-recipient-address').value = packOrderRecipient.address || '';
+        document.getElementById('pack-order-recipient-orgnr').value = packOrderRecipient.orgNumber || '';
         document.getElementById('pack-order-recipient-email').value = packOrderRecipient.email || '';
         const note = document.getElementById('pack-order-saved-note');
         if (packOrderSavedNumber) {
@@ -6562,6 +6658,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function onPackRecipientInput() {
         packOrderRecipient.name = document.getElementById('pack-order-recipient-name').value;
         packOrderRecipient.address = document.getElementById('pack-order-recipient-address').value;
+        packOrderRecipient.orgNumber = document.getElementById('pack-order-recipient-orgnr').value;
         packOrderRecipient.email = document.getElementById('pack-order-recipient-email').value;
     }
 
@@ -6607,6 +6704,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 <div style="cursor:pointer; flex:1; min-width:0;" onclick="pickSavedRecipient(${i})">
                     <div style="font-weight:700;">${escapeHtml(r.name || 'Unnamed')}</div>
                     ${r.address ? `<div style="color:var(--text-muted); font-size:0.82rem; white-space:pre-line;">${escapeHtml(r.address)}</div>` : ''}
+                    ${r.orgNumber ? `<div style="color:var(--text-muted); font-size:0.82rem;">Org. no: ${escapeHtml(r.orgNumber)}</div>` : ''}
                     ${r.email ? `<div style="color:var(--text-muted); font-size:0.82rem;">✉️ ${escapeHtml(r.email)}</div>` : ''}
                 </div>
                 <div style="display:flex; gap:6px; flex-shrink:0;">
@@ -6623,7 +6721,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             if (r.email) document.getElementById('compose-email-to').value = r.email;
             else showToast(`"${r.name}" has no saved email — enter one manually.`, "warning");
         } else {
-            packOrderRecipient = { name: r.name || '', address: r.address || '', email: r.email || '' };
+            packOrderRecipient = { name: r.name || '', address: r.address || '', email: r.email || '', orgNumber: r.orgNumber || '' };
             syncPackOrderRecipientInputs();
         }
         closeSavedRecipientsModal();
@@ -6632,12 +6730,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function saveCurrentRecipient() {
         const name = document.getElementById('pack-order-recipient-name').value.trim();
         const address = document.getElementById('pack-order-recipient-address').value.trim();
+        const orgNumber = document.getElementById('pack-order-recipient-orgnr').value.trim();
         const email = document.getElementById('pack-order-recipient-email').value.trim();
         if (!name) { showToast("Enter a recipient name first.", "warning"); return; }
         const recipients = getSavedRecipients();
         const existingIdx = recipients.findIndex(r => r.name.toLowerCase() === name.toLowerCase());
-        if (existingIdx >= 0) recipients[existingIdx] = { name, address, email };
-        else recipients.push({ name, address, email });
+        if (existingIdx >= 0) recipients[existingIdx] = { name, address, email, orgNumber };
+        else recipients.push({ name, address, email, orgNumber });
         setSavedRecipients(recipients);
         showToast(`Saved "${name}" to Saved Recipients.`, "success");
     }
@@ -6693,8 +6792,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 const address = (c.addresses && c.addresses[0]) ? c.addresses[0].value : '';
                 const email = (c.emails && c.emails[0]) ? c.emails[0].value : '';
                 const idx = recipients.findIndex(r => r.name.toLowerCase() === c.name.toLowerCase());
-                if (idx >= 0) recipients[idx] = { name: c.name, address, email };
-                else recipients.push({ name: c.name, address, email });
+                // vCard has no organization-number field, so a re-import must not wipe one saved by hand.
+                if (idx >= 0) recipients[idx] = { name: c.name, address, email, orgNumber: recipients[idx].orgNumber || '' };
+                else recipients.push({ name: c.name, address, email, orgNumber: '' });
             });
             setSavedRecipients(recipients);
             showToast(`Imported ${withName.length} contact(s).`, "success", 5000);
@@ -6739,6 +6839,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const { subject, text } = window.buildPackOrderEmailTemplate({
             orderNumber: packOrderSavedNumber || null,
             recipientName: packOrderRecipient.name || null,
+            recipientAddress: packOrderRecipient.address || null,
+            recipientOrgNumber: packOrderRecipient.orgNumber || null,
             items,
             fromName: wh.name,
         });
@@ -9120,6 +9222,324 @@ th { background: #eee; }
         resetCsvImportState();
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    //  VISMA ARTICLE IMPORT — see modules/visma-import.js for the actual parsing/matching/
+    //  suffix-routing logic (pure, unit-tested). Everything here is UI + the Supabase writes,
+    //  following the same "stage in memory, review, commit in one batch, log for undo" convention
+    //  as commitCSVImport() above — the one real difference is this import can write into SEVERAL
+    //  warehouses in one run (a brand-new one per recognized company/city suffix), which is why it
+    //  needs generateUniqueBTKFor()/logActivityFor() below instead of the plain
+    //  generateUniqueBTK()/logActivity() (both of those implicitly assume "the currently open
+    //  warehouse" via globalInventory/currentWarehouseId).
+    // ════════════════════════════════════════════════════════════════════════
+    var vismaImportDraft = null;          // buildVismaImportDraft()'s return value — groups[].items[] are edited in place by the row handlers below
+    var vismaImportBestExistingItems = []; // raw Supabase rows for Best's current catalog, fetched once at parse time — both the wipe-count shown in review and the before_data for each delete's activity_log entry
+
+    function openVismaImportModal() {
+        document.getElementById('visma-import-articles-textarea').value = '';
+        document.getElementById('visma-import-inventering-textarea').value = '';
+        document.getElementById('visma-import-parse-error').classList.add('hidden');
+        document.getElementById('visma-import-modal').classList.add('open');
+    }
+    function closeVismaImportModal() { document.getElementById('visma-import-modal').classList.remove('open'); }
+    function handleVismaImportModalOverlayClick(e) { if (e.target === document.getElementById('visma-import-modal')) closeVismaImportModal(); }
+
+    function handleVismaImportFileUpload(event, textareaId) {
+        const file = event.target.files?.[0];
+        event.target.value = ''; // allow re-selecting the same file later
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => { document.getElementById(textareaId).value = String(reader.result); };
+        reader.readAsText(file);
+    }
+
+    async function parseVismaImportFiles() {
+        const articlesText = document.getElementById('visma-import-articles-textarea').value.trim();
+        const inventeringText = document.getElementById('visma-import-inventering-textarea').value.trim();
+        const errEl = document.getElementById('visma-import-parse-error');
+        errEl.classList.add('hidden');
+        if (!articlesText) { errEl.textContent = "Paste or upload the Visma article export first."; errEl.classList.remove('hidden'); return; }
+
+        const vismaParsed = Papa.parse(articlesText, { header: true, skipEmptyLines: true });
+        const inventeringParsed = inventeringText ? Papa.parse(inventeringText, { header: true, skipEmptyLines: true }) : { data: [] };
+
+        const draft = window.buildVismaImportDraft(vismaParsed.data, inventeringParsed.data);
+        draft.groups.forEach(g => { g.skip = false; });
+        vismaImportDraft = draft;
+
+        // Fetched fresh here rather than trusting globalInventory — Best might not even be the
+        // warehouse currently open in the app when an admin runs this.
+        vismaImportBestExistingItems = [];
+        if (draft.groups.some(g => g.isBest)) {
+            const { data, error } = await sb.from('items').select('*').eq('warehouse_id', '1');
+            if (error) console.error("Could not load Best's current items:", error);
+            else vismaImportBestExistingItems = data || [];
+        }
+
+        closeVismaImportModal();
+        document.getElementById('visma-import-summary-modal').classList.add('open');
+        renderVismaImportSummary();
+    }
+
+    // Rendered ONCE per parse, not re-rendered on every edit (unlike the delivery-note review) —
+    // this list can run to 1000+ rows, so every field's own <input> is left to hold its own typed
+    // value; edit handlers below only ever mutate vismaImportDraft in place, never rebuild this DOM,
+    // which would otherwise wipe whatever else was mid-edit and reset the scroll position.
+    function renderVismaImportSummary() {
+        const draft = vismaImportDraft;
+        const totalItems = draft.groups.reduce((s, g) => s + g.items.length, 0);
+        document.getElementById('visma-import-summary-counts').innerHTML =
+            `<p style="font-size:0.9rem;">${totalItems} item(s) parsed across ${draft.groups.length} destination(s).</p>
+             <p style="color:var(--text-muted); font-size:0.82rem;">${draft.unresolvedManufacturerCount} with no identifiable manufacturer &middot; ${draft.noLocationCount} with no confirmed location &middot; ${draft.resetQuantityCount} had an unreliable negative Visma quantity (reset to 0, noted in Comments) — all editable below.</p>`;
+        document.getElementById('visma-import-summary-body').innerHTML = draft.groups.map((g, i) => renderVismaImportGroup(i, g)).join('');
+
+        const confirmBtn = document.getElementById('btn-visma-import-confirm');
+        if (draft.groups.some(g => g.isBest)) {
+            document.getElementById('visma-import-summary-body').insertAdjacentHTML('beforeend',
+                `<div style="margin-top:1rem; padding:0.75rem; border:1px solid var(--danger); border-radius:8px;">
+                    <label for="visma-import-confirm-text" style="color:var(--danger); font-weight:600;">Type DELETE BEST to confirm wiping Best's ${vismaImportBestExistingItems.length} current item(s) — including their photos — before importing:</label>
+                    <input type="text" id="visma-import-confirm-text" oninput="onVismaImportConfirmTextInput()" style="margin-top:0.4rem;">
+                </div>`);
+            confirmBtn.disabled = true;
+        } else {
+            confirmBtn.disabled = totalItems === 0;
+        }
+    }
+
+    function renderVismaImportGroup(groupIndex, group) {
+        const rowsHtml = group.items.map((item, i) => vismaImportItemRowHtml(groupIndex, i, item)).join('');
+        const wipeNote = group.isBest
+            ? `<p style="color:var(--danger); font-weight:600; font-size:0.85rem;">⚠️ Importing will permanently delete all ${vismaImportBestExistingItems.length} current item(s) in Best — including their photos — before these ${group.items.length} are added. Kit recipes and past orders referencing today's items will end up pointing at BTKs that no longer exist.</p>`
+            : '';
+        const nameField = group.needsNewWarehouse
+            ? `<input type="text" value="${escapeHtml(group.warehouseName)}" oninput="updateVismaImportGroupName(${groupIndex}, this.value)" style="font-weight:700; font-size:1rem; width:auto; display:inline-block; margin:0; padding:2px 6px;">`
+            : `<strong>${escapeHtml(group.warehouseName)}</strong>`;
+        const skipToggle = group.needsNewWarehouse
+            ? `<label style="font-size:0.8rem; font-weight:400; margin-left:12px;"><input type="checkbox" onchange="toggleVismaImportGroupSkip(${groupIndex}, this.checked)"> Skip this group entirely</label>`
+            : '';
+        return `<div id="visma-import-group-${groupIndex}" style="margin-bottom:1.25rem;">
+            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:0.4rem;">
+                <span>${group.needsNewWarehouse ? '🆕' : '🏬'}</span>${nameField}
+                <span style="color:var(--text-muted); font-size:0.85rem;">${group.city ? `(${group.city}) — ` : ''}${group.items.length} item(s)</span>
+                ${skipToggle}
+            </div>
+            ${wipeNote}
+            <div style="overflow:auto; max-height:280px; border:1px solid var(--border); border-radius:8px;">
+            <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
+                <thead style="position:sticky; top:0; background:var(--card-bg);"><tr>
+                    <th style="text-align:left; padding:4px 6px;">Name</th>
+                    <th style="text-align:left; padding:4px 6px;">Manufacturer</th>
+                    <th style="text-align:left; padding:4px 6px;">Item #</th>
+                    <th style="text-align:left; padding:4px 6px;">Visma Code</th>
+                    <th style="text-align:left; padding:4px 6px;">Qty</th>
+                    <th style="text-align:left; padding:4px 6px;">Location</th>
+                </tr></thead>
+                <tbody>${rowsHtml}</tbody>
+            </table>
+            </div>
+        </div>`;
+    }
+
+    function vismaImportItemRowHtml(groupIndex, itemIndex, item) {
+        return `<tr>
+            <td style="padding:3px 6px;"><input type="text" value="${escapeHtml(item.name)}" oninput="updateVismaImportItemField(${groupIndex},${itemIndex},'name',this.value)" style="width:100%; min-width:160px; margin:0; font-size:0.8rem; padding:3px 5px;"></td>
+            <td style="padding:3px 6px;"><input type="text" value="${escapeHtml(item.manufacturer || '')}" placeholder="—" oninput="updateVismaImportItemField(${groupIndex},${itemIndex},'manufacturer',this.value)" style="width:100%; min-width:100px; margin:0; font-size:0.8rem; padding:3px 5px;"></td>
+            <td style="padding:3px 6px;"><input type="text" value="${escapeHtml(item.itemnumber || '')}" placeholder="—" oninput="updateVismaImportItemField(${groupIndex},${itemIndex},'itemnumber',this.value)" style="width:100%; min-width:90px; margin:0; font-size:0.8rem; padding:3px 5px;"></td>
+            <td style="padding:3px 6px; font-size:0.72rem; color:var(--text-muted); white-space:nowrap;">${escapeHtml(item.itemnumber3)}</td>
+            <td style="padding:3px 6px;"><input type="number" min="0" value="${item.quantity}" oninput="updateVismaImportItemField(${groupIndex},${itemIndex},'quantity',this.value)" style="width:64px; margin:0; font-size:0.8rem; padding:3px 5px;"></td>
+            <td style="padding:3px 6px;"><input type="text" value="${escapeHtml(item.locationCode || '')}" placeholder="—" oninput="updateVismaImportItemField(${groupIndex},${itemIndex},'locationCode',this.value)" style="width:90px; margin:0; font-size:0.8rem; padding:3px 5px;"></td>
+        </tr>`;
+    }
+
+    function updateVismaImportItemField(groupIndex, itemIndex, field, value) {
+        const item = vismaImportDraft.groups[groupIndex].items[itemIndex];
+        item[field] = field === 'quantity' ? Math.max(0, parseInt(value, 10) || 0) : value;
+    }
+    function updateVismaImportGroupName(groupIndex, value) { vismaImportDraft.groups[groupIndex].warehouseName = value; }
+    function toggleVismaImportGroupSkip(groupIndex, skip) {
+        vismaImportDraft.groups[groupIndex].skip = skip;
+        const el = document.getElementById(`visma-import-group-${groupIndex}`);
+        if (el) el.style.opacity = skip ? '0.5' : '1';
+    }
+    function onVismaImportConfirmTextInput() {
+        const val = document.getElementById('visma-import-confirm-text').value.trim().toUpperCase();
+        document.getElementById('btn-visma-import-confirm').disabled = (val !== 'DELETE BEST');
+    }
+
+    function handleVismaImportSummaryModalOverlayClick(e) { if (e.target === document.getElementById('visma-import-summary-modal')) cancelVismaImportSummary(); }
+    function cancelVismaImportSummary() {
+        document.getElementById('visma-import-summary-modal').classList.remove('open');
+        vismaImportDraft = null;
+        vismaImportBestExistingItems = [];
+    }
+
+    // Same lowest-vacant-number + "W##" warehouse-tag logic as generateUniqueBTK() (used by CSV
+    // import/Duplicate), just parameterized on an explicit items array and warehouse id instead of
+    // reading globalInventory/currentWarehouseId — every destination warehouse this import touches
+    // starts empty (a brand-new warehouse, or Best right after being wiped), so existingItems is
+    // always [] at the call sites below and numbering simply starts at 1.
+    function generateUniqueBTKFor(existingItems, reserved, warehouseId) {
+        const used = new Set(reserved || []);
+        let maxN = 0;
+        (existingItems || []).forEach(i => {
+            const m = String(i.BTKnumber || i.btk || '').trim().toUpperCase().match(/^BTK0*(\d+)(?:W\d+)?$/);
+            if (m) { const n = parseInt(m[1], 10); used.add(n); maxN = Math.max(maxN, n); }
+        });
+        used.forEach(n => { maxN = Math.max(maxN, n); });
+        const suffix = 'W' + String(warehouseId).padStart(2, '0');
+        for (let n = 1; n <= maxN; n++) { if (!used.has(n)) return 'BTK' + String(n).padStart(6, '0') + suffix; }
+        let n = maxN + 1;
+        while (used.has(n)) n++;
+        return 'BTK' + String(n).padStart(6, '0') + suffix;
+    }
+
+    // Same insert shape as logActivity() (used everywhere else), with warehouse_id passed
+    // explicitly instead of read from currentWarehouseId — this import writes into several
+    // warehouses in one run, not just whichever one happens to be open right now. Fire-and-forget,
+    // same as logActivity() itself: a logging failure shouldn't roll back or block the real write.
+    // Takes userId as a plain argument rather than calling sb.auth.getUser() itself — that call
+    // hits the Auth server over the network, and the caller (one commitVismaImport() run) already
+    // knows it's the same signed-in user across every one of the (possibly 1000+) entries it logs,
+    // so the caller resolves it once and passes it through instead of re-fetching it per item.
+    async function logActivityFor(warehouseId, action, btk, beforeRow, afterRow, summary, batchId, userId) {
+        const { error } = await sb.from('activity_log').insert({
+            warehouse_id: warehouseId, user_id: userId || null, action,
+            entity_type: 'item', entity_id: btk, before_data: beforeRow || null, after_data: afterRow || null,
+            summary, batch_id: batchId || null
+        });
+        if (error) console.error("Could not log activity:", error);
+    }
+
+    async function commitVismaImport() {
+        const draft = vismaImportDraft;
+        if (!draft) return;
+        const btn = document.getElementById('btn-visma-import-confirm');
+        btn.disabled = true;
+        btn.textContent = 'Importing…';
+
+        const batchId = window.crypto?.randomUUID ? window.crypto.randomUUID() : null;
+        const { data: { user } } = await sb.auth.getUser();
+        const userId = user ? user.id : null;
+        let deleted = 0, created = 0, createFailed = 0, warehousesCreated = 0, bestWipeFailed = false;
+
+        // 1. Wipe Best first (if present) — one batched delete (before_data for each item's
+        // activity_log entry was already captured in vismaImportBestExistingItems at parse time),
+        // plus every Storage object those items' photos used (item_images rows cascade-delete with
+        // the item row itself per schema_item_images.sql, but the actual Storage files don't).
+        const bestGroup = draft.groups.find(g => g.isBest);
+        if (bestGroup && vismaImportBestExistingItems.length) {
+            const { data: photoRows } = await sb.from('item_images').select('full_url, thumb_url').eq('warehouse_id', '1');
+            const storagePaths = [];
+            (photoRows || []).forEach(p => {
+                const fp = storagePathFromPublicUrl(p.full_url, SUPABASE_STORAGE_BUCKET);
+                const tp = storagePathFromPublicUrl(p.thumb_url, SUPABASE_STORAGE_BUCKET);
+                if (fp) storagePaths.push(fp);
+                if (tp) storagePaths.push(tp);
+            });
+            vismaImportBestExistingItems.forEach(row => {
+                const fp = storagePathFromPublicUrl(row.image_full_url, SUPABASE_STORAGE_BUCKET);
+                const tp = storagePathFromPublicUrl(row.image_thumb_url, SUPABASE_STORAGE_BUCKET);
+                if (fp) storagePaths.push(fp);
+                if (tp) storagePaths.push(tp);
+            });
+            if (storagePaths.length) await sb.storage.from(SUPABASE_STORAGE_BUCKET).remove(storagePaths).catch(e => console.error("Could not remove some item images:", e));
+
+            const { error: delErr } = await sb.from('items').delete().eq('warehouse_id', '1');
+            if (delErr) {
+                console.error("Could not wipe Best's items:", delErr);
+                // Best's old rows are still there — inserting the reviewed set on top would collide
+                // with (or duplicate) their BTKs, since generateUniqueBTKFor() assumes this warehouse
+                // starts empty. Skip Best entirely for this run rather than risk that.
+                bestGroup.skip = true;
+                bestWipeFailed = true;
+            } else {
+                vismaImportBestExistingItems.forEach(row => {
+                    deleted++;
+                    logActivityFor('1', 'delete', row.btk, row, null, `Visma import: removed ${row.itemname_en || row.btk} (${row.btk}) before re-import`, batchId, userId);
+                });
+            }
+        }
+
+        // 2. Create any missing warehouses — pushed into WAREHOUSES immediately so the next
+        // suggestNextWarehouseId() call in this same loop doesn't collide with the one just made.
+        // Re-running this import later (a corrected export, a second batch) reuses a warehouse
+        // already created by a PRIOR run instead of minting a second one with the same name — matched
+        // by name only (there's no persistent suffix->warehouse mapping stored anywhere), so this
+        // only catches a group whose default name wasn't hand-edited away in a previous review.
+        for (const group of draft.groups) {
+            if (group.skip || !group.needsNewWarehouse) continue;
+            const existing = WAREHOUSES.find(w => (w.name || '').trim().toLowerCase() === group.warehouseName.trim().toLowerCase());
+            if (existing) { group.warehouseId = existing.l; group.reusedExisting = true; continue; }
+            const l = suggestNextWarehouseId();
+            const address = group.city ? `${group.city}, Sweden` : null;
+            const { error } = await sb.from('warehouses').insert({ l, name: group.warehouseName, address, type: 'database' });
+            if (error) { console.error(`Could not create warehouse "${group.warehouseName}":`, error); group.skip = true; continue; }
+            WAREHOUSES.push({ l, name: group.warehouseName, address, mode: 'supabase' });
+            group.warehouseId = l;
+            warehousesCreated++;
+        }
+
+        // 3. Insert every non-skipped group's items — resolveManufacturer() already de-dupes
+        // against globalManufacturers itself, so no extra caching needed here even with the same
+        // manufacturer name recurring across hundreds of rows.
+        for (const group of draft.groups) {
+            if (group.skip) continue;
+            const warehouseId = group.isBest ? '1' : group.warehouseId;
+            if (!warehouseId) continue; // that warehouse's own creation failed above
+            // Every OTHER destination genuinely starts empty (brand new, or Best just wiped above)
+            // — but a group reusing a warehouse a PRIOR run already created (step 2) is not empty,
+            // so generateUniqueBTKFor must scan its real current items, not assume none exist.
+            let existingItemsForBtk = [];
+            if (group.reusedExisting) {
+                const { data, error } = await sb.from('items').select('btk').eq('warehouse_id', warehouseId);
+                if (error) console.error(`Could not read existing items in "${group.warehouseName}" for BTK numbering:`, error);
+                else existingItemsForBtk = data || [];
+            }
+            const reserved = new Set();
+            for (const item of group.items) {
+                const btk = generateUniqueBTKFor(existingItemsForBtk, reserved, warehouseId);
+                reserved.add(parseInt(btk.slice(3), 10));
+                // Shaped into the same legacy item object every other write path builds (Add Item,
+                // CSV import, Delivery Note) so itemToSupabaseRow() — which resolves the
+                // manufacturer itself, validates unit_type against UNIT_TYPES, and normalizes
+                // 'None' consistently — is the one place that mapping is defined, not a second
+                // hand-rolled copy of it.
+                const legacyItem = {
+                    Manufacturer: item.manufacturer || 'None',
+                    itemnumber: item.itemnumber || 'None', 'itemname(english)': item.name, 'itemname(swedish)': item.name,
+                    itemnumber2: 'None', itemnumber3: item.itemnumber3,
+                    Numberofitems: String(item.quantity), UnitType: 'st', ReorderThreshold: '',
+                    Inventorylocation: item.inventoryLocation || 'None', MapPosition: 'None',
+                    LocationCode: item.locationCode || 'None', Comments: item.comment || 'None',
+                };
+                const row = await itemToSupabaseRow(legacyItem);
+                const { error } = await sb.from('items').insert({ ...row, btk, warehouse_id: warehouseId, images: '' });
+                if (error) { createFailed++; console.error(`Could not create item "${item.name}":`, error); continue; }
+                created++;
+                logActivityFor(warehouseId, 'create', btk, null, row, `Visma import: added ${item.name} (${btk})`, batchId, userId);
+            }
+        }
+
+        document.getElementById('visma-import-summary-modal').classList.remove('open');
+        btn.textContent = '✅ Confirm & Import';
+        vismaImportDraft = null;
+        vismaImportBestExistingItems = [];
+
+        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') await supabaseLoadList(currentWarehouseId);
+        renderWarehouseMeta();
+
+        const parts = [];
+        if (warehousesCreated) parts.push(`created ${warehousesCreated} warehouse${warehousesCreated === 1 ? '' : 's'}`);
+        if (deleted) parts.push(`removed ${deleted} old Best item${deleted === 1 ? '' : 's'}`);
+        if (created) parts.push(`added ${created} item${created === 1 ? '' : 's'}`);
+        if (createFailed) parts.push(`${createFailed} item${createFailed === 1 ? '' : 's'} failed`);
+        if (bestWipeFailed) parts.push(`could not wipe Best — its items were left untouched and its rows were skipped entirely this run`);
+        const msg = parts.length ? `Visma import complete — ${parts.join(', ')}.` : 'Nothing was imported.';
+        const canUndo = batchId && (deleted + created > 0);
+        showToast(msg, (createFailed || bestWipeFailed) ? 'warning' : (parts.length ? 'success' : 'info'), canUndo ? 15000 : 8000,
+            canUndo ? { label: '↩️ Undo', onClick: () => undoImportBatch(batchId) } : null);
+    }
+
     async function submitItemForm() {
         const btk = document.getElementById('ai-btknumber').value.trim();
         const nameEn = document.getElementById('ai-name-en').value.trim();
@@ -10059,6 +10479,7 @@ Respond with ONLY the JSON object, nothing else.`;
                 recipientLine = action.recipientAddress
                     ? `📍 ${escapeHtml(action.recipientAddress)}`
                     : `<span style="color:var(--text-muted);">No address ${action.lowConfidence ? 'found' : 'given'} for ${escapeHtml(action.recipientName)}</span>`;
+                if (action.recipientOrgNumber) recipientLine += `<br>🏢 Org. no: ${escapeHtml(action.recipientOrgNumber)}`;
             }
             infoHtml = `<div class="ai-action-diff">${lines.join('<br>')}${recipientLine ? `<div style="margin-top:4px;">${recipientLine}</div>` : ''}</div>`;
         }
@@ -10166,7 +10587,7 @@ Respond with ONLY the JSON object, nothing else.`;
             if (existing) existing.qty = it.quantity;
             else packOrder.push({ btk: it.btk, qty: it.quantity, packed: false });
         });
-        if (action.recipientName) packOrderRecipient = { name: action.recipientName, address: action.recipientAddress || '' };
+        if (action.recipientName) packOrderRecipient = { name: action.recipientName, address: action.recipientAddress || '', email: '', orgNumber: action.recipientOrgNumber || '' };
         updatePackOrderBadge();
         openPackOrderView();
         syncPackOrderRecipientInputs();
@@ -10205,6 +10626,7 @@ Respond with ONLY the JSON object, nothing else.`;
                 unresolvedCount: draft.items.length - resolved.length,
                 recipientName: draft.recipient.name,
                 recipientAddress: draft.recipient.address,
+                recipientOrgNumber: draft.recipient.orgNumber,
                 lowConfidence: draft.items.length > resolved.length || draft.recipient.confidence === 'not_found',
                 summary: `Pack ${resolved.length} item${resolved.length === 1 ? '' : 's'}` + (draft.recipient.name ? ` for ${draft.recipient.name}` : ''),
             };
@@ -10318,24 +10740,368 @@ Respond with ONLY the JSON object, nothing else.`;
     async function aiHandleOcrCleanup(rawText) {
         await aiEnsurePanelOpen();
         aiAppendMessage('user', `📝 Scanned text:\n${rawText}`);
+        let finalText = rawText;
+        if (aiHasApiKey === null) await aiRefreshKeyStatus();
+        if (!aiHasApiKey) {
+            // No cleanup without a key, but item-matching below needs no LLM call at all — still
+            // worth running against the raw scan rather than giving up entirely.
+            aiAppendMessage('system', aiNoKeyMessage());
+        } else {
+            const thinking = aiAppendMessage('system', 'Cleaning up the scanned text…');
+            try {
+                const cleaned = await aiGetGroqClient().chat({
+                    model: window.GROQ_MODELS.TEXT,
+                    reasoningEffort: 'low',
+                    messages: [
+                        { role: 'system', content: OCR_CLEANUP_SYSTEM_PROMPT },
+                        { role: 'user', content: rawText },
+                    ],
+                });
+                thinking.remove();
+                aiAppendMessage('assistant', cleaned);
+                finalText = cleaned;
+            } catch (e) {
+                thinking.remove();
+                aiAppendMessage('assistant', "Couldn't clean that up — " + aiFriendlyError(e) + " (the raw scan is above.)");
+            }
+        }
+        aiSuggestItemsFromScannedText(finalText);
+    }
+
+    // Checks the (cleaned, or raw if cleanup was skipped/failed) scanned text against the
+    // currently loaded inventory for items it might actually be a label for — a part number match
+    // is the strongest signal, an item name showing up in the text is a weaker fallback. Never
+    // applies anything automatically, just offers "this looks like something we already have" the
+    // same way search_item/list_items do. Runs entirely against globalInventory already in
+    // memory, so — like aiFuzzyFindItem — it needs no network call and works offline too.
+    const AI_OCR_MATCH_LIMIT = 5;
+    function aiFindItemsInScannedText(text) {
+        if (!text || !text.trim()) return [];
+        const normNum = s => (s || '').toString().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const textNorm = normNum(text);
+        const textLower = text.toLowerCase();
+        const matches = [];
+        globalInventory.forEach(item => {
+            let reason = null;
+            // Whitespace/dash-insensitive so "AB 1234-56" on a label still matches an item number
+            // stored as "AB1234-56" or "AB 1234 56". Skips synthetic "444..."-prefixed fillers some
+            // rows carry as placeholders rather than a real printed part number — see the
+            // no-hash-item-identity memory note; those would never legitimately appear on a label.
+            const numbers = [item.itemnumber, item.itemnumber2, item.itemnumber3]
+                .filter(n => n && n !== 'None' && !/^444/.test(String(n).trim()));
+            for (const num of numbers) {
+                const n = normNum(num);
+                if (n.length >= 4 && textNorm.includes(n)) { reason = `Part # ${num}`; break; }
+            }
+            if (!reason && item.BTKnumber && textLower.includes(item.BTKnumber.toLowerCase())) {
+                reason = item.BTKnumber;
+            }
+            if (!reason) {
+                const name = item['itemname(english)'] || item['itemname(swedish)'] || '';
+                const words = [...new Set(name.toLowerCase().split(/\s+/).filter(w => w.length >= 4))];
+                if (words.length) {
+                    const hits = words.filter(w => textLower.includes(w)).length;
+                    if (hits >= 2 || (words.length === 1 && hits === 1)) reason = `Name match: "${name}"`;
+                }
+            }
+            if (reason) matches.push({ btk: item.BTKnumber, name: item['itemname(english)'] || item.BTKnumber, reason });
+        });
+        return matches.slice(0, AI_OCR_MATCH_LIMIT);
+    }
+
+    // Renders any inventory matches found in a scanned label as the same clickable row list
+    // aiRenderItemListMessage already uses for search/list results — silent (no message at all)
+    // when nothing matches, since a label that's genuinely unrelated to stock shouldn't produce noise.
+    function aiSuggestItemsFromScannedText(text) {
+        const matches = aiFindItemsInScannedText(text);
+        if (!matches.length) return;
+        const entries = matches.map(m => ({ btk: m.btk, name: m.name, meta: m.reason }));
+        aiRenderItemListMessage(`🔎 This looks like it might match ${matches.length === 1 ? 'an item' : 'items'} already in stock:`, entries);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  DELIVERY NOTE ("Följsedel") IMPORT — see modules/delivery-note-parser.js for the
+    //  photo-to-structured-draft parsing/matching; everything below is the review-before-write UI
+    //  and the actual Supabase writes, following the same "stage in memory, review, commit in one
+    //  batch, log for undo" convention CSV import (commitCSVImport) already established.
+    // ════════════════════════════════════════════════════════════════════════
+    var deliveryNoteDraft = null;        // raw parsed { manufacturer, warehouseAddress, items } — display only
+    var deliveryNoteMatched = [];        // [{ btk, name, currentQty, deliveredQty, source, include }] — editable, Step 1
+    var deliveryNoteNewItems = [];       // [{ name, itemNumber, quantity, manufacturer, skip }] — editable, Step 2
+    var deliveryNoteStep = 'matched';    // 'matched' | 'new'
+    var deliveryNoteBatchId = null;      // minted on first actual write, shared by both steps — see undoImportBatch()
+    var deliveryNoteUpdateResult = null; // { ok, fail } from Step 1, carried into the final summary toast
+
+    // Entry point from scannerCaptureDeliveryNote(). Gated the same way stock-affecting AI actions
+    // already are: Supabase mode (activity_log/undo needs a real backend) and editor+ (this writes
+    // stock and creates items, not a read-only lookup).
+    async function aiHandleDeliveryNoteScan(dataUrl) {
+        await aiEnsurePanelOpen();
+        aiAppendMessage('user', '🧾 Scanned a delivery note');
+        if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') {
+            aiAppendMessage('system', "Delivery notes update stock and need the Activity Log for undo — that only works in a Supabase-connected warehouse.");
+            return;
+        }
+        if (!canEditItems()) {
+            aiAppendMessage('system', "You don't have permission to update stock in this warehouse.");
+            return;
+        }
         if (aiHasApiKey === null) await aiRefreshKeyStatus();
         if (!aiHasApiKey) { aiAppendMessage('system', aiNoKeyMessage()); return; }
-        const thinking = aiAppendMessage('system', 'Cleaning up the scanned text…');
+        const thinking = aiAppendMessage('system', 'Reading the delivery note…');
+        let draft;
         try {
-            const cleaned = await aiGetGroqClient().chat({
-                model: window.GROQ_MODELS.TEXT,
-                reasoningEffort: 'low',
-                messages: [
-                    { role: 'system', content: OCR_CLEANUP_SYSTEM_PROMPT },
-                    { role: 'user', content: rawText },
-                ],
-            });
-            thinking.remove();
-            aiAppendMessage('assistant', cleaned);
+            draft = await window.parseDeliveryNoteImage(aiGetGroqClient(), dataUrl);
         } catch (e) {
             thinking.remove();
-            aiAppendMessage('assistant', "Couldn't clean that up — " + aiFriendlyError(e) + " (the raw scan is above.)");
+            aiAppendMessage('assistant', "Couldn't read that delivery note — " + aiFriendlyError(e));
+            return;
         }
+        thinking.remove();
+        if (!draft.items.length) {
+            aiAppendMessage('assistant', "I couldn't find any line items on that — try a clearer, flatter photo with good lighting.");
+            return;
+        }
+        // Offline matching, same philosophy as aiFuzzyFindItem/order-parser.js: part number first
+        // (buildPartNumberIndex/findItemByAnyPartNumber, already used by CSV import — an exact,
+        // normalized match on a supplier's own article number), a confident-only name match as
+        // fallback so nothing gets silently misfiled while no one's watching.
+        const partIndex = buildPartNumberIndex(globalInventory);
+        const resolved = window.resolveDeliveryNoteItems(draft.items, {
+            findByPartNumber: (num) => {
+                const hit = findItemByAnyPartNumber({ itemnumber: num, itemnumber2: '', itemnumber3: '' }, partIndex);
+                return hit ? { btk: hit.BTKnumber, name: hit['itemname(english)'] || hit.BTKnumber, currentQty: parseInt(hit.Numberofitems, 10) || 0 } : null;
+            },
+            findByName: (name) => {
+                const match = aiFuzzyFindItem(name);
+                if (!match || !match.confident) return null;
+                const item = match.item;
+                return { btk: item.BTKnumber, name: item['itemname(english)'] || item.BTKnumber, currentQty: parseInt(item.Numberofitems, 10) || 0 };
+            },
+        });
+        const mfrNote = draft.manufacturer ? ` from ${draft.manufacturer}` : '';
+        aiAppendMessage('assistant', `Found ${draft.items.length} line item${draft.items.length === 1 ? '' : 's'}${mfrNote} — ${resolved.matched.length} matched an existing item, ${resolved.unmatched.length} not recognized. Review below before anything is saved.`);
+        openDeliveryNoteReview(draft, resolved);
+    }
+
+    function openDeliveryNoteReview(draft, resolved) {
+        deliveryNoteDraft = draft;
+        deliveryNoteMatched = resolved.matched.map(m => ({ ...m, include: true }));
+        deliveryNoteNewItems = resolved.unmatched.map(u => ({
+            name: u.name, itemNumber: u.itemNumber || '', quantity: u.quantity,
+            manufacturer: draft.manufacturer || '', skip: false,
+        }));
+        deliveryNoteBatchId = null;
+        deliveryNoteUpdateResult = null;
+        deliveryNoteStep = 'matched';
+        document.getElementById('delivery-note-modal').classList.add('open');
+        document.getElementById('btn-delivery-note-continue').disabled = false;
+        renderDeliveryNoteReview();
+    }
+
+    function handleDeliveryNoteModalOverlayClick(e) { if (e.target === document.getElementById('delivery-note-modal')) cancelDeliveryNoteReview(); }
+
+    // Nothing's been written yet at Step 1 — a plain close is safe. At Step 2, Step 1's updates are
+    // already saved, so cancelling just means skipping the not-yet-created new items (never silently
+    // discarded without saying so) rather than a lossless no-op.
+    function cancelDeliveryNoteReview() {
+        if (deliveryNoteStep === 'new') {
+            showConfirmModal({
+                title: 'Skip creating new items?',
+                body: "This delivery note's stock updates are already saved. Skipping now just leaves the unrecognized item(s) uncreated — add them by hand later if needed.",
+                confirmLabel: 'Skip New Items',
+                onConfirm: () => finishDeliveryNoteReview(),
+            });
+        } else {
+            closeDeliveryNoteModal();
+        }
+    }
+
+    function closeDeliveryNoteModal() {
+        document.getElementById('delivery-note-modal').classList.remove('open');
+        deliveryNoteDraft = null; deliveryNoteMatched = []; deliveryNoteNewItems = [];
+        deliveryNoteBatchId = null; deliveryNoteUpdateResult = null;
+    }
+
+    function renderDeliveryNoteReview() {
+        if (deliveryNoteStep === 'matched') renderDeliveryNoteMatchedStep();
+        else renderDeliveryNoteNewStep();
+    }
+
+    function renderDeliveryNoteMatchedStep() {
+        document.getElementById('delivery-note-modal-title').textContent = '🧾 Delivery Note — Step 1: Update Stock';
+        const mfrNote = deliveryNoteDraft.manufacturer ? ` from ${escapeHtml(deliveryNoteDraft.manufacturer)}` : '';
+        const addrNote = deliveryNoteDraft.warehouseAddress ? ` — addressed to: ${escapeHtml(deliveryNoteDraft.warehouseAddress)}` : '';
+        const nextNote = deliveryNoteNewItems.length
+            ? ` ${deliveryNoteNewItems.length} item${deliveryNoteNewItems.length === 1 ? '' : 's'} not recognized — you'll review ${deliveryNoteNewItems.length === 1 ? 'it' : 'them'} as new item(s) next.`
+            : '';
+        document.getElementById('delivery-note-modal-intro').innerHTML = `Delivery note${mfrNote}${addrNote}.${nextNote}`;
+        const body = document.getElementById('delivery-note-modal-body');
+        body.innerHTML = deliveryNoteMatched.length ? deliveryNoteMatched.map((e, i) => `
+            <div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border);">
+                <input type="checkbox" ${e.include ? 'checked' : ''} onchange="toggleDeliveryNoteMatchedInclude(${i}, this.checked)" style="flex-shrink:0;" title="Include this item">
+                <div style="flex:1; min-width:0;">
+                    <div style="font-weight:700;">${escapeHtml(e.name)} <span style="color:var(--text-muted); font-weight:400; font-size:0.8rem;">(${escapeHtml(e.btk)})</span></div>
+                    <div style="color:var(--text-muted); font-size:0.8rem;">Current: ${e.currentQty}${e.source === 'name' ? ' · matched by name — double-check this one' : ' · matched by part number'}</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:4px; flex-shrink:0;">
+                    <span style="font-size:0.8rem; color:var(--text-muted);">+</span>
+                    <input type="number" min="0" value="${e.deliveredQty}" oninput="updateDeliveryNoteMatchedQty(${i}, this.value)" style="width:64px; margin:0; padding:4px 6px;">
+                    <span style="font-size:0.8rem; color:var(--text-muted);">= <b id="delivery-note-newqty-${i}">${e.currentQty + e.deliveredQty}</b></span>
+                </div>
+            </div>`).join('') : `<p style="color:var(--text-muted);">Nothing on this note matched an existing item.</p>`;
+        document.getElementById('btn-delivery-note-continue').textContent = deliveryNoteMatched.length
+            ? (deliveryNoteNewItems.length ? 'Apply & Continue →' : '✅ Apply Updates')
+            : (deliveryNoteNewItems.length ? 'Continue →' : 'Close');
+    }
+
+    function toggleDeliveryNoteMatchedInclude(i, checked) { deliveryNoteMatched[i].include = checked; }
+    function updateDeliveryNoteMatchedQty(i, value) {
+        const qty = Math.max(0, parseInt(value, 10) || 0);
+        deliveryNoteMatched[i].deliveredQty = qty;
+        const el = document.getElementById(`delivery-note-newqty-${i}`);
+        if (el) el.textContent = deliveryNoteMatched[i].currentQty + qty;
+    }
+
+    function renderDeliveryNoteNewStep() {
+        document.getElementById('delivery-note-modal-title').textContent = '🧾 Delivery Note — Step 2: New Items';
+        const activeCount = deliveryNoteNewItems.filter(e => !e.skip).length;
+        document.getElementById('delivery-note-modal-intro').textContent = deliveryNoteNewItems.length
+            ? `${activeCount} of ${deliveryNoteNewItems.length} item(s) below will be created as new — edit any field, or match one to an existing item instead of creating it.`
+            : 'Nothing left to create.';
+        const body = document.getElementById('delivery-note-modal-body');
+        body.innerHTML = deliveryNoteNewItems.length ? deliveryNoteNewItems.map((e, i) => `
+            <div style="padding:10px 0; border-bottom:1px solid var(--border); ${e.skip ? 'opacity:0.5;' : ''}">
+                <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+                    <input type="checkbox" ${e.skip ? '' : 'checked'} onchange="toggleDeliveryNoteNewSkip(${i}, !this.checked)" title="Include this item">
+                    <input type="text" value="${escapeHtml(e.name)}" placeholder="Item name" oninput="updateDeliveryNoteNewField(${i}, 'name', this.value)" style="flex:1; margin:0;">
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+                    <input type="text" value="${escapeHtml(e.manufacturer || '')}" placeholder="Manufacturer" oninput="updateDeliveryNoteNewField(${i}, 'manufacturer', this.value)" style="flex:1; min-width:120px; margin:0;">
+                    <input type="text" value="${escapeHtml(e.itemNumber || '')}" placeholder="Item number" oninput="updateDeliveryNoteNewField(${i}, 'itemNumber', this.value)" style="flex:1; min-width:100px; margin:0;">
+                    <input type="number" min="0" value="${e.quantity}" oninput="updateDeliveryNoteNewField(${i}, 'quantity', this.value)" style="width:70px; margin:0;" title="Quantity">
+                </div>
+                <div style="display:flex; gap:6px;">
+                    <input type="text" placeholder="Or match to an existing BTK instead…" id="delivery-note-new-matchbtk-${i}" style="flex:1; margin:0; font-size:0.8rem;">
+                    <button type="button" class="secondary" onclick="matchDeliveryNoteNewToExisting(${i})" style="min-height:auto; padding:4px 10px; font-size:0.78rem;">Use This</button>
+                </div>
+            </div>`).join('') : '';
+        document.getElementById('btn-delivery-note-continue').textContent = activeCount ? '✅ Create New Items' : '✅ Finish';
+    }
+
+    function toggleDeliveryNoteNewSkip(i, skip) { deliveryNoteNewItems[i].skip = skip; renderDeliveryNoteNewStep(); }
+    function updateDeliveryNoteNewField(i, field, value) {
+        deliveryNoteNewItems[i][field] = field === 'quantity' ? Math.max(0, parseInt(value, 10) || 0) : value;
+    }
+
+    // The "actually this isn't new" escape hatch on a Step 2 row — applies the quantity update
+    // immediately (same helper Step 1's batch commit uses) and removes the row, rather than waiting
+    // for a final commit, since by this point Step 1 has already committed and this is really just
+    // one more matched-item update arriving late.
+    async function matchDeliveryNoteNewToExisting(i) {
+        const input = document.getElementById(`delivery-note-new-matchbtk-${i}`);
+        const btk = (input?.value || '').trim().toUpperCase();
+        if (!btk) { showToast("Type a BTK number first.", "warning"); return; }
+        const item = globalInventory.find(it => it.BTKnumber === btk);
+        if (!item) { showToast(`No item with BTK ${btk} found in this warehouse.`, "warning"); return; }
+        const entry = deliveryNoteNewItems[i];
+        if (!deliveryNoteBatchId && window.crypto?.randomUUID) deliveryNoteBatchId = window.crypto.randomUUID();
+        const result = await applyDeliveryNoteQuantityUpdate(btk, entry.quantity, deliveryNoteBatchId);
+        if (!result.ok) { showToast(`Could not update ${btk}: ${result.reason}`, "error"); return; }
+        await supabaseLoadList(currentWarehouseId);
+        deliveryNoteNewItems.splice(i, 1);
+        showToast(`Matched to ${item['itemname(english)'] || btk} — stock updated.`, "success");
+        renderDeliveryNoteNewStep();
+    }
+
+    // Applies one delivery-note line's quantity increase via the same concurrency-safe
+    // adjust_item_stock RPC adjustStock() itself uses (numberofitems = numberofitems + delta, done
+    // atomically server-side) rather than a plain .update() with a client-computed total — two
+    // people processing delivery notes at once shouldn't be able to silently clobber each other's
+    // stock counts. Snapshots the full row before/after for the activity_log, same as adjustStock().
+    async function applyDeliveryNoteQuantityUpdate(btk, deliveredQty, batchId) {
+        const item = globalInventory.find(i => i.BTKnumber === btk);
+        if (!item) return { ok: false, reason: 'item not found' };
+        const beforeRow = await itemToSupabaseRow(item);
+        const { data: next, error } = await sb.rpc('adjust_item_stock', { p_btk: btk, p_delta: deliveredQty });
+        if (error) { console.error(`Could not update stock for ${btk}:`, error); return { ok: false, reason: error.message }; }
+        item.Numberofitems = String(next);
+        const afterRow = { ...beforeRow, numberofitems: next };
+        logActivity('update', btk, beforeRow, afterRow, `Delivery note: ${summarizeItemChange('update', btk, beforeRow, afterRow)}`, batchId);
+        return { ok: true };
+    }
+
+    async function continueDeliveryNoteReview() {
+        // Guards against a double-tap re-entering this async function before the first call's
+        // awaits resolve, which would otherwise re-read the same deliveryNoteMatched/deliveryNoteNewItems
+        // lists and apply every included stock update (or create every new item) twice under the
+        // same batch. Re-enabled once this call actually lands somewhere interactive again — the
+        // 'new' step's re-render, or a fresh review opened via openDeliveryNoteReview().
+        const btn = document.getElementById('btn-delivery-note-continue');
+        if (btn.disabled) return;
+        btn.disabled = true;
+        if (deliveryNoteStep === 'matched') {
+            const included = deliveryNoteMatched.filter(e => e.include);
+            if (included.length) {
+                if (!deliveryNoteBatchId && window.crypto?.randomUUID) deliveryNoteBatchId = window.crypto.randomUUID();
+                let ok = 0, fail = 0;
+                for (const entry of included) {
+                    const result = await applyDeliveryNoteQuantityUpdate(entry.btk, entry.deliveredQty, deliveryNoteBatchId);
+                    if (result.ok) ok++; else fail++;
+                }
+                if (ok) await supabaseLoadList(currentWarehouseId);
+                deliveryNoteUpdateResult = { ok, fail };
+                if (fail) showToast(`${fail} item(s) could not be updated — see console for details.`, "warning", 6000);
+            }
+            if (deliveryNoteNewItems.length) { deliveryNoteStep = 'new'; renderDeliveryNoteReview(); btn.disabled = false; }
+            else finishDeliveryNoteReview();
+        } else {
+            const toCreate = deliveryNoteNewItems.filter(e => !e.skip);
+            let created = 0, failed = 0;
+            if (toCreate.length) {
+                if (!deliveryNoteBatchId && window.crypto?.randomUUID) deliveryNoteBatchId = window.crypto.randomUUID();
+                const reserved = new Set(); // shared across this loop — see generateUniqueBTK's own doc comment
+                for (const entry of toCreate) {
+                    if (!entry.name.trim()) { failed++; continue; }
+                    const btk = generateUniqueBTK(reserved);
+                    reserved.add(parseInt(btk.slice(3), 10));
+                    const newItem = {
+                        Manufacturer: entry.manufacturer.trim() || 'None', BTKnumber: btk,
+                        'itemname(english)': entry.name.trim(), 'itemname(swedish)': entry.name.trim(),
+                        itemnumber: entry.itemNumber.trim() || 'None', itemnumber2: 'None', itemnumber3: 'None',
+                        Numberofitems: String(entry.quantity), UnitType: 'st', ReorderThreshold: '',
+                        Inventorylocation: 'None', MapPosition: 'None', LocationCode: 'None', Comments: 'None',
+                    };
+                    const row = await itemToSupabaseRow(newItem);
+                    const { error } = await sb.from('items').insert({ ...row, btk, warehouse_id: currentWarehouseId, images: '' });
+                    if (error) { console.error(`Could not create item for "${entry.name}":`, error); failed++; continue; }
+                    logActivity('create', btk, null, row, `Delivery note: ${summarizeItemChange('create', btk, null, row)}`, deliveryNoteBatchId);
+                    created++;
+                }
+                if (created) await supabaseLoadList(currentWarehouseId);
+            }
+            finishDeliveryNoteReview({ created, failed });
+        }
+    }
+
+    function finishDeliveryNoteReview(newItemResult) {
+        // Captured before closeDeliveryNoteModal() clears them — it resets deliveryNoteBatchId/
+        // deliveryNoteUpdateResult as part of tearing down the review state.
+        const batchId = deliveryNoteBatchId;
+        const updateOk = deliveryNoteUpdateResult ? deliveryNoteUpdateResult.ok : 0;
+        const updateFail = deliveryNoteUpdateResult ? deliveryNoteUpdateResult.fail : 0;
+        closeDeliveryNoteModal();
+        const created = newItemResult ? newItemResult.created : 0;
+        const failed = newItemResult ? newItemResult.failed : 0;
+        const parts = [];
+        if (updateOk) parts.push(`updated ${updateOk} item${updateOk === 1 ? '' : 's'}`);
+        if (created) parts.push(`created ${created} new item${created === 1 ? '' : 's'}`);
+        if (updateFail) parts.push(`${updateFail} update${updateFail === 1 ? '' : 's'} failed`);
+        if (failed) parts.push(`${failed} new item${failed === 1 ? '' : 's'} failed`);
+        const msg = parts.length ? `Delivery note processed — ${parts.join(', ')}.` : "Delivery note processed — nothing was changed.";
+        const canUndo = batchId && (updateOk + created > 0);
+        showToast(msg, (updateFail || failed) ? 'warning' : (parts.length ? 'success' : 'info'), canUndo ? 15000 : 6000,
+            canUndo ? { label: '↩️ Undo', onClick: () => undoImportBatch(batchId) } : null);
     }
 
     async function aiTranscribeAudio(blob) {
@@ -10493,9 +11259,14 @@ Respond with ONLY the JSON object, nothing else.`;
     import { parseVCardFile, generateVCard } from './modules/contacts.js';
     import { parseOrderRequest } from './modules/order-parser.js';
     import { createEmailClient, buildMailtoLink, buildPackOrderEmailTemplate } from './modules/email-sender.js';
+    import { parseDeliveryNoteImage, resolveDeliveryNoteItems } from './modules/delivery-note-parser.js';
+    import { buildVismaImportDraft } from './modules/visma-import.js';
     window.parseVCardFile = parseVCardFile;
     window.generateVCard = generateVCard;
     window.parseOrderRequest = parseOrderRequest;
+    window.parseDeliveryNoteImage = parseDeliveryNoteImage;
+    window.resolveDeliveryNoteItems = resolveDeliveryNoteItems;
+    window.buildVismaImportDraft = buildVismaImportDraft;
     window.buildMailtoLink = buildMailtoLink;
     window.buildPackOrderEmailTemplate = buildPackOrderEmailTemplate;
     // Built once at load, same as window.aiGroq — sendEmail() itself still fails cleanly (a plain

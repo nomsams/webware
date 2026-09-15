@@ -4,25 +4,37 @@
 // same pattern as GROQ_API_KEY in groq-proxy.
 //
 // SMTP_PROVIDER picks a host/port preset for the common cases; use "custom" (with SMTP_HOST/
-// SMTP_PORT/SMTP_SECURE) for your own server or a provider not listed.
-//   supabase secrets set SMTP_PROVIDER=gmail        # or outlook / one.com / custom
-//   supabase secrets set SMTP_USER=you@gmail.com
+// SMTP_PORT/SMTP_SECURE) for your own server or a provider not listed. Any of SMTP_HOST/PORT/
+// SECURE can also be set *alongside* a preset to override just that one field (e.g. keep the
+// "office365" preset's host but force a different port) — only "custom" requires all three.
+//   supabase secrets set SMTP_PROVIDER=gmail        # or outlook / office365 / one.com / custom
+//   supabase secrets set SMTP_USER=you@example.com
 //   supabase secrets set SMTP_PASSWORD=...          # an APP PASSWORD, not your login password — see below
-//   supabase secrets set SMTP_FROM="Warehouse <you@gmail.com>"   # optional, defaults to SMTP_USER
-//   supabase secrets set SMTP_HOST=... SMTP_PORT=... SMTP_SECURE=true   # only when SMTP_PROVIDER=custom
+//   supabase secrets set SMTP_FROM="Warehouse <you@example.com>"   # optional, defaults to SMTP_USER
+//   supabase secrets set SMTP_HOST=... SMTP_PORT=... SMTP_SECURE=true   # "custom", or to override one field of a preset
 //
 // Gmail: needs a Google Account "App Password" (requires 2-Step Verification to be enabled) —
 // your normal password will not work over SMTP.
-// Outlook/Office 365: Microsoft has disabled basic SMTP AUTH for most tenants since 2022-2023;
-// plain user/password SMTP may simply be rejected depending on your tenant's settings. If so,
-// you'd need an OAuth2 flow or Microsoft Graph's send-mail API instead of SMTP — not implemented
-// here. Worth confirming your tenant still allows SMTP AUTH before relying on this preset.
+//
+// Outlook comes in two genuinely different flavors — pick the one that matches the mailbox:
+//   - "outlook": a personal outlook.com/hotmail.com/live.com address. Works the same way Gmail
+//     does — turn on 2-step verification, then generate an "app password" at
+//     account.live.com/proofs/AppPassword and use that as SMTP_PASSWORD.
+//   - "office365": a work/school mailbox on Microsoft 365 / Exchange Online. Microsoft disabled
+//     basic SMTP AUTH tenant-wide by default since 2022-2023, so this will fail with an
+//     authentication error until an admin explicitly re-enables it for the mailbox — see the
+//     error message this function returns for exactly how. If your admin can't or won't do that,
+//     SMTP isn't an option at all for that tenant; sending would need Microsoft Graph's
+//     send-mail API with OAuth2 instead, which is a materially different integration and isn't
+//     implemented here.
 // one.com: SMTP is generally enabled by default with your mailbox password — see one.com's own
 // SMTP docs for the current host/port if send.one.com stops working.
 //
-// This has not been exercised against a live SMTP server in this environment (no Deno runtime
-// available here) — the denomailer usage follows its documented API, but verify it end-to-end
-// once deployed before relying on it.
+// Not exercised against a live SMTP server in this environment (no Deno runtime available here)
+// — the denomailer usage follows its documented API (confirmed against its own README: tls:true
+// is full TLS, tls:false is STARTTLS — what both Outlook presets below rely on at port 587) but
+// verify it end-to-end once deployed before relying on it, especially for a mailbox/tenant this
+// hasn't been tried against yet.
 //
 // Deploy: supabase functions deploy send-email
 
@@ -39,18 +51,29 @@ const SMTP_FROM = Deno.env.get("SMTP_FROM") || SMTP_USER;
 
 const SMTP_PRESETS: Record<string, { host: string; port: number; secure: boolean }> = {
   gmail: { host: "smtp.gmail.com", port: 465, secure: true },
-  outlook: { host: "smtp.office365.com", port: 587, secure: false }, // STARTTLS, see the tenant caveat above
+  // Personal outlook.com/hotmail.com/live.com — NOT the same host as a Microsoft 365 business
+  // tenant (see "office365" below); using the wrong one of these two is the most common way this
+  // preset fails outright.
+  outlook: { host: "smtp-mail.outlook.com", port: 587, secure: false },
+  // Work/school mailbox on Microsoft 365 / Exchange Online — see the tenant-wide SMTP AUTH caveat
+  // in the header comment above.
+  office365: { host: "smtp.office365.com", port: 587, secure: false },
   "one.com": { host: "send.one.com", port: 465, secure: true },
 };
 
 function resolveSmtpConfig() {
-  if (SMTP_PROVIDER !== "custom" && SMTP_PRESETS[SMTP_PROVIDER]) {
-    return SMTP_PRESETS[SMTP_PROVIDER];
-  }
-  const host = Deno.env.get("SMTP_HOST");
-  const port = Number(Deno.env.get("SMTP_PORT") || 587);
-  const secure = (Deno.env.get("SMTP_SECURE") || "false").toLowerCase() === "true";
+  const preset = SMTP_PRESETS[SMTP_PROVIDER];
+  // SMTP_HOST/PORT/SECURE override the matching field of a preset when set, or fully define a
+  // config on their own when there's no preset at all — not just for SMTP_PROVIDER=custom, but
+  // for any unrecognized/typo'd provider value too, same as before this preset table grew a
+  // per-field-override option (a provider name that isn't in the table above is otherwise
+  // indistinguishable from "custom" as far as this function is concerned).
+  const host = Deno.env.get("SMTP_HOST") || preset?.host;
   if (!host) return null;
+  const portEnv = Deno.env.get("SMTP_PORT");
+  const port = portEnv ? Number(portEnv) : (preset?.port ?? 587);
+  const secureEnv = Deno.env.get("SMTP_SECURE");
+  const secure = secureEnv ? secureEnv.toLowerCase() === "true" : (preset?.secure ?? false);
   return { host, port, secure };
 }
 
@@ -132,7 +155,8 @@ Deno.serve(async (req) => {
         content: text || "",
       });
     } catch (err) {
-      return json({ error: `send failed: ${err instanceof Error ? err.message : String(err)}` }, 502);
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      return json({ error: `send failed: ${rawMsg}${smtpFailureHint(rawMsg)}` }, 502);
     } finally {
       await client.close();
     }
@@ -149,4 +173,27 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
+}
+
+// Turns the SMTP server's own (often cryptic) rejection text into an actionable hint for the two
+// failure modes that account for nearly every real support request here: Microsoft's tenant-wide
+// SMTP AUTH block (the "office365" preset's whole reason for existing as a separate warning), and
+// a plain wrong-password mixup (most often someone using their real login password instead of an
+// app password). Anything else is left as just the raw SMTP error — better to say nothing than to
+// guess wrong.
+function smtpFailureHint(rawMsg: string): string {
+  if (/smtpclientauthentication is disabled/i.test(rawMsg) || /5\.7\.139/.test(rawMsg)) {
+    return " — SMTP AUTH is disabled for this mailbox/tenant (Microsoft's default since 2022-2023). " +
+      "An admin needs to turn it on: Exchange Admin Center → Recipients → the mailbox → " +
+      "\"Manage email apps\" → enable \"Authenticated SMTP\" (or PowerShell: " +
+      "Set-CASMailbox -Identity <email> -SmtpClientAuthenticationDisabled $false), then wait " +
+      "up to an hour for it to take effect. If tenant policy blocks this entirely, SMTP isn't " +
+      "usable here and sending would need Microsoft Graph's API with OAuth2 instead.";
+  }
+  if (/5\.7\.3/.test(rawMsg) || /authentication unsuccessful/i.test(rawMsg) || /invalid login/i.test(rawMsg)) {
+    return " — check SMTP_USER/SMTP_PASSWORD. For Gmail and personal Outlook.com/Hotmail " +
+      "accounts this must be an app password (generated after turning on 2-step verification), " +
+      "not the account's normal sign-in password.";
+  }
+  return "";
 }

@@ -63,14 +63,22 @@ export function buildMailtoLink({ to, subject = '', body = '' }) {
 // Builds a ready subject/body for notifying someone about a packed order — takes the same shape
 // order-parser.js's draft.items / draft.recipient produce, so the two modules compose directly:
 // parseOrderRequest() -> buildPackOrderEmailTemplate() -> sendEmail()/buildMailtoLink().
-export function buildPackOrderEmailTemplate({ orderNumber, recipientName, items = [], fromName }) {
+// recipientAddress/recipientOrgNumber are optional (order-parser.js's web-search lookup, or
+// whatever a Saved Recipient/prefilled address has on file) and are only added as a "Ship to:"
+// line when actually known — never guessed here.
+export function buildPackOrderEmailTemplate({ orderNumber, recipientName, recipientAddress, recipientOrgNumber, items = [], fromName }) {
   const subject = orderNumber ? `Pack order ${orderNumber}` : 'New pack order';
   const lines = items.map((it) => `- ${it.quantity}x ${it.btk || it.reference}${it.matchedName ? ` (${it.matchedName})` : ''}`);
+  const shipToLines = [
+    recipientAddress ? `Ship to: ${recipientAddress.replace(/\n/g, ', ')}` : null,
+    recipientOrgNumber ? `Org. no: ${recipientOrgNumber}` : null,
+  ].filter(Boolean);
   const text = [
     `Hi${recipientName ? ` ${recipientName}` : ''},`,
     '',
     'The following items have been packed for you:',
     ...lines,
+    ...(shipToLines.length ? ['', ...shipToLines] : []),
     '',
     fromName ? `From: ${fromName}` : null,
     fromName ? '' : null,

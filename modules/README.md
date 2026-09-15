@@ -3,12 +3,15 @@
 Standalone JS building blocks for functionality discussed for the app. Most of these aren't
 imported by `index.html` yet — nothing changes until a module is deliberately wired in — except
 **`perspective-warp.js`**, **`groq-client.js`**, **`cors-proxy.js`**, **`web-search.js`**,
-**`order-parser.js`**, **`contacts.js`**, and **`email-sender.js`**, which are (via the
+**`order-parser.js`**, **`contacts.js`**, **`email-sender.js`**, **`delivery-note-parser.js`**, and
+**`visma-import.js`**, which are (via the
 `<script type="module">` bridge near the end of `index.html`, since the rest of the app is one
 classic script) — the first four back the 🤖 AI Assistant chat bubble, `order-parser.js` backs its
-natural-language Pack Order action, `contacts.js` backs the Saved Recipients picker, and
+natural-language Pack Order action, `contacts.js` backs the Saved Recipients picker,
 `email-sender.js` backs the "📧 Email Recipient" Compose Email modal — both on the Pack Order
-screen (see the README's Features list for all of these). `img-square.js` remains unwired. Each
+screen — `delivery-note-parser.js` backs the "🧾 Delivery Note" scanner capture, and
+`visma-import.js` backs the header's "📥 Import from Visma" button (see the README's Features/Data
+Import Workflow sections for all of these). `img-square.js` remains unwired. Each
 file has a `STATUS:` header comment saying which. Run all tests with:
 
 ```bash
@@ -55,10 +58,19 @@ node --test modules/tests/*.test.js
   `aiFuzzyFindItem()` — the same fuzzy matcher `search_item`/`pack_kit` use — as
   `searchItemCandidates`, scored by `bestCandidateMatch()` to find the closest hit. This works
   offline too, since it's scored against the already-loaded catalog rather than a live query.
-  Recipient address lookup is wired to `web-search.js` (`window.duckySearch`/`window.crawly`) —
-  the same DuckDuckGo path the assistant's own `web_search` action uses — so a named recipient
-  with no address gets one searched for automatically. `fromAddress` is the current warehouse's
-  own name/address (via `getWarehouseMeta()`), not inferred from the text.
+  Recipient info lookup is wired to `web-search.js` (`window.duckySearch`/`window.crawly`) — the
+  same DuckDuckGo path the assistant's own `web_search` action uses — so a named recipient with no
+  address gets one searched for automatically (`recipient.address`); the same lookup also tries to
+  pick out an organization/registration number (`recipient.orgNumber`, e.g. Swedish
+  `556677-8899` — `guessOrgNumber()`, preferring a labeled line like "Org.nr:"/"VAT" over a bare
+  number-shaped match so a stray invoice/phone number isn't mistaken for one) across up to 3
+  search results, since an address and an org number often live on different pages of the same
+  site. index.html threads `recipient.orgNumber` through to the confirm card, the applied pack
+  order's recipient fields (alongside name/address), and — since neither the `orders` table nor
+  vCard has a slot for it — only into `buildPackOrderEmailTemplate()`'s optional "Org. no:" line
+  and the local-only Saved Recipients entry, same treatment as the recipient's email address.
+  `fromAddress` is the current warehouse's own name/address (via `getWarehouseMeta()`), not
+  inferred from the text.
 
   **Multi-warehouse handling**: orders are already single-warehouse (`orders.warehouse_id`) and,
   per the user, pack orders are only ever sent from one warehouse at a time — so item resolution
@@ -73,6 +85,66 @@ node --test modules/tests/*.test.js
   needed to add it later: items already carry `manufacturer` + `itemnumber` (the manufacturer's own
   part number), which is what actually identifies "the same product" across warehouses if you want
   to match on that instead of by name.
+- **`delivery-note-parser.js`** — **wired in**, as the scanner modal's "🧾 Delivery Note" button:
+  reads a photographed delivery note/packing slip ("följsedel") via a *multimodal* Groq model
+  (`GROQ_MODELS.MULTIMODAL`, sent as an `image_url` content part alongside the extraction prompt —
+  see `parseDeliveryNoteImage()`) rather than Tesseract OCR + text cleanup the way the "📝 Scan
+  Text" button works — a vision model keeps the note's own layout/context (which column is qty vs.
+  item number, which address block is the ship-to vs. the supplier's own letterhead) that flattened
+  OCR text alone loses. `parseDeliveryNoteReply()` is the pure JSON-extraction half (same
+  code-fence/prose-tolerant approach as `order-parser.js`'s `parseJsonReply`), returning
+  `{ manufacturer, warehouseAddress, items: [{ name, itemNumber, quantity }] }`.
+  `resolveDeliveryNoteItems()` is the pure matching half — dependency-injected `findByPartNumber`/
+  `findByName` callbacks (index.html supplies its own `buildPartNumberIndex`/
+  `findItemByAnyPartNumber` — the same offline part-number index CSV import uses — for the first,
+  and `aiFuzzyFindItem()` gated to a *confident* match only, never a "did you mean?" guess, for the
+  second) split each line into `matched` (existing item + computed `newQty`) or `unmatched`, so both
+  halves are fully testable without a live inventory, a DOM, or a real vision call.
+
+  index.html's `aiHandleDeliveryNoteScan()` wires the capture (a downscaled JPEG data URL — legible
+  well below full camera resolution, and keeping the vision-call payload small actually matters here
+  unlike local OCR) into a **two-step review before anything is written**, exactly as requested:
+  Step 1 shows every matched line with an editable delivered-quantity and applies those via the same
+  concurrency-safe `adjust_item_stock` RPC the item page's own stock stepper uses (never a raw
+  overwrite); only once that's done does Step 2 show whatever didn't match as editable new-item
+  proposals (name/manufacturer/item number/quantity, each skippable, or redirectable to an existing
+  BTK typed in by hand) for `generateUniqueBTK()` + `resolveManufacturer()` to actually create.
+  Both steps' writes share one `activity_log` `batch_id`, so the whole note — quantity updates and
+  new items together — undoes as one action via the existing `undoImportBatch()`, the same mechanism
+  a CSV import uses; nothing new was added to the schema for this. Requires Supabase mode (activity
+  log/undo needs a real backend) and editor/maintainer/admin, same bar CSV import and manual stock
+  edits already use.
+- **`visma-import.js`** — **wired in**, as the header's "📥 Import from Visma" button (admin only —
+  see below): turns a raw Visma article export plus an optional physical inventory-count file into
+  per-destination-warehouse item drafts, pure/dependency-injected/unit-tested like
+  `order-parser.js`/`delivery-note-parser.js`, no Supabase/DOM access at all.
+  `classifySuffix()`/`KNOWN_ARTICLE_SUFFIXES` route each row by its article number's trailing
+  company/city code (`MB`→Best, `BBD`/`GN`/`GJ`/`SN`→their own new warehouse, anything else — no
+  suffix, or an unrecognized one — into one shared `UNRECOGNIZED_SUFFIX` bucket, confirmed against
+  the real export rather than guessed). `inferManufacturer()` tries the count file's own company
+  column first, then `KNOWN_BRAND_PREFIXES` (brand names actually seen in this catalog), then
+  `extractHanyStyleCode()`'s three regex shapes (HÄNY's own internal numbering turns up in names
+  with or without the word "HÄNY" itself, so a shape match alone is treated as HÄNY specifically —
+  the one case worth inferring from a code shape alone). `resolveQuantity()` prefers the count
+  file's physically-counted `Antal` when a row matches one; otherwise Visma's own `ant_i_lager` is
+  used only when non-negative — it's unreliable in the wild (frequently deeply negative in the real
+  export), so a negative reading becomes `0` with a comment recording what it actually said rather
+  than being trusted. `parsePlatsLocation()` turns a physical-count location like `"A 3-3 1-1"` into
+  a real `LocationCode` (confirmed field-by-field against the actual warehouse: Zone, Depth, Level,
+  Bin, Row — see the README's "Bin Location Codes" section). `buildVismaImportDraft()` ties all of
+  this together, joining the two files by article number and grouping the result by destination.
+
+  index.html's own code (no separate module, since it's all Supabase/DOM work) does the actual
+  writing: `generateUniqueBTKFor()`/`logActivityFor()` are explicit-warehouse-id variants of
+  `generateUniqueBTK()`/`logActivity()` (both of which otherwise assume "whichever warehouse is
+  currently open"), since one import run can create and populate several warehouses at once. A
+  review table (every field editable, grouped by destination, new-warehouse names editable or
+  skippable) sits between parsing and any write; choosing to import into Best requires typing a
+  confirmation phrase, since it deletes every current Best item — photos included, via
+  `storagePathFromPublicUrl()` same as `deleteItemPhotoRow()` — before adding the reviewed set.
+  Every write from the whole run (Best's deletions and every warehouse's new items) shares one
+  `activity_log` batch, reverting as a single `undoImportBatch()` call, unchanged from how a CSV
+  import already uses it.
 - **`img-square.js`** — pads an image to a square, filling the new space with a solid color or a
   color sampled from the image's own edges. Ported from `github.com/nomsams/imgsquare`. Intended
   to slot into the existing item-photo/manufacturer-logo canvas editor as an extra step.
@@ -85,25 +157,33 @@ node --test modules/tests/*.test.js
   autosave (plain `localStorage`) and "Google Calendar sync" (turned out to be a
   `calendar.google.com` deep link / `.ics` download, not a real API integration) weren't ported —
   neither is more than a few lines to add directly wherever this ends up wired in, if wanted.
-- **`email-sender.js`** + **`../supabase/functions/send-email/index.ts`** — **wired in**, as the
-  "📧 Email Recipient" Compose Email modal on the Pack Order screen (a template dropdown prefills
-  subject/body via `buildPackOrderEmailTemplate()`, both stay fully editable either way). Sends
-  email via SMTP (Gmail/Outlook/one.com presets, or a custom host for your own server), credentials
-  held as Supabase secrets, same pattern as `GROQ_API_KEY` — **requires `send-email` deployed and
-  those secrets set** (`supabase functions deploy send-email`, then the `supabase secrets set ...`
-  calls in the function's own doc comment) before "📧 Send Email" will work; until then it fails
-  with a clear "SMTP is not configured" message rather than a silent/opaque error. The function
-  requires editor/maintainer/admin (checked server-side against `profiles.role`, not just "signed
-  in" — sending mail as the org's own SMTP identity to an arbitrary recipient is sensitive enough to
-  need the same bar the rest of the app uses for writes) and validates `to`/`subject` (a real email
-  shape, no `\r\n`) before handing anything to the SMTP client, as defense in depth against header
-  injection. "✉️ Mail App" (`buildMailtoLink()`) is the zero-backend alternative next to it — always
-  available, no deployment needed, just opens the user's own mail client with everything prefilled;
-  nothing is sent until they hit send there themselves. **Not exercised against a live SMTP server**
-  (no Deno runtime available in this environment) — the `denomailer` usage follows its documented
-  API but verify it end-to-end once deployed. See the function's doc comment for the Gmail
-  app-password requirement and the Outlook basic-auth caveat (Microsoft has disabled it for most
-  tenants since 2022–2023 — confirm yours still allows it before relying on that preset).
+- **`email-sender.js`** + **`../supabase/functions/send-email/index.ts`** — **wired in and deployed**,
+  as the "📧 Email Recipient" Compose Email modal on the Pack Order screen (a template dropdown
+  prefills subject/body via `buildPackOrderEmailTemplate()` — including an optional "Ship to: …" /
+  "Org. no: …" block when the recipient's address/org number are known, e.g. from
+  `order-parser.js`'s web-search lookup or a Saved Recipient — both stay fully editable either way).
+  Sends email via SMTP (Gmail, personal Outlook.com/Hotmail (`outlook` preset), a Microsoft
+  365/Exchange Online work mailbox (`office365` preset — a genuinely different host/auth story than
+  personal Outlook, see the function's own doc comment), one.com, or a custom host), credentials
+  held as Supabase secrets, same pattern as `GROQ_API_KEY` — **still needs those secrets actually
+  set** (`supabase secrets set SMTP_PROVIDER=... SMTP_USER=... SMTP_PASSWORD=...`, see the function's
+  own doc comment for the full list and per-provider notes) before "📧 Send Email" will work; until
+  then it fails with a clear "SMTP is not configured" message rather than a silent/opaque error. A
+  failed send past that point gets an actionable hint appended for the two most common real-world
+  failures — Microsoft's tenant-wide SMTP AUTH block (`office365` specifically) and a wrong-password
+  mixup (a real sign-in password instead of an app password) — rather than just the SMTP server's
+  own cryptic rejection text. The function requires editor/maintainer/admin (checked server-side
+  against `profiles.role`, not just "signed in" — sending mail as the org's own SMTP identity to an
+  arbitrary recipient is sensitive enough to need the same bar the rest of the app uses for writes)
+  and validates `to`/`subject` (a real email shape, no `\r\n`) before handing anything to the SMTP
+  client, as defense in depth against header injection. "✉️ Mail App" (`buildMailtoLink()`) is the
+  zero-backend alternative next to it — always available, no deployment needed, just opens the
+  user's own mail client with everything prefilled; nothing is sent until they hit send there
+  themselves. **Not exercised against a live SMTP server** (no Deno runtime available in this
+  environment) — the `denomailer` usage follows its documented API (confirmed against its own
+  README: `tls: true` is full TLS, `tls: false` is STARTTLS, which is what both Outlook presets rely
+  on at port 587) but verify it end-to-end once real SMTP secrets are set, especially for a
+  mailbox/tenant this hasn't been tried against yet.
 
   **On the recipient's email address and GDPR**: index.html deliberately never adds it to the
   `orders` table (which is already synced/backed-up/admin-visible across the org) — it only ever
