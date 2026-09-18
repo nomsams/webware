@@ -22,17 +22,33 @@
 //     left-to-right, Row = position front-to-back, 1 = closest to the walkway) — matching
 //     webware's own LocationCode format (Zone+Depth-Level-Bin(-Row), Row omitted when 1).
 //
+// A later export ("v3") added two more columns directly on the Visma rows themselves —
+// `manufacturers` (hand-curated for ~60% of rows) and `location` (the same Plats values as the
+// separate inventory-count file, for the same 62 Best rows) — so both are used as an ADDITIONAL,
+// lower-priority source alongside the inventory-count file's own Företag/Plats, not a replacement
+// for it: the inventory-count file is still authoritative when a row has one.
+//
+// Item numbers: `artikelnr` (Visma's own code) is always Item #3 ("internal"). Item #1/#2 come
+// from whichever of these is available, in order: the inventory-count file's own Artikelnummer
+// (hand-verified, e.g. Reed's "12070") always wins as Item #1 when given; otherwise up to two
+// *distinct* manufacturer-style codes are pulled out of the product name itself — HÄNY parts
+// often carry two at once (e.g. "793.539 HÄNY LUFTFILTER HPU6 H-5075" has both a dotted code and a
+// letter-dash-digits code), Weber/TEI-style parts use a "LETTERS space DIGITS" shape ("REP 990",
+// "EXM 731", "TE 726"), and some are just a bare 6-8 digit part number. Regex extraction never
+// overwrites a number that's already known from a more authoritative source — it only fills a gap.
+//
 // Usage:
 //   import { buildVismaImportDraft } from './visma-import.js';
 //   const draft = buildVismaImportDraft(vismaRows, inventeringRows);
 //   // vismaRows: parsed rows of the Visma export (Papa.parse(text, {header:true}).data) — each
-//   //   needs at least artikelnr/artikelnamn/ant_i_lager.
+//   //   needs at least artikelnr/artikelnamn/ant_i_lager/enhet, plus optionally manufacturers/location.
 //   // inventeringRows: parsed rows of the physical count file — each needs at least
-//   //   visma_artikelnummer/Artikelnummer/Företag/Plats/Antal.
+//   //   visma_artikelnummer/Artikelnummer/Företag/Plats/Antal. Optional — pass [] if you're relying
+//   //   entirely on a Visma export that already has its own manufacturers/location columns.
 //   // draft: {
 //   //   groups: [{ suffixCode, isBest, needsNewWarehouse, warehouseName, city, items: [{
-//   //     vismaCode, name, manufacturer, itemnumber, itemnumber3, quantity, comment,
-//   //     locationCode, inventoryLocation,
+//   //     vismaCode, name, manufacturer, itemnumber, itemnumber2, itemnumber3, unitType,
+//   //     quantity, comment, locationCode, inventoryLocation,
 //   //   }] }],
 //   //   unresolvedManufacturerCount, noLocationCount, resetQuantityCount,
 //   // }
@@ -62,9 +78,14 @@ export function classifySuffix(artikelnr) {
 
 // Brand names actually observed in the real export, as a plain "name starts with" prefix check —
 // deliberately a short, hand-maintained list rather than anything fuzzy, since a wrong brand guess
-// is worse than leaving a manufacturer blank for a human to fill in during review.
+// is worse than leaving a manufacturer blank for a human to fill in during review. Kept to brands
+// that are both frequent AND distinctive enough as a prefix to be safe (a generic word like
+// "Superior" or "Flex" — also seen in the data, just 1-2 rows each — is exactly the kind of
+// plausible-looking guess this list deliberately excludes; those rows rely on the CSV's own
+// `manufacturers` column or the inventory-count file's Företag instead, see inferManufacturer()).
 export const KNOWN_BRAND_PREFIXES = [
   'HÄNY', 'WEBER', 'MAPE', 'TEI', 'ECOBETON', 'SIKA', 'REED', 'GA LINDBERG',
+  'KRAFT TOOLS', 'NYCANDER', 'HEIDELBERG', 'RAMBOARD',
 ];
 
 export function findBrandPrefix(name) {
@@ -74,10 +95,36 @@ export function findBrandPrefix(name) {
 
 // The three HÄNY-internal numbering shapes confirmed against the real catalog — a dotted 3-digit
 // code ("794.035"), a letter-dash-digits code ("D-2728"/"H-5189"), or a digits-dash-letters-dash-
-// digits code ("2261-CS-11"). Checked in this order; the first match wins.
+// digits code ("2261-CS-11"). Checked in this order; the first match wins. These three are also
+// used as a manufacturer signal (see inferManufacturer) — they're specific enough to HÄNY's own
+// numbering that a match alone is worth trusting, unlike the two below.
 const RE_DOTTED = /\b\d{3}\.\d{2,3}[A-Z]?\b/;
 const RE_LETTER_DASH_DIGITS = /\b[A-Z]-\d{3,4}\b/;
 const RE_DIGITS_DASH_LETTERS_DASH_DIGITS = /\b\d{3,4}-[A-Z]{1,2}-\d{2,3}\b/;
+// A bare manufacturer part number with no separators at all (e.g. HÄNY's "1012785") — 6-8 digits
+// specifically to avoid catching a short quantity/year-like number or colliding with Item #3 (the
+// Visma article number, which itself is usually shorter or carries a letter suffix).
+const RE_BARE_DIGITS = /\b\d{6,8}\b/;
+// Weber/TEI/HÄNY-style model codes: a short letter prefix, a space, then digits ("REP 990",
+// "EXM 731", "TE 726", "IC 311", "ZMP 725", "MF 80") — distinct from the Visma article number's
+// own compact form of the same code (e.g. "REP990MB", no space), which is why this needs to look
+// at the *name*, not artikelnr. Deliberately a whitelist of confirmed real prefixes rather than
+// "any 2-5 letters" — checked against the full real export, a generic version of this pattern
+// matches on plenty of ordinary descriptive words followed by a measurement or weight ("RING 142"
+// from "O-RING 142,5 X...", "VIT 25" = "white, 25 kg", "MM 20", "DIN 912", cement grade "LL 42",
+// etc.) — every one of those would have been a wrong item number, not a real manufacturer code.
+const RE_LETTERS_SPACE_DIGITS = /\b(REP|EXM|TE|IC|ZMP|MF)\s\d{2,4}\b/;
+
+// Each whitelisted model-code prefix above belongs to exactly one manufacturer in this catalog —
+// confirmed against every real occurrence, not guessed — so a row missing both Företag and the
+// brand word itself in its name (e.g. "EXM 702 EXPANDER 20 KG", no "WEBER" anywhere) can still be
+// resolved via its own model code instead of falling back to blank.
+const CODE_PREFIX_MANUFACTURER = { REP: 'WEBER', EXM: 'WEBER', TE: 'TEI', IC: 'HÄNY', ZMP: 'HÄNY', MF: 'HÄNY' };
+
+function inferManufacturerFromCodePrefix(name) {
+  const m = String(name || '').toUpperCase().match(RE_LETTERS_SPACE_DIGITS);
+  return m ? (CODE_PREFIX_MANUFACTURER[m[1]] || null) : null;
+}
 
 export function extractHanyStyleCode(name) {
   const upper = String(name || '').toUpperCase();
@@ -85,17 +132,59 @@ export function extractHanyStyleCode(name) {
   return m ? m[0] : null;
 }
 
-// Företag (from the inventory-count file) wins outright when given; otherwise a known brand
-// prefix in the name; otherwise a HÄNY-style code shape in the name implies HÄNY specifically —
-// the one case worth inferring from a code shape alone, per how HÄNY's own parts are actually
+// Up to two *distinct* manufacturer-style codes found in a product name, checked in this priority
+// order (most specific/least likely to be a false hit, first) and de-duplicated — a name carrying
+// two different code shapes (common for HÄNY, see the module header comment) yields both, a name
+// with only one shape yields just that one, repeated occurrences of the same code count once.
+const CODE_PATTERNS = [RE_DOTTED, RE_LETTER_DASH_DIGITS, RE_DIGITS_DASH_LETTERS_DASH_DIGITS, RE_BARE_DIGITS, RE_LETTERS_SPACE_DIGITS];
+
+export function extractItemNumberCandidates(name) {
+  const upper = String(name || '').toUpperCase();
+  const found = [];
+  for (const re of CODE_PATTERNS) {
+    const m = upper.match(re);
+    if (m && !found.includes(m[0])) {
+      found.push(m[0]);
+      if (found.length >= 2) break;
+    }
+  }
+  return found;
+}
+
+// Priority: the inventory-count file's own Företag (hand-verified for the 62 Best rows it covers)
+// wins outright; then the Visma export's own `manufacturers` column (hand-curated for ~60% of the
+// full catalog, added in the "v3" export) when given; then a known brand prefix in the name; then
+// a whitelisted model-code prefix (REP/EXM/TE/IC/ZMP/MF, see CODE_PREFIX_MANUFACTURER) — for a row
+// missing the brand word itself; then a HÄNY-style code shape in the name implies HÄNY specifically
+// — the one case worth inferring from a code shape alone, per how HÄNY's own parts are actually
 // named in this catalog (their brand word doesn't always appear, their numbering scheme does).
 // Anything else is left blank for a human to fill in during review, never guessed further.
-export function inferManufacturer(name, foretag) {
+export function inferManufacturer(name, { foretag, csvManufacturer } = {}) {
   if (foretag && String(foretag).trim()) return String(foretag).trim();
+  if (csvManufacturer && String(csvManufacturer).trim()) return String(csvManufacturer).trim();
   const brand = findBrandPrefix(name);
   if (brand) return brand;
+  const fromCode = inferManufacturerFromCodePrefix(name);
+  if (fromCode) return fromCode;
   if (extractHanyStyleCode(name)) return 'HÄNY';
   return null;
+}
+
+// Visma's `enhet` column uses Swedish unit words — mapped to webware's own UNIT_TYPES values
+// (index.html) rather than used verbatim, so the app's Add/Edit-item dropdown and this import
+// agree on one canonical value per unit instead of two spellings for the same thing. Falls back to
+// 'st' (the app's own default) for anything unrecognized, same as itemToSupabaseRow() already does
+// for any UnitType value outside UNIT_TYPES — so an unmapped unit degrades safely either way.
+const ENHET_TO_UNIT_TYPE = {
+  styck: 'st', kilo: 'kg', liter: 'liter', pall: 'pallet',
+  dag: 'dag', rulle: 'rulle', meter: 'meter', kvadratmeter: 'kvadratmeter',
+  vecka: 'vecka', paket: 'paket', timmar: 'timmar', 'löpmeter': 'lopmeter',
+  'månad': 'manad', 'förpackning': 'forpackning', kilometer: 'kilometer',
+};
+
+export function mapEnhetToUnitType(enhet) {
+  const key = String(enhet || '').trim().toLowerCase();
+  return ENHET_TO_UNIT_TYPE[key] || 'st';
 }
 
 // Visma exports Swedish-formatted numbers (comma decimal, space thousands-separator, e.g.
@@ -166,23 +255,43 @@ export function buildVismaImportDraft(vismaRows, inventeringRows) {
     const inventeringMatch = inventeringByCode.get(vismaCode) || null;
     const suffixCode = classifySuffix(vismaCode);
 
-    const manufacturer = inferManufacturer(name, inventeringMatch && inventeringMatch['Företag']);
+    const manufacturer = inferManufacturer(name, {
+      foretag: inventeringMatch && inventeringMatch['Företag'],
+      csvManufacturer: row.manufacturers,
+    });
     if (!manufacturer) unresolvedManufacturerCount++;
 
-    const itemnumber = (inventeringMatch && normalizeCode(inventeringMatch.Artikelnummer)) || extractHanyStyleCode(name) || null;
+    // Item #1: the inventory-count file's own manually-verified Artikelnummer when given, else the
+    // first regex-extracted code from the name. Item #2: a *different* second regex-extracted code,
+    // if the name actually carries two (see the module header comment) — regex never overwrites the
+    // manual Artikelnummer, it only fills in whichever of #1/#2 that source didn't already cover.
+    const manualNumber = inventeringMatch && normalizeCode(inventeringMatch.Artikelnummer);
+    const candidates = extractItemNumberCandidates(name).filter((c) => c.toUpperCase() !== vismaCode.toUpperCase());
+    const itemnumber = manualNumber || candidates[0] || null;
+    // Case-insensitive: candidates are always uppercase (extractItemNumberCandidates upcases the
+    // name before matching), but a manually-typed Artikelnummer can be lowercase — comparing by
+    // exact string would let e.g. manual 'd-2728' and regex-extracted 'D-2728' both survive as two
+    // "different" item numbers when they're actually the same code.
+    const itemnumber2 = candidates.find((c) => !itemnumber || c.toUpperCase() !== itemnumber.toUpperCase()) || null;
 
     const { quantity, comment } = resolveQuantity(row.ant_i_lager, inventeringMatch);
     if (comment) resetQuantityCount++;
 
-    const location = inventeringMatch ? parsePlatsLocation(inventeringMatch.Plats) : null;
+    // The inventory-count file's own Plats wins when this row has a match there; otherwise fall
+    // back to the Visma export's own `location` column (the "v3" export carries the same values
+    // for the same 62 Best rows directly on each row, so a separate count-file upload becomes
+    // optional rather than required once a row already has this).
+    const platsValue = (inventeringMatch && inventeringMatch.Plats) || row.location || null;
+    const location = platsValue ? parsePlatsLocation(platsValue) : null;
     if (!location) noLocationCount++;
 
     const item = {
       vismaCode, name, manufacturer,
-      itemnumber, itemnumber3: vismaCode,
+      itemnumber, itemnumber2, itemnumber3: vismaCode,
+      unitType: mapEnhetToUnitType(row.enhet),
       quantity, comment,
       locationCode: location ? location.locationCode : null,
-      inventoryLocation: inventeringMatch ? (inventeringMatch.Plats || null) : null,
+      inventoryLocation: platsValue,
     };
 
     if (!buckets.has(suffixCode)) buckets.set(suffixCode, []);

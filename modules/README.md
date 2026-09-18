@@ -121,26 +121,58 @@ node --test modules/tests/*.test.js
   `classifySuffix()`/`KNOWN_ARTICLE_SUFFIXES` route each row by its article number's trailing
   company/city code (`MB`→Best, `BBD`/`GN`/`GJ`/`SN`→their own new warehouse, anything else — no
   suffix, or an unrecognized one — into one shared `UNRECOGNIZED_SUFFIX` bucket, confirmed against
-  the real export rather than guessed). `inferManufacturer()` tries the count file's own company
-  column first, then `KNOWN_BRAND_PREFIXES` (brand names actually seen in this catalog), then
-  `extractHanyStyleCode()`'s three regex shapes (HÄNY's own internal numbering turns up in names
-  with or without the word "HÄNY" itself, so a shape match alone is treated as HÄNY specifically —
-  the one case worth inferring from a code shape alone). `resolveQuantity()` prefers the count
-  file's physically-counted `Antal` when a row matches one; otherwise Visma's own `ant_i_lager` is
-  used only when non-negative — it's unreliable in the wild (frequently deeply negative in the real
-  export), so a negative reading becomes `0` with a comment recording what it actually said rather
-  than being trusted. `parsePlatsLocation()` turns a physical-count location like `"A 3-3 1-1"` into
-  a real `LocationCode` (confirmed field-by-field against the actual warehouse: Zone, Depth, Level,
-  Bin, Row — see the README's "Bin Location Codes" section). `buildVismaImportDraft()` ties all of
-  this together, joining the two files by article number and grouping the result by destination.
+  the real export rather than guessed).
+
+  **Manufacturer** (`inferManufacturer()`): the count file's own `Företag` column first, then a
+  later ("v3") export's own `manufacturers` column when the row has one, then `KNOWN_BRAND_PREFIXES`
+  (brand names actually seen in this catalog, kept to ones frequent *and* distinctive enough to be
+  a safe prefix check — a generic word like "Superior" or "Flex", also seen in the data at 1-2 rows
+  each, is deliberately excluded), then a whitelisted model-code prefix (`CODE_PREFIX_MANUFACTURER`
+  — see below) for a row missing the brand word itself, then `extractHanyStyleCode()`'s three regex
+  shapes (HÄNY's own internal numbering turns up in names with or without the word "HÄNY" itself, so
+  a shape match alone is treated as HÄNY specifically — the one case worth inferring from a code
+  shape alone).
+
+  **Item numbers** (`extractItemNumberCandidates()`): `artikelnr` (Visma's own code) is always Item
+  #3 ("internal"). Item #1/#2 come from the count file's own manually-verified `Artikelnummer` when
+  given (always wins as #1), else up to two *distinct* codes pulled from the name itself, checked in
+  priority order and de-duplicated — a dotted code (`794.035`, optional trailing letter), a
+  letter-dash-digits code (`D-2728`), a digits-dash-letters-dash-digits code (`2261-CS-11`), a bare
+  6-8 digit part number (`1012785`), and a whitelisted "model-code prefix + digits" shape (`REP 990`
+  /`EXM 731` for Weber, `TE 726` for TEI, `IC 311`/`ZMP 725`/`MF 80` for HÄNY). That last one is
+  deliberately a curated whitelist rather than "any 2-5 letters" — checked against the full real
+  export, a generic version of it matches plenty of ordinary descriptive words followed by a
+  measurement or weight ("RING 142" from "O-RING 142,5 X...", "VIT 25" = "white, 25 kg", cement
+  grade "LL 42", etc.), which would have been a wrong item number every time. A name carrying two
+  different shapes at once (common for HÄNY, e.g. `"793.539 HÄNY LUFTFILTER HPU6 H-5075"`) yields
+  both.
+
+  **Units** (`mapEnhetToUnitType()`): Visma's `enhet` column (Swedish unit words) is mapped onto
+  webware's own `UNIT_TYPES` (index.html) rather than used verbatim, so the app's Add/Edit-item
+  dropdown and this import agree on one canonical value — falls back to `'st'` for anything
+  unrecognized, same as `itemToSupabaseRow()` already does for any `UnitType` outside `UNIT_TYPES`.
+
+  **Quantity** (`resolveQuantity()`): prefers the count file's physically-counted `Antal` when a row
+  matches one; otherwise Visma's own `ant_i_lager` is used only when non-negative — it's unreliable
+  in the wild (frequently deeply negative in the real export), so a negative reading (from either
+  source) becomes `0` with a comment recording what it actually said rather than being trusted.
+
+  **Location** (`parsePlatsLocation()`): the count file's own `Plats` wins when a row matches one,
+  else a later export's own `location` column on the row itself (same values, same 62 Best rows) —
+  either way turned into a real `LocationCode` (confirmed field-by-field against the actual
+  warehouse: Zone, Depth, Level, Bin, Row — see the README's "Bin Location Codes" section).
+
+  `buildVismaImportDraft()` ties all of this together, joining the (optional) count file by article
+  number and grouping the result by destination warehouse.
 
   index.html's own code (no separate module, since it's all Supabase/DOM work) does the actual
-  writing: `generateUniqueBTKFor()`/`logActivityFor()` are explicit-warehouse-id variants of
-  `generateUniqueBTK()`/`logActivity()` (both of which otherwise assume "whichever warehouse is
-  currently open"), since one import run can create and populate several warehouses at once. A
-  review table (every field editable, grouped by destination, new-warehouse names editable or
-  skippable) sits between parsing and any write; choosing to import into Best requires typing a
-  confirmation phrase, since it deletes every current Best item — photos included, via
+  writing, reusing the same `generateUniqueBTK()`/`logActivity()` every other write path uses —
+  both take an optional `{existingItems, warehouseId}` / `{warehouseId, userId}` argument (instead
+  of always assuming "whichever warehouse is currently open") specifically so one import run can
+  create and populate several warehouses without needing its own duplicate copies of either
+  function. A review table (every field editable, grouped by destination, new-warehouse names
+  editable or skippable) sits between parsing and any write; choosing to import into Best requires
+  typing a confirmation phrase, since it deletes every current Best item — photos included, via
   `storagePathFromPublicUrl()` same as `deleteItemPhotoRow()` — before adding the reviewed set.
   Every write from the whole run (Best's deletions and every warehouse's new items) shares one
   `activity_log` batch, reverting as a single `undoImportBatch()` call, unchanged from how a CSV

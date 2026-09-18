@@ -3,8 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  classifySuffix, findBrandPrefix, extractHanyStyleCode, inferManufacturer,
-  resolveQuantity, parsePlatsLocation, buildVismaImportDraft,
+  classifySuffix, findBrandPrefix, extractHanyStyleCode, extractItemNumberCandidates, inferManufacturer,
+  resolveQuantity, parsePlatsLocation, mapEnhetToUnitType, buildVismaImportDraft,
   UNRECOGNIZED_SUFFIX, UNRECOGNIZED_WAREHOUSE_NAME,
 } from '../visma-import.js';
 
@@ -44,11 +44,69 @@ test('extractHanyStyleCode finds each of the three confirmed code shapes', () =>
   assert.equal(extractHanyStyleCode('a totally unrelated product'), null);
 });
 
-test('inferManufacturer prefers Företag, then a brand prefix, then a HÄNY-style code shape, then blank', () => {
-  assert.equal(inferManufacturer('794.035 O-RING', 'HÄNY'), 'HÄNY');
-  assert.equal(inferManufacturer('WEBER EXM 725 ANL. GROV 20 KG', null), 'WEBER');
-  assert.equal(inferManufacturer('2261-CS-11 GREASE RING', null), 'HÄNY');
-  assert.equal(inferManufacturer('MINIPALL', null), null);
+test('inferManufacturer prefers Företag, then the CSV\'s own manufacturers column, then a brand prefix, then a HÄNY-style code shape, then blank', () => {
+  assert.equal(inferManufacturer('794.035 O-RING', { foretag: 'HÄNY', csvManufacturer: 'Someone Else' }), 'HÄNY');
+  assert.equal(inferManufacturer('MYSTERY WIDGET', { csvManufacturer: 'Nycander' }), 'Nycander');
+  assert.equal(inferManufacturer('WEBER EXM 725 ANL. GROV 20 KG', {}), 'WEBER');
+  assert.equal(inferManufacturer('2261-CS-11 GREASE RING', {}), 'HÄNY');
+  assert.equal(inferManufacturer('MINIPALL', {}), null);
+  assert.equal(inferManufacturer('MINIPALL'), null); // no options object at all
+});
+
+test('inferManufacturer infers the manufacturer from a whitelisted model-code prefix when the brand word itself is missing from the name', () => {
+  assert.equal(inferManufacturer('EXM 702 EXPANDER 20 KG', {}), 'WEBER');
+  assert.equal(inferManufacturer('REP 995 YTSLAMMA 20 KG (A+B)', {}), 'WEBER');
+  assert.equal(inferManufacturer('ZMP 725 HÄNY INJEKTERINGSPUMP', {}), 'HÄNY'); // also has the word HÄNY, but confirms the code-prefix tier agrees
+});
+
+test('extractItemNumberCandidates finds a bare 6-8 digit part number', () => {
+  assert.deepEqual(extractItemNumberCandidates('1012785 HÄNY SEAL KIT CYLINDER'), ['1012785']);
+});
+
+test('extractItemNumberCandidates finds a Weber/TEI-style "LETTERS space DIGITS" model code', () => {
+  assert.deepEqual(extractItemNumberCandidates('WEBER REP 990 BETONGSKYDD KOMP B 6,8KG'), ['REP 990']);
+  assert.deepEqual(extractItemNumberCandidates('WEBER EXM 731 EXPANDERANDE FOGBETONG TIX'), ['EXM 731']);
+  assert.deepEqual(extractItemNumberCandidates('TEI TE 726 BORRHAMMARE 26,7 Kw'), ['TE 726']);
+});
+
+test('extractItemNumberCandidates finds two distinct codes when a name carries both a dotted and a letter-dash-digits shape', () => {
+  assert.deepEqual(extractItemNumberCandidates('793.539 HÄNY LUFTFILTER HPU6 H-5075'), ['793.539', 'H-5075']);
+});
+
+test('extractItemNumberCandidates finds a dotted code (with trailing letter) alongside a digits-dash-letters-dash-digits code', () => {
+  assert.deepEqual(extractItemNumberCandidates('HÄNY 398.022C 3-WAY VALVE 2 1/2" 1862-WQ-99'), ['398.022C', '1862-WQ-99']);
+});
+
+test('extractItemNumberCandidates never returns the same code twice even if it appears more than once', () => {
+  assert.deepEqual(extractItemNumberCandidates('793.539 SPARE FOR 793.539 O-RING'), ['793.539']);
+});
+
+test('extractItemNumberCandidates returns an empty array when nothing matches', () => {
+  assert.deepEqual(extractItemNumberCandidates('PALLHUV'), []);
+});
+
+test('mapEnhetToUnitType maps every distinct Swedish unit confirmed in the real export, case-insensitively', () => {
+  assert.equal(mapEnhetToUnitType('Styck'), 'st');
+  assert.equal(mapEnhetToUnitType('KILO'), 'kg');
+  assert.equal(mapEnhetToUnitType('liter'), 'liter');
+  assert.equal(mapEnhetToUnitType('Pall'), 'pallet');
+  assert.equal(mapEnhetToUnitType('Dag'), 'dag');
+  assert.equal(mapEnhetToUnitType('Rulle'), 'rulle');
+  assert.equal(mapEnhetToUnitType('Meter'), 'meter');
+  assert.equal(mapEnhetToUnitType('Kvadratmeter'), 'kvadratmeter');
+  assert.equal(mapEnhetToUnitType('Vecka'), 'vecka');
+  assert.equal(mapEnhetToUnitType('Paket'), 'paket');
+  assert.equal(mapEnhetToUnitType('Timmar'), 'timmar');
+  assert.equal(mapEnhetToUnitType('Löpmeter'), 'lopmeter');
+  assert.equal(mapEnhetToUnitType('Månad'), 'manad');
+  assert.equal(mapEnhetToUnitType('Förpackning'), 'forpackning');
+  assert.equal(mapEnhetToUnitType('Kilometer'), 'kilometer');
+});
+
+test('mapEnhetToUnitType falls back to \'st\' for an unrecognized or missing unit', () => {
+  assert.equal(mapEnhetToUnitType('Something Else'), 'st');
+  assert.equal(mapEnhetToUnitType(''), 'st');
+  assert.equal(mapEnhetToUnitType(undefined), 'st');
 });
 
 test('resolveQuantity uses the inventering match\'s physical count when present, ignoring ant_i_lager entirely', () => {
@@ -141,6 +199,45 @@ test('buildVismaImportDraft skips a row with no article number or no name rather
     [],
   );
   assert.equal(draft.groups.length, 0);
+});
+
+test('buildVismaImportDraft uses the v3 export\'s own manufacturers/location columns and extracts two item numbers from a HÄNY-style name', () => {
+  const draft = buildVismaImportDraft([
+    { artikelnr: '1733621MB', artikelnamn: '793.539 HÄNY LUFTFILTER HPU6 H-5075', enhet: 'Styck', ant_i_lager: '11,00', manufacturers: 'HÄNY', location: 'A 2-3 1-2' },
+  ], []); // no separate inventory-count file — everything comes from the v3 row itself
+
+  const item = draft.groups[0].items[0];
+  assert.equal(item.manufacturer, 'HÄNY');
+  assert.equal(item.itemnumber, '793.539');
+  assert.equal(item.itemnumber2, 'H-5075');
+  assert.equal(item.itemnumber3, '1733621MB');
+  assert.equal(item.unitType, 'st');
+  assert.equal(item.locationCode, 'A2-3-01-2');
+  assert.equal(item.quantity, 11); // no inventering match, ant_i_lager is non-negative
+  assert.equal(draft.noLocationCount, 0);
+});
+
+test('buildVismaImportDraft prefers the inventory-count file\'s Plats/Antal/Artikelnummer over the v3 row\'s own columns when both are present', () => {
+  const draft = buildVismaImportDraft(
+    [{ artikelnr: '1103188MB', artikelnamn: '12070 REED WASHER RED RUBBER 1"', enhet: 'Kilo', ant_i_lager: '-99,00', manufacturers: 'Wrong Brand', location: 'A 9-9 9-9' }],
+    [{ visma_artikelnummer: '1103188MB', Artikelnummer: '12070', 'Företag': 'Reed', Plats: 'A 4-3 4-2', Antal: '20.0' }],
+  );
+  const item = draft.groups[0].items[0];
+  assert.equal(item.manufacturer, 'Reed'); // Företag wins over the CSV's own manufacturers column
+  assert.equal(item.itemnumber, '12070'); // manual Artikelnummer wins over regex extraction from the name
+  assert.equal(item.quantity, 20); // inventering Antal wins over ant_i_lager
+  assert.equal(item.locationCode, 'A4-3-04-2'); // inventering Plats wins over the v3 row's own location
+  assert.equal(item.unitType, 'kg');
+});
+
+test('buildVismaImportDraft does not treat a manual Artikelnummer as a distinct Item #2 when it only differs from a regex-extracted code by case', () => {
+  const draft = buildVismaImportDraft(
+    [{ artikelnr: '1900001MB', artikelnamn: 'D-2728 HÄNY VALVE', enhet: 'Styck', ant_i_lager: '5' }],
+    [{ visma_artikelnummer: '1900001MB', Artikelnummer: 'd-2728', 'Företag': 'HÄNY', Plats: 'A 1-1 1-1', Antal: '5' }],
+  );
+  const item = draft.groups[0].items[0];
+  assert.equal(item.itemnumber, 'd-2728'); // manual Artikelnummer wins as Item #1
+  assert.equal(item.itemnumber2, null); // same code as Item #1, just different case — not a second code
 });
 
 test('buildVismaImportDraft handles empty input without throwing', () => {

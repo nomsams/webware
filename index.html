@@ -62,10 +62,33 @@
         header { display: flex; justify-content: space-between; align-items: center; padding: 0.65rem 1rem; background: var(--card-bg); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
         .logo-container { display: flex; align-items: center; gap: 10px; }
         .logo-container img { height: 36px; max-width: 130px; object-fit: contain; border-radius: 6px; }
-        .header-actions { display: flex; gap: 4px; }
+        .header-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
         .icon-btn { background: none; border: none; font-size: 1.25rem; cursor: pointer; color: var(--text-main); padding: 6px; border-radius: 50%; transition: background 0.2s; min-width: 38px; min-height: 38px; display: flex; align-items: center; justify-content: center; }
         .badge-count { position: absolute; top: 2px; right: 2px; background: var(--danger); color: white; font-size: 0.62rem; font-weight: 700; border-radius: 50%; min-width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; padding: 0 3px; line-height: 1; }
         .icon-btn:hover, .icon-btn:active { background: var(--border); }
+        /* "⋯ More" — Stocktaking/Dashboard/Theme/Console used to sit as their own permanent header
+           icons alongside Pack Order/Scan/Settings; on a narrow phone that's 7 icons plus the logo,
+           which measurably overflows the header on a 375px-wide screen (confirmed: the header's own
+           scrollWidth exceeds its visible width once Pack Order's badge and Dashboard are both
+           shown) with no scroll affordance — Console/Settings become simply unreachable. Folding the
+           lower-frequency ones into one dropdown keeps every action reachable in at most one extra
+           tap while the always-visible row fits comfortably at any width.
+        */
+        .header-more-wrap { position: relative; }
+        .header-more-menu {
+            position: absolute; top: calc(100% + 8px); right: 0; background: var(--card-bg);
+            border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 28px -6px rgba(0,0,0,0.3);
+            min-width: 210px; padding: 6px; z-index: 200; display: flex; flex-direction: column; gap: 2px;
+        }
+        .header-more-menu.hidden { display: none; }
+        .header-more-item {
+            display: flex; align-items: center; gap: 10px; background: none; border: none;
+            color: var(--text-main); font-size: 0.92rem; font-weight: 500; padding: 0.65rem 0.7rem;
+            border-radius: 8px; cursor: pointer; text-align: left; min-height: unset; width: 100%;
+            justify-content: flex-start;
+        }
+        .header-more-item:hover { background: var(--border); }
+        [data-theme="dark"] .header-more-item:hover { background: #334155; }
 
         .container { max-width: 800px; margin: 1rem auto; padding: 0 1rem; }
         .card { background: var(--card-bg); border-radius: 16px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); margin-bottom: 1rem; border: 1px solid var(--border); }
@@ -499,10 +522,21 @@
         .ai-suggestions { display: flex; flex-wrap: wrap; gap: 6px; align-self: stretch; }
         .ai-suggestions button { flex: none; background: var(--border); border: none; border-radius: 14px; padding: 0.35rem 0.7rem; font-size: 0.78rem; cursor: pointer; color: var(--text-main); min-height: unset; }
         #ai-recording-status { padding: 0 0.65rem 0.5rem; font-size: 0.78rem; color: var(--danger); text-align: center; font-weight: 600; }
-        .ai-panel-input-row { display: flex; gap: 0.5rem; padding: 0.65rem; border-top: 1px solid var(--border); }
+        .ai-panel-input-row { display: flex; align-items: center; gap: 0.4rem; padding: 0.65rem; border-top: 1px solid var(--border); }
         .ai-panel-input-row input { flex: 1; margin: 0; min-height: 38px; }
-        .ai-panel-input-row button { min-height: 38px; min-width: 38px; padding: 0 0.6rem; }
+        /* Mic/photo/send as a matched set of round icon buttons (a small, familiar chat-app idiom)
+           instead of the default rectangular blue button — mic and photo are visually secondary
+           (neutral gray) since they're optional input modes, send stays primary blue as the one
+           action that actually does something with whatever's been typed/attached. */
+        .ai-panel-input-row button { min-height: 38px; min-width: 38px; width: 38px; height: 38px; padding: 0; border-radius: 50%; flex-shrink: 0; font-size: 1.05rem; transition: transform 0.15s; }
+        .ai-panel-input-row button:hover { transform: scale(1.06); }
+        #ai-chat-mic-btn, #ai-chat-photo-btn { background: var(--border); color: var(--text-main); }
+        [data-theme="dark"] #ai-chat-mic-btn, [data-theme="dark"] #ai-chat-photo-btn { background: #334155; color: #e2e8f0; }
+        #ai-chat-mic-btn:hover, #ai-chat-photo-btn:hover { background: #cbd5e1; }
+        [data-theme="dark"] #ai-chat-mic-btn:hover, [data-theme="dark"] #ai-chat-photo-btn:hover { background: #475569; }
         #ai-chat-mic-btn.recording { background: var(--danger); color: #fff; animation: aiPulse 1s ease-in-out infinite; }
+        .ai-msg img { max-width: 100%; border-radius: 10px; display: block; }
+        .ai-msg img + div { margin-top: 6px; }
     </style>
 </head>
 <body>
@@ -522,6 +556,8 @@
     <div id="ai-recording-status" class="hidden">🎙️ Listening… <span id="ai-recording-timer">0:00</span> — tap the mic to stop</div>
     <div class="ai-panel-input-row">
         <button id="ai-chat-mic-btn" onclick="aiChatToggleRecording()" aria-label="Record voice instruction" title="Voice input">🎤</button>
+        <button id="ai-chat-photo-btn" onclick="document.getElementById('ai-chat-photo-input').click()" aria-label="Take or choose a photo to show the assistant" title="Take a picture">📷</button>
+        <input type="file" id="ai-chat-photo-input" accept="image/*" capture="environment" class="hidden" onchange="aiChatHandlePhotoSelected(event)" aria-label="Photo for the AI Assistant">
         <input type="text" id="ai-chat-input" placeholder='e.g. "find grease sticks"' onkeydown="if(event.key==='Enter') aiChatSendText()">
         <button onclick="aiChatSendText()" aria-label="Send">➤</button>
     </div>
@@ -953,6 +989,9 @@
         <label class="modal-label" for="ai-comments">Comments</label>
         <textarea id="ai-comments" placeholder="Optional notes..."></textarea>
 
+        <label class="modal-label" for="ai-link">Link (optional)</label>
+        <input type="url" id="ai-link" placeholder="e.g. a supplier page or datasheet URL">
+
         <div class="modal-actions">
             <button class="secondary full-width" onclick="closeAddItemModal()">Cancel</button>
             <button class="success-btn full-width" onclick="submitItemForm()">✔ Save Item</button>
@@ -1001,7 +1040,7 @@
 <div class="modal-overlay" id="csv-mapping-modal" onclick="handleCsvMappingModalOverlayClick(event)">
     <div class="modal-box" style="max-width:620px;">
         <h3 style="margin-top:0;">🧭 Match CSV Columns</h3>
-        <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">This file's headers don't exactly match what we expect — here's our best guess at what each column means. Check it over, adjust anything wrong, then continue. Columns set to "Ignore" are left out of the import entirely.</p>
+        <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">This file's headers don't exactly match what we expect — here's our best guess at what each column means. Check it over, adjust anything wrong, then continue. Columns set to "Ignore" are left out of the import entirely. Pointing two columns at the same field combines both values (e.g. two note columns both mapped to Comments) rather than one replacing the other.</p>
         <div id="csv-mapping-list" style="max-height:50vh; overflow-y:auto;"></div>
         <div class="modal-actions" style="margin-top:1rem;">
             <button class="secondary full-width" onclick="closeCsvMappingModal()">Cancel</button>
@@ -1171,21 +1210,20 @@
         <button class="icon-btn hidden" id="btn-pack-order" onclick="openPackOrderView()" aria-label="View Pack Order" title="Pack Order" style="position:relative;">
             📦<span id="pack-order-badge" class="badge-count">0</span>
         </button>
-        <button class="icon-btn" id="btn-inventering" onclick="openInventeringSetup()" aria-label="Stocktaking" title="Stocktaking">
-            📋
-        </button>
-        <button class="icon-btn hidden" id="btn-dashboard" onclick="openDashboardView()" aria-label="Dashboard" title="Dashboard">
-            📊
-        </button>
         <button class="icon-btn" id="btn-scan" onclick="openBarcodeScanner('open')" aria-label="Scan Barcode or QR" title="Scan">
             📷
         </button>
-        <button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle Dark Mode" title="Toggle Theme">
-            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
-        </button>
-        <button class="icon-btn" onclick="toggleConsole()" aria-label="Toggle Console" title="Console">
-            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-        </button>
+        <div class="header-more-wrap">
+            <button class="icon-btn" id="btn-header-more" onclick="toggleHeaderMoreMenu(event)" aria-label="More" aria-haspopup="true" title="More">
+                <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"></circle></svg>
+            </button>
+            <div class="header-more-menu hidden" id="header-more-menu">
+                <button class="header-more-item" id="btn-inventering" onclick="closeHeaderMoreMenu(); openInventeringSetup();">📋 Stocktaking</button>
+                <button class="header-more-item hidden" id="btn-dashboard" onclick="closeHeaderMoreMenu(); openDashboardView();">📊 Dashboard</button>
+                <button class="header-more-item" onclick="closeHeaderMoreMenu(); toggleTheme();">🌙 Toggle Theme</button>
+                <button class="header-more-item" onclick="closeHeaderMoreMenu(); toggleConsole();">🖥️ Console</button>
+            </div>
+        </div>
         <button class="icon-btn" onclick="toggleSettings()" aria-label="Open Settings" title="Settings">
             <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
         </button>
@@ -1632,9 +1670,11 @@
         <div id="dashboard-quicklinks" style="margin-top:1.5rem; display:flex; flex-wrap:wrap; gap:8px;"></div>
     </section>
 
-    <!-- Batch Image Review — one file at a time from a multi-file picker, filename fuzzy-matched
-         against itemnumber/2/3 (see findImageMatchCandidates). Confirm assigns it; Skip tries the
-         next-best suggestion, then finally sets it aside as "unassigned" once suggestions run out. -->
+    <!-- Batch Image Review — one file (or, when two files' best-matching item is the same, a pair
+         of files) at a time from a multi-file picker, filename fuzzy-matched against
+         itemnumber/2/3 (see findImageMatchCandidates). Confirm assigns it/them; Skip tries the
+         next-best suggestion (solo entries only), then finally sets it aside as "unassigned" once
+         suggestions run out. -->
     <section id="batch-image-review-view" class="card hidden">
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:1.25rem;">
             <button class="secondary" onclick="cancelBatchImageReview()">✕ Cancel Import</button>
@@ -1643,7 +1683,7 @@
         <h1 style="margin-bottom:1rem; border-bottom:2px solid var(--border); padding-bottom:0.75rem; font-size:1.6rem; color:var(--primary);">🖼️ Batch Image Review</h1>
         <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
             <div style="flex:1; min-width:240px; max-width:400px;">
-                <img id="batch-image-preview" alt="" style="width:100%; border-radius:12px; border:1px solid var(--border); background:var(--border); display:block;">
+                <div id="batch-image-preview-wrap" style="display:flex; gap:8px;"></div>
                 <p id="batch-image-filename" style="text-align:center; color:var(--text-muted); font-size:0.85rem; margin-top:0.5rem; word-break:break-all;"></p>
             </div>
             <div style="flex:1; min-width:240px;">
@@ -1963,6 +2003,22 @@
 
     function toggleConsole() { document.getElementById('console-overlay').classList.toggle('open'); }
     function handleConsoleOverlayClick(e) { if (e.target === document.getElementById('console-overlay')) toggleConsole(); }
+
+    // Header "⋯ More" — Stocktaking/Dashboard/Theme/Console live here instead of as their own
+    // permanent header icons (see the .header-more-menu CSS comment for why: too many icons for a
+    // narrow phone screen, some becoming unreachable). Closes on an outside click/tap, same as any
+    // ordinary dropdown, and on Escape for keyboard users.
+    function toggleHeaderMoreMenu(e) {
+        if (e) e.stopPropagation();
+        document.getElementById('header-more-menu').classList.toggle('hidden');
+    }
+    function closeHeaderMoreMenu() { document.getElementById('header-more-menu').classList.add('hidden'); }
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('header-more-menu');
+        const wrap = document.getElementById('btn-header-more');
+        if (menu && !menu.classList.contains('hidden') && !menu.contains(e.target) && e.target !== wrap && !wrap.contains(e.target)) closeHeaderMoreMenu();
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeHeaderMoreMenu(); });
     function copyLogs(e)  { e.stopPropagation(); navigator.clipboard.writeText(logs.join('\n')).then(() => showToast("Logs copied!", "success")); }
     function clearLogs(e) { e.stopPropagation(); logs.length = 0; document.getElementById('console-output').innerHTML = ''; console.log("Console cleared."); }
 
@@ -2124,12 +2180,17 @@
     // ════════════════════════════════════════════════════════════════════════
     const COLUMNS_B = [
         'Manufacturer', 'BTKnumber', 'itemnumber', 'itemname(english)', 'itemname(swedish)',
-        'itemnumber2', 'itemnumber3', 'Numberofitems', 'UnitType', 'Inventorylocation', 'MapPosition', 'LocationCode', 'Comments', 'images'
+        'itemnumber2', 'itemnumber3', 'Numberofitems', 'UnitType', 'Inventorylocation', 'MapPosition', 'LocationCode', 'Comments', 'Link', 'images'
     ];
 
     // What Numberofitems is counted IN — "5" alone is ambiguous (5 what?), "5 st" (Swedish for
     // "styck", i.e. each/piece) or "25 liter" isn't. Deliberately a fixed short list rather than
     // free text, so it stays a compact dropdown everywhere it's edited.
+    // Extended with every distinct Visma "enhet" unit confirmed against the real article export
+    // (see modules/visma-import.js's mapEnhetToUnitType, which maps Swedish enhet values onto
+    // these exact `value`s) beyond the original st/kg/liter/pallet/box/bag — no Supabase schema
+    // change needed for this: items.unit_type has no CHECK constraint on purpose (see
+    // supabase/schema_item_units.sql), specifically so a new unit is a client-only addition here.
     const UNIT_TYPES = [
         { value: 'st', label: 'st (each)' },
         { value: 'kg', label: 'kg' },
@@ -2137,6 +2198,17 @@
         { value: 'pallet', label: 'pallet' },
         { value: 'box', label: 'box' },
         { value: 'bag', label: 'bag' },
+        { value: 'dag', label: 'dag (day)' },
+        { value: 'vecka', label: 'vecka (week)' },
+        { value: 'manad', label: 'månad (month)' },
+        { value: 'timmar', label: 'timmar (hours)' },
+        { value: 'meter', label: 'meter' },
+        { value: 'lopmeter', label: 'löpmeter (running meter)' },
+        { value: 'kvadratmeter', label: 'kvadratmeter (m²)' },
+        { value: 'kilometer', label: 'kilometer (km)' },
+        { value: 'rulle', label: 'rulle (roll)' },
+        { value: 'paket', label: 'paket (package)' },
+        { value: 'forpackning', label: 'förpackning (packaging)' },
     ];
     function unitTypeOptionsHtml(selected) {
         const sel = selected || 'st';
@@ -2161,6 +2233,7 @@
         'MapPosition': ['zone', 'area', 'map'],
         'LocationCode': ['bincode', 'binlocation', 'binlocationcode', 'shelf', 'shelflocation'],
         'Comments': ['comment', 'notes', 'note', 'remarks'],
+        'Link': ['url', 'weblink', 'website', 'producturl', 'datasheet', 'productlink'],
         'images': ['image', 'photo', 'photos', 'picture', 'imagefile', 'imagefilename'],
     };
     function normalizeHeaderName(h) {
@@ -2520,6 +2593,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             MapPosition: row.map_position || 'None',
             LocationCode: row.location_code || 'None',
             Comments: row.comments || 'None',
+            Link: row.link || 'None',
             images: row.images || '', // legacy static-mode field, unused for Supabase-mode items now
             imageFullUrl: row.image_full_url || '',
             imageThumbUrl: row.image_thumb_url || '',
@@ -3277,19 +3351,70 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         });
     }
 
-    // ── Batch Image Review — one file at a time from the multi-file picker ─────────────────────
-    var batchImageQueue = [];            // [{ file, candidates, candidateIndex }]
+    // ── Batch Image Review — one file, or a *pair* of files, at a time from the multi-file picker ──
+    // Solo entry:  { files: [file], candidates, candidateIndex, pairedItem: null }
+    // Paired entry: { files: [file1, file2], matchInfo: [candidate1, candidate2], pairedItem: item }
+    // A pair happens when two different files' own best (top) suggestion is the *same* item — a
+    // common real shape for this batch (e.g. a HÄNY part photographed from two angles, or a part
+    // plus its label) — so both are reviewed and confirmed together instead of as two separate
+    // steps. A third+ file sharing that same top pick becomes its own solo entry rather than being
+    // silently dropped or crammed into one card. Files with no candidate at all, or whose top pick
+    // is unique in this upload, are unaffected — reviewed solo exactly as before.
+    var batchImageQueue = [];
     var batchImageIndex = 0;
     var batchImageResults = { assigned: 0, unassigned: 0 };
     var batchImageUnassignedFiles = [];  // files that ran out of candidates (or had none)
     var batchImageStaticZipEntries = []; // static/draft mode only — no server-side storage, so confirmed images are zipped at the end like the old flow did
+    var batchImagePreviewUrls = [];      // object URLs for the current review step's preview image(s), revoked on every re-render
+
+    function entryTopBTK(entry) {
+        if (entry.pairedItem) return entry.pairedItem.BTKnumber;
+        const c = entry.candidates[0];
+        return c ? c.item.BTKnumber : null;
+    }
 
     function handleBatchImageUpload(event) {
         const files = Array.from(event.target.files || []);
         event.target.value = '';
         if (!files.length) return;
         const index = buildImageMatchIndex(globalInventory);
-        batchImageQueue = files.map(file => ({ file, candidates: findImageMatchCandidates(file.name, index), candidateIndex: 0 }));
+        const perFile = files.map(file => ({ file, candidates: findImageMatchCandidates(file.name, index) }));
+
+        const byTopBTK = new Map();
+        perFile.forEach(pf => {
+            const top = pf.candidates[0];
+            if (!top) return;
+            if (!byTopBTK.has(top.item.BTKnumber)) byTopBTK.set(top.item.BTKnumber, []);
+            byTopBTK.get(top.item.BTKnumber).push(pf);
+        });
+
+        const grouped = new Set();
+        batchImageQueue = [];
+        perFile.forEach(pf => {
+            if (grouped.has(pf)) return;
+            const top = pf.candidates[0];
+            const siblings = top ? byTopBTK.get(top.item.BTKnumber) : null;
+            if (siblings && siblings.length > 1) {
+                const pair = [pf];
+                grouped.add(pf);
+                for (const sib of siblings) {
+                    if (pair.length >= 2) break;
+                    if (sib === pf || grouped.has(sib)) continue;
+                    pair.push(sib);
+                    grouped.add(sib);
+                }
+                if (pair.length === 2) {
+                    batchImageQueue.push({
+                        files: pair.map(p => p.file),
+                        matchInfo: pair.map(p => p.candidates[0]),
+                        pairedItem: top.item,
+                    });
+                    return;
+                }
+            }
+            batchImageQueue.push({ files: [pf.file], candidates: pf.candidates, candidateIndex: 0, pairedItem: null });
+        });
+
         batchImageIndex = 0;
         batchImageResults = { assigned: 0, unassigned: 0 };
         batchImageUnassignedFiles = [];
@@ -3301,15 +3426,23 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function renderBatchImageReview() {
         if (batchImageIndex >= batchImageQueue.length) { finishBatchImageReview(); return; }
         const entry = batchImageQueue[batchImageIndex];
-        const candidate = entry.candidates[entry.candidateIndex];
+        const candidate = entry.pairedItem
+            ? { item: entry.pairedItem, field: entry.matchInfo[0].field, exact: entry.matchInfo.every(m => m.exact) }
+            : entry.candidates[entry.candidateIndex];
 
         document.getElementById('batch-image-progress').textContent = `Image ${batchImageIndex + 1} of ${batchImageQueue.length}`;
-        const imgEl = document.getElementById('batch-image-preview');
-        if (imgEl.dataset.objectUrl) URL.revokeObjectURL(imgEl.dataset.objectUrl);
-        const objUrl = URL.createObjectURL(entry.file);
-        imgEl.src = objUrl;
-        imgEl.dataset.objectUrl = objUrl;
-        document.getElementById('batch-image-filename').textContent = entry.file.name;
+        batchImagePreviewUrls.forEach(u => URL.revokeObjectURL(u));
+        batchImagePreviewUrls = [];
+        const wrap = document.getElementById('batch-image-preview-wrap');
+        wrap.innerHTML = entry.files.map(() =>
+            `<img alt="" style="flex:1; min-width:0; max-width:100%; border-radius:12px; border:1px solid var(--border); background:var(--border); display:block;">`
+        ).join('');
+        Array.from(wrap.children).forEach((img, i) => {
+            const url = URL.createObjectURL(entry.files[i]);
+            img.src = url;
+            batchImagePreviewUrls.push(url);
+        });
+        document.getElementById('batch-image-filename').textContent = entry.files.map(f => f.name).join('  +  ');
 
         const infoEl = document.getElementById('batch-image-suggestion');
         const btnConfirm = document.getElementById('btn-batch-image-confirm');
@@ -3321,32 +3454,47 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             btnSkip.textContent = '🗄️ Set Aside — Unassigned';
         } else {
             const item = candidate.item;
-            const fieldLabel = { itemnumber: 'Item Number', itemnumber2: 'Item Number 2', itemnumber3: 'Item Number 3' }[candidate.field];
-            // Items keep up to MAX_ITEM_PHOTOS photos (the first one confirmed becomes the main
-            // photo, the rest are gallery-only) — flag it when this same item is also the top guess
-            // for other files still in this batch, since together with what it already has that
-            // could run past the cap, in which case the extras just won't fit.
-            const others = batchImageQueue.filter((e, i) => i !== batchImageIndex && e.candidates[0] && e.candidates[0].item.BTKnumber === item.BTKnumber).length;
+            const fieldLabelOf = f => ({ itemnumber: 'Item Number', itemnumber2: 'Item Number 2', itemnumber3: 'Item Number 3' }[f]);
             const existingCount = (item.photos || []).length;
             const numLines = ['itemnumber', 'itemnumber2', 'itemnumber3']
                 .filter(f => item[f] && item[f] !== 'None')
                 .map(f => `${f === 'itemnumber' ? 'Item # 1' : f === 'itemnumber2' ? 'Item # 2' : 'Item # 3'}: ${escapeHtml(item[f])}`)
                 .join('<br>');
             let multiNote = '';
-            if (others && existingCount + others + 1 > MAX_ITEM_PHOTOS) {
-                multiNote = `<div style="margin-top:6px; font-size:0.78rem; color:#f59e0b;">⚠️ ${others} other image${others === 1 ? '' : 's'} in this batch also matched this item — together with what it already has, that's more than the ${MAX_ITEM_PHOTOS}-photo limit, so some won't fit.</div>`;
-            } else if (others) {
-                multiNote = `<div style="margin-top:6px; font-size:0.78rem; color:var(--text-muted);">ℹ️ ${others} other image${others === 1 ? '' : 's'} in this batch also matched this item — they'll be added as separate photos for it.</div>`;
+            let matchedLine;
+            // Items keep up to MAX_ITEM_PHOTOS photos (the first one confirmed becomes the main
+            // photo, the rest are gallery-only). `others` is every OTHER queue entry (solo or
+            // paired) whose own top match is this same item — computed once, shared by both
+            // branches below, so a paired entry's cap warning accounts for a third+ file that
+            // spilled into its own solo entry for the same item, not just its own 1-2 files.
+            const others = batchImageQueue.filter((e, i) => i !== batchImageIndex && entryTopBTK(e) === item.BTKnumber)
+                .reduce((sum, e) => sum + e.files.length, 0);
+            const totalIncoming = entry.files.length + others;
+            if (entry.pairedItem) {
+                // Two files whose own best guess independently landed on the same item — shown and
+                // confirmed together rather than as two separate steps (see the module comment above).
+                matchedLine = entry.matchInfo.map((c, i) => `Image ${i + 1}: ${fieldLabelOf(c.field)}${c.exact ? ' (exact)' : ''}`).join(' · ');
+                multiNote = `<div style="margin-top:6px; font-size:0.78rem; color:var(--text-muted);">📷 Both images matched this item — confirming adds both as separate photos.${others ? ` ${others} more image${others === 1 ? '' : 's'} elsewhere in this batch also matched it.` : ''}</div>`;
+            } else {
+                matchedLine = `Matched on ${fieldLabelOf(candidate.field)}${candidate.exact ? ' (exact)' : ''}`;
+                if (others && !(existingCount + totalIncoming > MAX_ITEM_PHOTOS)) {
+                    multiNote = `<div style="margin-top:6px; font-size:0.78rem; color:var(--text-muted);">ℹ️ ${others} other image${others === 1 ? '' : 's'} in this batch also matched this item — they'll be added as separate photos for it.</div>`;
+                }
+            }
+            if (existingCount + totalIncoming > MAX_ITEM_PHOTOS) {
+                multiNote += `<div style="margin-top:4px; font-size:0.78rem; color:#f59e0b;">⚠️ ${existingCount} photo(s) already saved, plus ${totalIncoming} more incoming from this batch — that's more than the ${MAX_ITEM_PHOTOS}-photo limit, so some won't fit.</div>`;
             }
             infoEl.innerHTML = `
                 <div style="font-weight:700;">${escapeHtml(item['itemname(english)'] || item.BTKnumber)}</div>
                 <div style="color:var(--text-muted); font-size:0.85rem;">BTK ${escapeHtml(item.BTKnumber)}${item.Manufacturer && item.Manufacturer !== 'None' ? ' · ' + escapeHtml(item.Manufacturer) : ''}</div>
                 ${numLines ? `<div style="margin-top:6px; font-size:0.85rem;">${numLines}</div>` : ''}
-                <div style="margin-top:6px; font-size:0.8rem; color:var(--primary);">Matched on ${fieldLabel}${candidate.exact ? ' (exact)' : ''}</div>
+                <div style="margin-top:6px; font-size:0.8rem; color:var(--primary);">${matchedLine}</div>
                 ${multiNote}
             `;
             btnConfirm.classList.remove('hidden');
-            btnSkip.textContent = (entry.candidateIndex + 1 < entry.candidates.length) ? '⏭️ Skip — Try Next Suggestion' : '🗄️ Skip — Set Aside';
+            btnSkip.textContent = entry.pairedItem
+                ? '🗄️ Skip — Set Aside Both'
+                : (entry.candidateIndex + 1 < entry.candidates.length) ? '⏭️ Skip — Try Next Suggestion' : '🗄️ Skip — Set Aside';
         }
 
         document.getElementById('batch-image-manual-search').value = '';
@@ -3355,25 +3503,29 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     async function confirmBatchImageMatch() {
         const entry = batchImageQueue[batchImageIndex];
-        const candidate = entry.candidates[entry.candidateIndex];
-        if (!candidate) return;
-        await assignBatchImageToItem(entry.file, candidate.item.BTKnumber);
-        batchImageResults.assigned++;
+        const btk = entry.pairedItem ? entry.pairedItem.BTKnumber : (entry.candidates[entry.candidateIndex] || {}).item?.BTKnumber;
+        if (!btk) return;
+        for (const file of entry.files) {
+            await assignBatchImageToItem(file, btk);
+            batchImageResults.assigned++;
+        }
         batchImageIndex++;
         renderBatchImageReview();
     }
 
     async function skipBatchImageMatch() {
         const entry = batchImageQueue[batchImageIndex];
-        if (entry.candidateIndex + 1 < entry.candidates.length) {
+        if (!entry.pairedItem && entry.candidateIndex + 1 < entry.candidates.length) {
             entry.candidateIndex++;
             renderBatchImageReview();
             return;
         }
-        batchImageUnassignedFiles.push(entry.file);
-        batchImageResults.unassigned++;
-        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
-            try { await uploadUnassignedImage(entry.file); } catch (e) { console.error('Could not store unassigned image:', e); }
+        for (const file of entry.files) {
+            batchImageUnassignedFiles.push(file);
+            batchImageResults.unassigned++;
+            if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+                try { await uploadUnassignedImage(file); } catch (e) { console.error('Could not store unassigned image:', e); }
+            }
         }
         batchImageIndex++;
         renderBatchImageReview();
@@ -3391,8 +3543,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
     async function pickBatchImageManualMatch(btk) {
         const entry = batchImageQueue[batchImageIndex];
-        await assignBatchImageToItem(entry.file, btk);
-        batchImageResults.assigned++;
+        for (const file of entry.files) {
+            await assignBatchImageToItem(file, btk);
+            batchImageResults.assigned++;
+        }
         batchImageIndex++;
         renderBatchImageReview();
     }
@@ -3422,8 +3576,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     async function finishBatchImageReview() {
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
-        const imgEl = document.getElementById('batch-image-preview');
-        if (imgEl.dataset.objectUrl) { URL.revokeObjectURL(imgEl.dataset.objectUrl); imgEl.dataset.objectUrl = ''; }
+        batchImagePreviewUrls.forEach(u => URL.revokeObjectURL(u));
+        batchImagePreviewUrls = [];
         if (!isSupa) {
             saveDraft(currentWarehouseId);
             if (batchImageStaticZipEntries.length) await downloadImageZip(batchImageStaticZipEntries);
@@ -3445,8 +3599,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             body: `${remaining} image(s) not yet reviewed will be discarded. Anything already confirmed is kept.`,
             confirmLabel: '✕ Stop',
             onConfirm: () => {
-                const imgEl = document.getElementById('batch-image-preview');
-                if (imgEl.dataset.objectUrl) { URL.revokeObjectURL(imgEl.dataset.objectUrl); imgEl.dataset.objectUrl = ''; }
+                batchImagePreviewUrls.forEach(u => URL.revokeObjectURL(u));
+                batchImagePreviewUrls = [];
                 if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') saveDraft(currentWarehouseId);
                 if (listMode === 'items') filterList(false);
                 showListView('items');
@@ -4488,6 +4642,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!mapping.some(m => m.target === 'BTKnumber')) {
             showToast("No column is mapped to BTK Number — every row will get a fresh one assigned. Fine for genuinely new stock, but double-check that's what you want.", "warning", 7000);
         }
+        const targetCounts = new Map();
+        mapping.forEach(m => { if (m.target) targetCounts.set(m.target, (targetCounts.get(m.target) || 0) + 1); });
+        const clashingTargets = [...targetCounts.entries()].filter(([t, n]) => n > 1 && !APPENDABLE_CSV_TARGETS.has(t)).map(([t]) => t);
+        if (clashingTargets.length) {
+            showToast(`More than one column is mapped to ${clashingTargets.join(', ')} — only the first non-blank value per row will be kept for ${clashingTargets.length > 1 ? 'those' : 'that'} field, the rest ignored.`, "warning", 8000);
+        }
         document.getElementById('csv-mapping-modal').classList.remove('open');
         csvImportPendingParsed = null;
         window.__csvMappingState = null;
@@ -4498,10 +4658,28 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // confirmed mapping, then hands off to the same detection pipeline the exact-match fast path
     // uses — one shared place that decides what's new, what conflicts, and what merely looks
     // similar, regardless of how the CSV got here or how its columns were originally named.
+    // Free-text fields where combining two source columns' values makes sense — Comments is the
+    // motivating case (e.g. both a "Notes" and a "Remarks" column mapped onto it). Every other
+    // field (BTK/item numbers, quantity, a single-value Link/location) keeps "first non-blank
+    // value wins" instead — concatenating two BTK numbers or two quantities together would corrupt
+    // an identifier or silently mangle a number that then needs `parseInt`, not produce anything
+    // useful the way two notes fields combined would.
+    const APPENDABLE_CSV_TARGETS = new Set(['Comments']);
     function proceedWithColumnMapping(parsed, mapping) {
         const remapped = parsed.data.map(row => {
             const out = {};
-            mapping.forEach(m => { if (m.target) out[m.target] = row[m.header]; });
+            // A user can manually point two different raw headers at the same target field. A
+            // blank cell in either column contributes nothing rather than blanking out a value the
+            // other column already set.
+            mapping.forEach(m => {
+                if (!m.target) return;
+                const value = row[m.header];
+                const trimmed = value == null ? '' : String(value).trim();
+                if (!trimmed) return;
+                if (out[m.target] === undefined) out[m.target] = trimmed;
+                else if (APPENDABLE_CSV_TARGETS.has(m.target)) out[m.target] = `${out[m.target]} | ${trimmed}`;
+                // else: a value is already set for this target from an earlier column — kept as-is.
+            });
             return out;
         });
         const presentColumns = new Set(mapping.filter(m => m.target).map(m => m.target));
@@ -7599,6 +7777,15 @@ th { background: #eee; }
                 : getStr(val);
             return `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">${label}:</span><span>${valHtml}</span></div>`;
         };
+        // Rendered as an actual clickable link rather than plain text — a bare domain (no scheme
+        // typed) is treated as https://, and anything else that isn't already http(s) is coerced
+        // the same way, so a stray "javascript:" value can never end up as a live href.
+        const fieldUrl = (label, val) => {
+            if (!val || val === 'None') return field(label, val);
+            const trimmed = String(val).trim();
+            const href = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+            return `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">${label}:</span><span><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" style="word-break:break-all;">🔗 ${escapeHtml(trimmed)}</a></span></div>`;
+        };
         document.getElementById('detail-content').innerHTML = `
             <div style="margin-bottom:14px;font-size:1rem;color:var(--text-muted);"><strong style="color:var(--text-main);">${dMfr ? escapeHtml(dMfr) + ' · ' : ''}</strong><span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span></div>
             ${field('Item Name (English)', item['itemname(english)'])}
@@ -7631,6 +7818,7 @@ th { background: #eee; }
                     </span></div>`;
             })()}
             <div style="margin-bottom:12px;display:flex;gap:10px;flex-direction:column;"><span style="font-weight:600;color:var(--text-muted);">Comments:</span><div style="background:var(--primary-light);padding:10px;border-radius:8px;border:1px solid var(--border);">${getStr(item.Comments)}</div></div>
+            ${fieldUrl('Link', item.Link)}
             ${field('Images', item.images)}
             ${item.updatedAt ? `<p style="color:var(--text-muted);font-size:0.8rem;margin-top:0.5rem;">Last updated: ${new Date(item.updatedAt).toLocaleString()}<span id="last-updated-by"></span></p>` : ''}
             ${item.lastInventoriedAt ? `<p style="color:var(--text-muted);font-size:0.8rem;margin-top:0.25rem;">📋 Last inventoried: ${new Date(item.lastInventoriedAt).toLocaleString()}${item.lastInventoriedLocation ? ` at ${escapeHtml(item.lastInventoriedLocation)}` : ''}<span id="last-inventoried-by"></span></p>` : ''}`;
@@ -7771,7 +7959,9 @@ th { background: #eee; }
             <div class="warehouse-map loc-picker-grid" id="qe-loc-grid"></div>
             <input type="text" id="qe-locationcode" value="${escapeHtml(val(item.LocationCode))}" placeholder="…or type the code directly, e.g. A1-4-07" oninput="syncLocationPickerFromText('qe')" style="text-transform:uppercase;">
             <label class="modal-label" for="qe-comments">Comments</label>
-            <textarea id="qe-comments">${escapeHtml(val(item.Comments))}</textarea>`;
+            <textarea id="qe-comments">${escapeHtml(val(item.Comments))}</textarea>
+            <label class="modal-label" for="qe-link">Link (optional)</label>
+            <input type="url" id="qe-link" value="${escapeHtml(val(item.Link))}" placeholder="e.g. a supplier page or datasheet URL">`;
         populateLocationCodePicker('qe', item.LocationCode);
     }
 
@@ -7790,6 +7980,7 @@ th { background: #eee; }
             MapPosition: document.getElementById('qe-mapposition').value.trim().toUpperCase(),
             LocationCode: document.getElementById('qe-locationcode').value.trim().toUpperCase(),
             Comments: document.getElementById('qe-comments').value.trim(),
+            Link: document.getElementById('qe-link').value.trim(),
         };
     }
 
@@ -7853,6 +8044,7 @@ th { background: #eee; }
             MapPosition: fields.MapPosition || 'None',
             LocationCode: fields.LocationCode || 'None',
             Comments: fields.Comments || 'None',
+            Link: fields.Link || 'None',
             images: existingItem.images || '',
             imageFullUrl: existingItem.imageFullUrl,
             imageThumbUrl: existingItem.imageThumbUrl,
@@ -7872,7 +8064,8 @@ th { background: #eee; }
                 unit_type: updated.UnitType,
                 reorder_threshold: updated.ReorderThreshold === '' ? null : parseInt(updated.ReorderThreshold, 10),
                 inventorylocation: updated.Inventorylocation, map_position: updated.MapPosition === 'None' ? null : updated.MapPosition,
-                location_code: updated.LocationCode === 'None' ? null : updated.LocationCode, comments: updated.Comments
+                location_code: updated.LocationCode === 'None' ? null : updated.LocationCode, comments: updated.Comments,
+                link: updated.Link === 'None' ? null : updated.Link
             };
             const { error } = await sb.from('items').update(row).eq('btk', btk);
             if (error) return showToast("Save blocked: " + error.message, "error");
@@ -8453,7 +8646,7 @@ th { background: #eee; }
         document.getElementById('modal-title').innerText = '➕ Add New Item';
         document.getElementById('modal-notice').style.display = 'block';
         document.getElementById('ai-btknumber').readOnly = false;
-        ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-reorder-threshold','ai-location','ai-mapposition','ai-locationcode','ai-comments']
+        ['ai-manufacturer','ai-btknumber','ai-itemnumber','ai-name-en','ai-name-sv','ai-num2','ai-num3','ai-qty','ai-reorder-threshold','ai-location','ai-mapposition','ai-locationcode','ai-comments','ai-link']
             .forEach(id => { document.getElementById(id).value = ''; });
         document.getElementById('ai-unittype').value = 'st';
         populateLocationCodePicker('ai', '');
@@ -8488,6 +8681,7 @@ th { background: #eee; }
         document.getElementById('ai-mapposition').value = item.MapPosition === 'None' ? '' : item.MapPosition;
         document.getElementById('ai-locationcode').value = item.LocationCode === 'None' ? '' : item.LocationCode;
         document.getElementById('ai-comments').value = item.Comments === 'None' ? '' : item.Comments;
+        document.getElementById('ai-link').value = item.Link === 'None' ? '' : (item.Link || '');
         populateLocationCodePicker('ai', item.LocationCode);
         document.getElementById('add-item-modal').classList.add('open');
     }
@@ -8716,6 +8910,7 @@ th { background: #eee; }
         { key: 'MapPosition', label: 'Map Position' },
         { key: 'LocationCode', label: 'Bin Location Code' },
         { key: 'Comments', label: 'Comments' },
+        { key: 'Link', label: 'Link' },
         { key: 'images', label: 'Image / Photo Reference' }
     ];
     // BTK is moot in csv-conflict mode (both sides share the same BTK by definition); images is
@@ -8839,10 +9034,12 @@ th { background: #eee; }
             itemnumber2: getMergeValue('itemnumber2'),
             itemnumber3: getMergeValue('itemnumber3'),
             Numberofitems: String(finalQty),
+            UnitType: UNIT_TYPES.some(u => u.value === getMergeValue('UnitType')) ? getMergeValue('UnitType') : 'st',
             Inventorylocation: getMergeValue('Inventorylocation'),
             MapPosition: getMergeValue('MapPosition'),
             LocationCode: getMergeValue('LocationCode'),
             Comments: finalComments || 'None',
+            Link: getMergeValue('Link') || 'None',
             images: imagesFallback || ''
         };
     }
@@ -8888,13 +9085,15 @@ th { background: #eee; }
                 itemname_en: mergedItem['itemname(english)'], itemname_sv: mergedItem['itemname(swedish)'],
                 itemnumber2: mergedItem.itemnumber2, itemnumber3: mergedItem.itemnumber3,
                 numberofitems: finalQty,
+                unit_type: mergedItem.UnitType,
                 // Not one of the merge grid's pickable fields (it's a config value, not really
                 // "the same kind of fact" as a name/manufacturer/etc.) — the survivor keeps its own.
                 reorder_threshold: (survivor.ReorderThreshold === undefined || survivor.ReorderThreshold === '') ? null : parseInt(survivor.ReorderThreshold, 10),
                 inventorylocation: mergedItem.Inventorylocation === 'None' ? null : mergedItem.Inventorylocation,
                 map_position: mergedItem.MapPosition === 'None' ? null : mergedItem.MapPosition,
                 location_code: mergedItem.LocationCode === 'None' ? null : mergedItem.LocationCode,
-                comments: mergedComments || null
+                comments: mergedComments || null,
+                link: mergedItem.Link === 'None' ? null : mergedItem.Link
             };
             const survivorBeforeRow = await itemToSupabaseRow(survivor);
             const loserBeforeRows = await Promise.all(losers.map(itemToSupabaseRow));
@@ -9066,7 +9265,8 @@ th { background: #eee; }
             inventorylocation: item.Inventorylocation === 'None' ? null : item.Inventorylocation,
             map_position: item.MapPosition === 'None' ? null : item.MapPosition,
             location_code: item.LocationCode === 'None' ? null : item.LocationCode,
-            comments: item.Comments === 'None' ? null : item.Comments
+            comments: item.Comments === 'None' ? null : item.Comments,
+            link: (item.Link === 'None' || !item.Link) ? null : item.Link
         };
     }
 
@@ -9342,8 +9542,10 @@ th { background: #eee; }
                 <thead style="position:sticky; top:0; background:var(--card-bg);"><tr>
                     <th style="text-align:left; padding:4px 6px;">Name</th>
                     <th style="text-align:left; padding:4px 6px;">Manufacturer</th>
-                    <th style="text-align:left; padding:4px 6px;">Item #</th>
+                    <th style="text-align:left; padding:4px 6px;">Item #1</th>
+                    <th style="text-align:left; padding:4px 6px;">Item #2</th>
                     <th style="text-align:left; padding:4px 6px;">Visma Code</th>
+                    <th style="text-align:left; padding:4px 6px;">Unit</th>
                     <th style="text-align:left; padding:4px 6px;">Qty</th>
                     <th style="text-align:left; padding:4px 6px;">Location</th>
                 </tr></thead>
@@ -9358,7 +9560,9 @@ th { background: #eee; }
             <td style="padding:3px 6px;"><input type="text" value="${escapeHtml(item.name)}" oninput="updateVismaImportItemField(${groupIndex},${itemIndex},'name',this.value)" style="width:100%; min-width:160px; margin:0; font-size:0.8rem; padding:3px 5px;"></td>
             <td style="padding:3px 6px;"><input type="text" value="${escapeHtml(item.manufacturer || '')}" placeholder="—" oninput="updateVismaImportItemField(${groupIndex},${itemIndex},'manufacturer',this.value)" style="width:100%; min-width:100px; margin:0; font-size:0.8rem; padding:3px 5px;"></td>
             <td style="padding:3px 6px;"><input type="text" value="${escapeHtml(item.itemnumber || '')}" placeholder="—" oninput="updateVismaImportItemField(${groupIndex},${itemIndex},'itemnumber',this.value)" style="width:100%; min-width:90px; margin:0; font-size:0.8rem; padding:3px 5px;"></td>
+            <td style="padding:3px 6px;"><input type="text" value="${escapeHtml(item.itemnumber2 || '')}" placeholder="—" oninput="updateVismaImportItemField(${groupIndex},${itemIndex},'itemnumber2',this.value)" style="width:100%; min-width:90px; margin:0; font-size:0.8rem; padding:3px 5px;"></td>
             <td style="padding:3px 6px; font-size:0.72rem; color:var(--text-muted); white-space:nowrap;">${escapeHtml(item.itemnumber3)}</td>
+            <td style="padding:3px 6px;"><select onchange="updateVismaImportItemField(${groupIndex},${itemIndex},'unitType',this.value)" style="width:100%; min-width:80px; margin:0; font-size:0.8rem; padding:3px 5px;">${unitTypeOptionsHtml(item.unitType)}</select></td>
             <td style="padding:3px 6px;"><input type="number" min="0" value="${item.quantity}" oninput="updateVismaImportItemField(${groupIndex},${itemIndex},'quantity',this.value)" style="width:64px; margin:0; font-size:0.8rem; padding:3px 5px;"></td>
             <td style="padding:3px 6px;"><input type="text" value="${escapeHtml(item.locationCode || '')}" placeholder="—" oninput="updateVismaImportItemField(${groupIndex},${itemIndex},'locationCode',this.value)" style="width:90px; margin:0; font-size:0.8rem; padding:3px 5px;"></td>
         </tr>`;
@@ -9483,10 +9687,10 @@ th { background: #eee; }
                 const legacyItem = {
                     Manufacturer: item.manufacturer || 'None',
                     itemnumber: item.itemnumber || 'None', 'itemname(english)': item.name, 'itemname(swedish)': item.name,
-                    itemnumber2: 'None', itemnumber3: item.itemnumber3,
-                    Numberofitems: String(item.quantity), UnitType: 'st', ReorderThreshold: '',
+                    itemnumber2: item.itemnumber2 || 'None', itemnumber3: item.itemnumber3,
+                    Numberofitems: String(item.quantity), UnitType: item.unitType || 'st', ReorderThreshold: '',
                     Inventorylocation: item.inventoryLocation || 'None', MapPosition: 'None',
-                    LocationCode: item.locationCode || 'None', Comments: item.comment || 'None',
+                    LocationCode: item.locationCode || 'None', Comments: item.comment || 'None', Link: 'None',
                 };
                 const row = await itemToSupabaseRow(legacyItem);
                 const { error } = await sb.from('items').insert({ ...row, btk, warehouse_id: warehouseId, images: '' });
@@ -9540,6 +9744,7 @@ th { background: #eee; }
             'MapPosition':       document.getElementById('ai-mapposition').value.trim().toUpperCase() || 'None',
             'LocationCode':      document.getElementById('ai-locationcode').value.trim().toUpperCase() || 'None',
             'Comments':          document.getElementById('ai-comments').value.trim() || 'None',
+            'Link':              document.getElementById('ai-link').value.trim() || 'None',
             'images':            existingImages
         };
 
@@ -9553,7 +9758,8 @@ th { background: #eee; }
                 unit_type: newItem.UnitType,
                 reorder_threshold: newItem.ReorderThreshold === '' ? null : parseInt(newItem.ReorderThreshold, 10),
                 inventorylocation: newItem.Inventorylocation, map_position: newItem.MapPosition === 'None' ? null : newItem.MapPosition,
-                location_code: newItem.LocationCode === 'None' ? null : newItem.LocationCode, comments: newItem.Comments
+                location_code: newItem.LocationCode === 'None' ? null : newItem.LocationCode, comments: newItem.Comments,
+                link: newItem.Link === 'None' ? null : newItem.Link
             };
             const wasEdit = modalMode === 'edit';
             // Snapshot the pre-edit row for the activity log BEFORE issuing the write — globalInventory
@@ -10153,6 +10359,27 @@ ${css}
         return el;
     }
 
+    // Same bubble styling as aiAppendMessage, plus an inline photo — used by the "📷 Take a
+    // picture" input (below) to show what was actually sent/received. Built via DOM methods rather
+    // than an innerHTML string so the data: URL never has to round-trip through HTML parsing.
+    function aiAppendImageMessage(role, dataUrl, caption) {
+        const el = document.createElement('div');
+        el.className = role === 'user' ? 'ai-msg ai-msg-user' : role === 'assistant' ? 'ai-msg ai-msg-assistant' : 'ai-msg ai-msg-system';
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.alt = 'Photo';
+        el.appendChild(img);
+        if (caption) {
+            const p = document.createElement('div');
+            p.textContent = caption;
+            el.appendChild(p);
+        }
+        const list = document.getElementById('ai-panel-messages');
+        list.appendChild(el);
+        el.scrollIntoView({ block: 'end' });
+        return el;
+    }
+
     function aiRemoveLastActionCard() {
         const cards = document.querySelectorAll('#ai-panel-messages .ai-action-card');
         if (cards.length) cards[cards.length - 1].remove();
@@ -10164,6 +10391,69 @@ ${css}
         if (!text) return;
         input.value = '';
         await aiHandleUtterance(text);
+    }
+
+    // Downscales an arbitrary image File/Blob into a single JPEG data URL — for a one-off chat
+    // attachment there's no need for prepareImageBlobsFromBlob()'s full+thumb pair (that's for a
+    // photo being stored as an item's actual image); one size is enough to both display in the chat
+    // bubble and keep the vision-model request quick.
+    async function fileToDataUrl(file, maxSide = 1200, quality = 0.75) {
+        const bitmap = await createImageBitmap(file);
+        const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+        const w = Math.round(bitmap.width * scale), h = Math.round(bitmap.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+        bitmap.close?.();
+        return canvas.toDataURL('image/jpeg', quality);
+    }
+
+    // "📷 Take a picture" in the chat input row — a general-purpose counterpart to the mic button:
+    // show the assistant a photo and ask about it, right in the conversation, rather than only via
+    // the dedicated Delivery Note/barcode-scanner flows elsewhere. Whatever's currently typed (if
+    // anything) becomes the question about the photo; with nothing typed, a sensible default asks
+    // it to identify/describe whatever's in frame. Uses the same multimodal model the Delivery Note
+    // capture does — no separate action/classification step, since a photo message always just gets
+    // a plain conversational reply, never one of the structured pack/edit/search actions.
+    const AI_PHOTO_DEFAULT_PROMPT = "What is this? If it looks like a warehouse item, part, or label, help identify it and mention anything relevant (part numbers, condition, quantity visible) — otherwise just describe what you see.";
+    async function aiChatHandlePhotoSelected(event) {
+        const file = event.target.files?.[0];
+        event.target.value = ''; // allow re-selecting/re-shooting the same photo later
+        if (!file) return;
+        await aiEnsurePanelOpen();
+        if (aiHasApiKey === null) await aiRefreshKeyStatus();
+        if (!aiHasApiKey) { aiAppendMessage('system', aiNoKeyMessage()); return; }
+
+        const input = document.getElementById('ai-chat-input');
+        const typedText = input.value.trim();
+        input.value = '';
+
+        let dataUrl;
+        try {
+            dataUrl = await fileToDataUrl(file);
+        } catch (e) {
+            aiAppendMessage('system', "Couldn't read that photo — try again.");
+            return;
+        }
+        aiAppendImageMessage('user', dataUrl, typedText || null);
+
+        const thinking = aiAppendMessage('system', 'Looking at the photo…');
+        try {
+            const reply = await aiGetGroqClient().chat({
+                model: window.GROQ_MODELS.MULTIMODAL,
+                messages: [
+                    { role: 'user', content: [
+                        { type: 'text', text: typedText || AI_PHOTO_DEFAULT_PROMPT },
+                        { type: 'image_url', image_url: { url: dataUrl } },
+                    ] },
+                ],
+            });
+            thinking.remove();
+            aiAppendMessage('assistant', reply);
+        } catch (e) {
+            thinking.remove();
+            aiAppendMessage('assistant', aiFriendlyError(e));
+        }
     }
 
     // Every field the assistant is allowed to change via "edit_field" — mapped to the existing
@@ -10183,6 +10473,7 @@ ${css}
         map_position: { elId: 'qe-mapposition', itemKey: 'MapPosition', label: 'Map Position' },
         location_code: { elId: 'qe-locationcode', itemKey: 'LocationCode', label: 'Bin Location Code' },
         comments: { elId: 'qe-comments', itemKey: 'Comments', label: 'Comments' },
+        link: { elId: 'qe-link', itemKey: 'Link', label: 'Link' },
     };
 
     const AI_SYSTEM_PROMPT = `You are an assistant embedded in a warehouse inventory app. The user gives a short instruction (voice-transcribed or typed), possibly in English, Swedish, or Finnish. You may also be shown the most recent turns of this conversation for context — use them to resolve references like "it", "that one", "those", or a follow-up question (e.g. after finding an item, "how many do we have" means that item's stock; after listing items, "pack the second one" means that item) — but still classify only the CURRENT instruction, as EXACTLY ONE JSON object, no prose, matching one of:
@@ -10192,7 +10483,7 @@ ${css}
 {"action":"list_items","query":string}
 {"action":"list_kit_items","query":string}
 {"action":"low_stock_items"}
-{"action":"edit_field","field":"name_en"|"name_sv"|"manufacturer"|"itemnumber"|"itemnumber2"|"itemnumber3"|"quantity"|"unit_type"|"reorder_threshold"|"location"|"map_position"|"location_code"|"comments","value":string}
+{"action":"edit_field","field":"name_en"|"name_sv"|"manufacturer"|"itemnumber"|"itemnumber2"|"itemnumber3"|"quantity"|"unit_type"|"reorder_threshold"|"location"|"map_position"|"location_code"|"comments"|"link","value":string}
 {"action":"web_search","query":string}
 {"action":"chat","reply":string}
 Rules:
@@ -11046,7 +11337,7 @@ Respond with ONLY the JSON object, nothing else.`;
                         'itemname(english)': entry.name.trim(), 'itemname(swedish)': entry.name.trim(),
                         itemnumber: entry.itemNumber.trim() || 'None', itemnumber2: 'None', itemnumber3: 'None',
                         Numberofitems: String(entry.quantity), UnitType: 'st', ReorderThreshold: '',
-                        Inventorylocation: 'None', MapPosition: 'None', LocationCode: 'None', Comments: 'None',
+                        Inventorylocation: 'None', MapPosition: 'None', LocationCode: 'None', Comments: 'None', Link: 'None',
                     };
                     const row = await itemToSupabaseRow(newItem);
                     const { error } = await sb.from('items').insert({ ...row, btk, warehouse_id: currentWarehouseId, images: '' });
