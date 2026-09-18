@@ -8064,7 +8064,7 @@ th { background: #eee; }
                 unit_type: updated.UnitType,
                 reorder_threshold: updated.ReorderThreshold === '' ? null : parseInt(updated.ReorderThreshold, 10),
                 inventorylocation: updated.Inventorylocation, map_position: updated.MapPosition === 'None' ? null : updated.MapPosition,
-                location_code: updated.LocationCode === 'None' ? null : updated.LocationCode, comments: updated.Comments,
+                location_code: (!updated.LocationCode || updated.LocationCode === 'None') ? null : updated.LocationCode, comments: updated.Comments,
                 link: updated.Link === 'None' ? null : updated.Link
             };
             const { error } = await sb.from('items').update(row).eq('btk', btk);
@@ -9091,7 +9091,9 @@ th { background: #eee; }
                 reorder_threshold: (survivor.ReorderThreshold === undefined || survivor.ReorderThreshold === '') ? null : parseInt(survivor.ReorderThreshold, 10),
                 inventorylocation: mergedItem.Inventorylocation === 'None' ? null : mergedItem.Inventorylocation,
                 map_position: mergedItem.MapPosition === 'None' ? null : mergedItem.MapPosition,
-                location_code: mergedItem.LocationCode === 'None' ? null : mergedItem.LocationCode,
+                // Blank (not just literal 'None') must become null here too — location_code has a
+                // real CHECK constraint (items_location_code_format) that rejects '' outright.
+                location_code: (!mergedItem.LocationCode || mergedItem.LocationCode === 'None') ? null : mergedItem.LocationCode,
                 comments: mergedComments || null,
                 link: mergedItem.Link === 'None' ? null : mergedItem.Link
             };
@@ -9262,11 +9264,16 @@ th { background: #eee; }
             numberofitems: parseInt(item.Numberofitems, 10) || 0,
             unit_type: UNIT_TYPES.some(u => u.value === item.UnitType) ? item.UnitType : 'st',
             reorder_threshold: (item.ReorderThreshold === undefined || item.ReorderThreshold === '' || item.ReorderThreshold === null) ? null : parseInt(item.ReorderThreshold, 10),
-            inventorylocation: item.Inventorylocation === 'None' ? null : item.Inventorylocation,
-            map_position: item.MapPosition === 'None' ? null : item.MapPosition,
-            location_code: item.LocationCode === 'None' ? null : item.LocationCode,
-            comments: item.Comments === 'None' ? null : item.Comments,
-            link: (item.Link === 'None' || !item.Link) ? null : item.Link
+            inventorylocation: (!item.Inventorylocation || item.Inventorylocation === 'None') ? null : item.Inventorylocation,
+            map_position: (!item.MapPosition || item.MapPosition === 'None') ? null : item.MapPosition,
+            // location_code has a real CHECK constraint in Postgres (items_location_code_format) —
+            // unlike the other free-text fields here, a blank string is not just cosmetically wrong,
+            // it fails the insert/update outright (a CSV/Visma-imported row with no bin-code column
+            // ends up with '' here, not 'None', since normalizeItems() defaults every COLUMNS_B
+            // field to '' rather than 'None').
+            location_code: (!item.LocationCode || item.LocationCode === 'None') ? null : item.LocationCode,
+            comments: (!item.Comments || item.Comments === 'None') ? null : item.Comments,
+            link: (!item.Link || item.Link === 'None') ? null : item.Link
         };
     }
 
@@ -9758,7 +9765,7 @@ th { background: #eee; }
                 unit_type: newItem.UnitType,
                 reorder_threshold: newItem.ReorderThreshold === '' ? null : parseInt(newItem.ReorderThreshold, 10),
                 inventorylocation: newItem.Inventorylocation, map_position: newItem.MapPosition === 'None' ? null : newItem.MapPosition,
-                location_code: newItem.LocationCode === 'None' ? null : newItem.LocationCode, comments: newItem.Comments,
+                location_code: (!newItem.LocationCode || newItem.LocationCode === 'None') ? null : newItem.LocationCode, comments: newItem.Comments,
                 link: newItem.Link === 'None' ? null : newItem.Link
             };
             const wasEdit = modalMode === 'edit';
