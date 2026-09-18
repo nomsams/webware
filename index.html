@@ -8063,8 +8063,9 @@ th { background: #eee; }
                 numberofitems: parseInt(updated.Numberofitems) || 0,
                 unit_type: updated.UnitType,
                 reorder_threshold: updated.ReorderThreshold === '' ? null : parseInt(updated.ReorderThreshold, 10),
-                inventorylocation: updated.Inventorylocation, map_position: updated.MapPosition === 'None' ? null : updated.MapPosition,
-                location_code: (!updated.LocationCode || updated.LocationCode === 'None') ? null : updated.LocationCode, comments: updated.Comments,
+                map_position: updated.MapPosition === 'None' ? null : updated.MapPosition,
+                ...sanitizeLocationCodeForRow(updated.LocationCode, updated.Inventorylocation),
+                comments: updated.Comments,
                 link: updated.Link === 'None' ? null : updated.Link
             };
             const { error } = await sb.from('items').update(row).eq('btk', btk);
@@ -8183,6 +8184,22 @@ th { background: #eee; }
         const depthLabel = p.depth === 1 ? ' (front)' : p.depth === 2 ? ' (back)' : '';
         const rowLabel = p.binRow > 1 ? ` (${p.binRow - 1} bin${p.binRow > 2 ? 's' : ''} back)` : '';
         return `Zone ${p.zone} · Rack ${p.depth}${depthLabel} · Level ${p.level} · Bin ${p.bin}${rowLabel}`;
+    }
+
+    // items.location_code has a real Postgres CHECK constraint matching the same shape
+    // parseLocationCode() parses (and requires the letters be uppercase) — a value that doesn't
+    // fit it, hand-typed or arriving from a CSV/Visma column mapped onto LocationCode without
+    // actually containing real bin codes, would fail the insert/update outright. Rather than lose
+    // an import over that, an invalid value is sent as no bin code at all, with its raw text folded
+    // into Inventorylocation instead (only when that field doesn't already have something more
+    // specific) so it isn't silently thrown away, just moved to the free-text field it actually is.
+    function sanitizeLocationCodeForRow(locationCode, inventoryLocation) {
+        const raw = (locationCode && locationCode !== 'None') ? String(locationCode).trim() : '';
+        const invLoc = (!inventoryLocation || inventoryLocation === 'None') ? null : inventoryLocation;
+        if (!raw) return { location_code: null, inventorylocation: invLoc };
+        const parsed = parseLocationCode(raw);
+        if (parsed) return { location_code: raw.toUpperCase(), inventorylocation: invLoc };
+        return { location_code: null, inventorylocation: invLoc || raw };
     }
 
     // Walking order for "Sort: Bin Location" — zone alphabetically, then depth/level/bin
@@ -9093,11 +9110,8 @@ th { background: #eee; }
                 // Not one of the merge grid's pickable fields (it's a config value, not really
                 // "the same kind of fact" as a name/manufacturer/etc.) — the survivor keeps its own.
                 reorder_threshold: (survivor.ReorderThreshold === undefined || survivor.ReorderThreshold === '') ? null : parseInt(survivor.ReorderThreshold, 10),
-                inventorylocation: mergedItem.Inventorylocation === 'None' ? null : mergedItem.Inventorylocation,
                 map_position: mergedItem.MapPosition === 'None' ? null : mergedItem.MapPosition,
-                // Blank (not just literal 'None') must become null here too — location_code has a
-                // real CHECK constraint (items_location_code_format) that rejects '' outright.
-                location_code: (!mergedItem.LocationCode || mergedItem.LocationCode === 'None') ? null : mergedItem.LocationCode,
+                ...sanitizeLocationCodeForRow(mergedItem.LocationCode, mergedItem.Inventorylocation),
                 comments: mergedComments || null,
                 link: mergedItem.Link === 'None' ? null : mergedItem.Link
             };
@@ -9268,14 +9282,8 @@ th { background: #eee; }
             numberofitems: parseInt(item.Numberofitems, 10) || 0,
             unit_type: UNIT_TYPES.some(u => u.value === item.UnitType) ? item.UnitType : 'st',
             reorder_threshold: (item.ReorderThreshold === undefined || item.ReorderThreshold === '' || item.ReorderThreshold === null) ? null : parseInt(item.ReorderThreshold, 10),
-            inventorylocation: (!item.Inventorylocation || item.Inventorylocation === 'None') ? null : item.Inventorylocation,
             map_position: (!item.MapPosition || item.MapPosition === 'None') ? null : item.MapPosition,
-            // location_code has a real CHECK constraint in Postgres (items_location_code_format) —
-            // unlike the other free-text fields here, a blank string is not just cosmetically wrong,
-            // it fails the insert/update outright (a CSV/Visma-imported row with no bin-code column
-            // ends up with '' here, not 'None', since normalizeItems() defaults every COLUMNS_B
-            // field to '' rather than 'None').
-            location_code: (!item.LocationCode || item.LocationCode === 'None') ? null : item.LocationCode,
+            ...sanitizeLocationCodeForRow(item.LocationCode, item.Inventorylocation),
             comments: (!item.Comments || item.Comments === 'None') ? null : item.Comments,
             link: (!item.Link || item.Link === 'None') ? null : item.Link
         };
@@ -9853,8 +9861,9 @@ th { background: #eee; }
                 numberofitems: parseInt(newItem.Numberofitems) || 0,
                 unit_type: newItem.UnitType,
                 reorder_threshold: newItem.ReorderThreshold === '' ? null : parseInt(newItem.ReorderThreshold, 10),
-                inventorylocation: newItem.Inventorylocation, map_position: newItem.MapPosition === 'None' ? null : newItem.MapPosition,
-                location_code: (!newItem.LocationCode || newItem.LocationCode === 'None') ? null : newItem.LocationCode, comments: newItem.Comments,
+                map_position: newItem.MapPosition === 'None' ? null : newItem.MapPosition,
+                ...sanitizeLocationCodeForRow(newItem.LocationCode, newItem.Inventorylocation),
+                comments: newItem.Comments,
                 link: newItem.Link === 'None' ? null : newItem.Link
             };
             const wasEdit = modalMode === 'edit';
