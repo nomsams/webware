@@ -44,9 +44,10 @@ Every importer below (Items/Kits/Warehouses) shares the same shape: a **📁 Upl
 - **"📥 Import from Visma"** in the header (admin only — this can create warehouses and, for Best,
   wipes the current catalog first, the same bar "+ Add Warehouse" already uses): paste or upload
   Visma's own article export (`modules/visma-import.js` reads `artikelnr`/`artikelnamn`/`enhet`/
-  `ant_i_lager`, plus `manufacturers`/`location` if the export has them — everything else, prices
-  included, is dropped) plus, optionally but strongly recommended when the export doesn't already
-  carry its own `manufacturers`/`location` columns, a physical inventory-count file
+  `ant_i_lager`, plus `manufacturers`/`location` if the export has them and, from a still-later
+  export, `clean_name`/`article_code_1`/`article_code_2` if it has those too — everything else,
+  prices included, is dropped) plus, optionally but strongly recommended when the export doesn't
+  already carry its own `manufacturers`/`location` columns, a physical inventory-count file
   (`visma_artikelnummer`/`Artikelnummer`/`Företag`/`Plats`/`Antal`) for Best's own bin locations and
   actually-counted quantities — Visma's own stock figure (`ant_i_lager`) is unreliable on its own
   (frequently negative in the wild), so a row without a matching count-file entry gets that figure
@@ -66,17 +67,26 @@ Every importer below (Items/Kits/Warehouses) shares the same shape: a **📁 Upl
   known model-code prefix in the name (see below) implies its one manufacturer; otherwise, if the
   name contains one of HÄNY's own internal numbering shapes, it's inferred as HÄNY specifically;
   otherwise left blank for manual review rather than guessed further.
-- **Item numbers 1 and 2 are pulled out of the product name itself** when not already known —
-  `artikelnr` (Visma's own code) always becomes Item #3 ("internal"). A name can carry up to two
-  distinct manufacturer-style codes at once (common for HÄNY parts, e.g. `"793.539 HÄNY LUFTFILTER
-  HPU6 H-5075"` has both `793.539` and `H-5075`) — recognized shapes are a dotted code (`794.035`,
-  optionally with a trailing letter like `794.022C`), a letter-dash-digits code (`D-2728`), a
+- **Item numbers 1 and 2** come from whichever source has them, in priority order — the
+  inventory-count file's own manually-verified `Artikelnummer` (wins outright), the export's own
+  `article_code_1`/`article_code_2` columns when present (already extracted by whatever produced
+  that export, covering shapes like `TE3549R25WS`/`CF2016PF` that the regex fallback below wouldn't
+  catch on its own — populated for roughly a third of real rows), then **pulled out of the product
+  name itself** for whatever a higher source didn't already cover: `artikelnr` (Visma's own code)
+  always becomes Item #3 ("internal"), and a name can carry up to two distinct manufacturer-style
+  codes at once (common for HÄNY parts, e.g. `"793.539 HÄNY LUFTFILTER HPU6 H-5075"` has both
+  `793.539` and `H-5075`) — recognized shapes are a dotted code (`794.035`, optionally with a
+  trailing letter like `794.022C`), a letter-dash-digits code (`D-2728`), a
   digits-dash-letters-dash-digits code (`2261-CS-11`), a bare 6-8 digit part number (`1012785`),
   and a whitelisted model-code prefix + number (`REP 990`/`EXM 731` for Weber, `TE 726` for TEI,
   `IC 311`/`ZMP 725`/`MF 80` for HÄNY — a curated list rather than "any letters", since a generic
   version of this pattern turned out to match plenty of ordinary descriptive words followed by a
-  measurement, like "RING 142" or "VIT 25" = "white, 25 kg"). The inventory-count file's own
-  manually-verified `Artikelnummer` always wins as Item #1 over a regex guess when both exist.
+  measurement, like "RING 142" or "VIT 25" = "white, 25 kg"). This regex fallback still does the
+  work for roughly two-thirds of a real export that has neither of the columns above.
+- **Display name**: the export's own `clean_name` column (the same product description with the
+  brand and any part numbers already stripped, when present) is used as the item's name instead of
+  the raw `artikelnamn` — manufacturer inference and the item-number regex above always look at the
+  raw name regardless, since a stripped name is missing exactly the signal they need.
 - **Units**: the Visma export's own `enhet` column (Swedish unit words — styck, kilo, dag, rulle,
   meter, kvadratmeter, vecka, paket, pall, timmar, löpmeter, månad, förpackning, kilometer, liter)
   is mapped onto webware's own unit-type dropdown, extended with all of these alongside the
@@ -165,6 +175,7 @@ Each row has its own BTK, its own stock count, its own bin location, its own com
 - **Activity Log & Revert** (admin only, Settings → "📜 Activity Log", Supabase mode only — "who did this" needs a real account, which static warehouses don't have): every item create/update/delete — the Add/Edit modal, quick-edit, the +/− stock stepper, Duplicate, Remove, Merge (survivor update + each merged-away delete, separately), Pack Order finalization, and Supabase-mode CSV import — writes a row to `activity_log` with who, when, a human-readable summary ("Updated Automatic Greaser (BTK000037) — Qty: 5 → 7"), and a full before/after snapshot of the row. "↩️ Revert" on any entry restores the item to its `before_data` (re-inserting it if the entry was a delete, deleting it if it was a create) via `revert_activity_log_entry()` — admin-gated *in the database*, not just the UI — and the revert itself writes a new `action='revert'` log entry pointing back at what it undid, so it shows up in the log too and can itself be reverted (undoing an undo). The log is append-only by design: nothing ever rewrites an existing entry except that RPC flipping its own `reverted_at`/`reverted_by` markers.
 - **Reorder Threshold** (Add/Edit modal or quick-edit, optional): a per-item override for when the "⚠️ Low stock" badge shows, on top of the app-wide default in Settings. Set on a specific item, it always applies regardless of whether the Settings toggle is even on — some items genuinely need reordering at 5 units, others at 500. Left blank, the item falls back to the app-wide setting exactly as before.
 - **Link** (Add/Edit modal, quick-edit, CSV import, Merge, or the AI Assistant's "change one of its fields", optional): a single free-form URL — a supplier's product page, a datasheet, anything worth one click away from the item — rendered on the item's page as an actual clickable link rather than plain text. A value typed without `http://`/`https://` (e.g. just `example.com/part`) is treated as `https://` automatically.
+- **Hide negative-stock items** (checkbox next to the Manufacturers filter on the Items list, **on by default**, per-device): a negative stock number is essentially always a data problem — an unreliable import figure (see Visma Import's own quantity handling above) or a stock-adjustment slip — rather than a real "less than zero on the shelf" fact, so it's hidden from the everyday list by default rather than shown alongside genuinely-in-stock items. The list-stats line always says how many are hidden ("Showing 40 of 42 items (2 negative-stock items hidden)") rather than silently shrinking the count with no explanation; unchecking it shows everything again.
 - **Pack Order → Finalize** ("✅ Finalize Order (Deduct Stock)", editor/maintainer/admin): only enabled once every line is marked packed. Deducts each line's quantity from stock via the same atomic `adjust_item_stock()` RPC the +/− stepper uses (Supabase mode) or a local decrement (draft mode), and — if the order was saved — marks it `status = 'fulfilled'`. Each deduction is its own Activity Log entry, individually revertible, rather than one opaque bulk change.
 - **Backorder Report** (Settings → "📋 Backorder Report", editor/maintainer/admin, Supabase mode only): every saved order in the warehouse with an outstanding `backorder > 0` on at least one line, most recent first — a quick view across every order instead of having to reopen each one to check.
 

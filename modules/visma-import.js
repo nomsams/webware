@@ -28,20 +28,32 @@
 // lower-priority source alongside the inventory-count file's own Företag/Plats, not a replacement
 // for it: the inventory-count file is still authoritative when a row has one.
 //
+// A still-later export ("v6") added three more: `clean_name` (the product description with brand
+// and part numbers already stripped, e.g. "KOMPLETT RESERVDELSLÅDA" for a name whose raw form was
+// "TEI TE 726 KOMPLETT RESERVDELSLÅDA" — used only as the item's DISPLAY name, never for
+// extraction, since stripping the brand word is exactly what would break manufacturer inference)
+// and `article_code_1`/`article_code_2` (item numbers already extracted by whatever produced that
+// file, covering roughly a third of rows with shapes this module's own regex whitelist doesn't —
+// "TE3549R25WS", "CF2016PF" — populated alongside, not instead of, the ~two-thirds of rows that
+// still need the regex fallback below).
+//
 // Item numbers: `artikelnr` (Visma's own code) is always Item #3 ("internal"). Item #1/#2 come
-// from whichever of these is available, in order: the inventory-count file's own Artikelnummer
-// (hand-verified, e.g. Reed's "12070") always wins as Item #1 when given; otherwise up to two
-// *distinct* manufacturer-style codes are pulled out of the product name itself — HÄNY parts
+// from pooling every source that might have one — the inventory-count file's own Artikelnummer
+// (hand-verified, e.g. Reed's "12070", wins outright), the v6 export's own article_code_1/2, and
+// up to two *distinct* manufacturer-style codes pulled out of the raw product name — HÄNY parts
 // often carry two at once (e.g. "793.539 HÄNY LUFTFILTER HPU6 H-5075" has both a dotted code and a
 // letter-dash-digits code), Weber/TEI-style parts use a "LETTERS space DIGITS" shape ("REP 990",
-// "EXM 731", "TE 726"), and some are just a bare 6-8 digit part number. Regex extraction never
-// overwrites a number that's already known from a more authoritative source — it only fills a gap.
+// "EXM 731", "TE 726"), and some are just a bare 6-8 digit part number — then taking the first two
+// genuinely distinct values across all of them, in that priority order. A lower-priority source
+// never overwrites a higher one, it only fills whichever of #1/#2 nothing more authoritative
+// already covered.
 //
 // Usage:
 //   import { buildVismaImportDraft } from './visma-import.js';
 //   const draft = buildVismaImportDraft(vismaRows, inventeringRows);
 //   // vismaRows: parsed rows of the Visma export (Papa.parse(text, {header:true}).data) — each
-//   //   needs at least artikelnr/artikelnamn/ant_i_lager/enhet, plus optionally manufacturers/location.
+//   //   needs at least artikelnr/artikelnamn/ant_i_lager/enhet, plus optionally
+//   //   manufacturers/location (v3) and clean_name/article_code_1/article_code_2 (v6).
 //   // inventeringRows: parsed rows of the physical count file — each needs at least
 //   //   visma_artikelnummer/Artikelnummer/Företag/Plats/Antal. Optional — pass [] if you're relying
 //   //   entirely on a Visma export that already has its own manufacturers/location columns.
@@ -235,6 +247,17 @@ function normalizeCode(code) {
   return String(code || '').trim();
 }
 
+// De-dupes a priority-ordered list of candidate item-number strings down to the first 2 genuinely
+// distinct ones, comparing case-insensitively (a manually-typed or CSV-provided code isn't
+// guaranteed the same case as a regex-extracted one, e.g. manual 'd-2728' vs extracted 'D-2728').
+function firstTwoDistinctCodes(candidates) {
+  const out = [];
+  candidates.filter(Boolean).forEach((c) => {
+    if (out.length < 2 && !out.some((d) => d.toUpperCase() === c.toUpperCase())) out.push(c);
+  });
+  return out;
+}
+
 export function buildVismaImportDraft(vismaRows, inventeringRows) {
   const inventeringByCode = new Map();
   (inventeringRows || []).forEach((r) => {
@@ -249,44 +272,57 @@ export function buildVismaImportDraft(vismaRows, inventeringRows) {
 
   (vismaRows || []).forEach((row) => {
     const vismaCode = normalizeCode(row.artikelnr);
-    const name = String(row.artikelnamn || '').trim();
-    if (!vismaCode || !name) return; // an unusable row (shouldn't happen in a real export) is skipped, not guessed at
+    // A later ("v6") export adds `clean_name` — the same product description with the brand and
+    // any part numbers already stripped out by whatever produced the file — as a nicer display
+    // name than the raw `artikelnamn`. Extraction (manufacturer inference, regex item-number
+    // fallback below) still runs against the RAW name, never clean_name: clean_name has the brand
+    // word deliberately removed, which is exactly the signal inferManufacturer()/findBrandPrefix()
+    // need, and often still contains a leftover code fragment (e.g. "NACKE TE 260") that isn't
+    // reliably the *whole* story the raw name would give a regex to work with.
+    const rawName = String(row.artikelnamn || '').trim();
+    if (!vismaCode || !rawName) return; // an unusable row (shouldn't happen in a real export) is skipped, not guessed at
+    const cleanName = row.clean_name ? String(row.clean_name).trim() : '';
+    const displayName = cleanName || rawName;
 
     const inventeringMatch = inventeringByCode.get(vismaCode) || null;
     const suffixCode = classifySuffix(vismaCode);
 
-    const manufacturer = inferManufacturer(name, {
+    const manufacturer = inferManufacturer(rawName, {
       foretag: inventeringMatch && inventeringMatch['Företag'],
       csvManufacturer: row.manufacturers,
     });
     if (!manufacturer) unresolvedManufacturerCount++;
 
-    // Item #1: the inventory-count file's own manually-verified Artikelnummer when given, else the
-    // first regex-extracted code from the name. Item #2: a *different* second regex-extracted code,
-    // if the name actually carries two (see the module header comment) — regex never overwrites the
-    // manual Artikelnummer, it only fills in whichever of #1/#2 that source didn't already cover.
+    // Item #1/#2, in priority order: the inventory-count file's own manually-verified Artikelnummer
+    // (hand-checked against the physical shelf, wins outright); the "v6" export's own
+    // article_code_1/article_code_2 columns (already extracted by whatever produced that file —
+    // populated for roughly a third of rows, covering shapes this module's own regex whitelist
+    // doesn't, like "TE3549R25WS" or "CF2016PF"); then up to two regex-extracted codes from the raw
+    // name, for the majority of rows that have neither. All candidates are pooled and de-duplicated
+    // together (case-insensitively) rather than picking one source per field outright, so e.g. a
+    // row with only article_code_1 given can still pick up a genuinely different second code the
+    // name itself carries.
     const manualNumber = inventeringMatch && normalizeCode(inventeringMatch.Artikelnummer);
-    const candidates = extractItemNumberCandidates(name).filter((c) => c.toUpperCase() !== vismaCode.toUpperCase());
-    const itemnumber = manualNumber || candidates[0] || null;
-    // Case-insensitive: candidates are always uppercase (extractItemNumberCandidates upcases the
-    // name before matching), but a manually-typed Artikelnummer can be lowercase — comparing by
-    // exact string would let e.g. manual 'd-2728' and regex-extracted 'D-2728' both survive as two
-    // "different" item numbers when they're actually the same code.
-    const itemnumber2 = candidates.find((c) => !itemnumber || c.toUpperCase() !== itemnumber.toUpperCase()) || null;
+    const csvCode1 = normalizeCode(row.article_code_1);
+    const csvCode2 = normalizeCode(row.article_code_2);
+    const regexCandidates = extractItemNumberCandidates(rawName).filter((c) => c.toUpperCase() !== vismaCode.toUpperCase());
+    const [itemnumber = null, itemnumber2 = null] = firstTwoDistinctCodes(
+      [manualNumber, csvCode1, csvCode2, ...regexCandidates].filter((c) => c && c.toUpperCase() !== vismaCode.toUpperCase())
+    );
 
     const { quantity, comment } = resolveQuantity(row.ant_i_lager, inventeringMatch);
     if (comment) resetQuantityCount++;
 
     // The inventory-count file's own Plats wins when this row has a match there; otherwise fall
-    // back to the Visma export's own `location` column (the "v3" export carries the same values
-    // for the same 62 Best rows directly on each row, so a separate count-file upload becomes
+    // back to the Visma export's own `location` column (added in the "v3" export, carrying the same
+    // values for the same 62 Best rows directly on each row, so a separate count-file upload becomes
     // optional rather than required once a row already has this).
     const platsValue = (inventeringMatch && inventeringMatch.Plats) || row.location || null;
     const location = platsValue ? parsePlatsLocation(platsValue) : null;
     if (!location) noLocationCount++;
 
     const item = {
-      vismaCode, name, manufacturer,
+      vismaCode, name: displayName, manufacturer,
       itemnumber, itemnumber2, itemnumber3: vismaCode,
       unitType: mapEnhetToUnitType(row.enhet),
       quantity, comment,

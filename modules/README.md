@@ -133,19 +133,32 @@ node --test modules/tests/*.test.js
   a shape match alone is treated as HÄNY specifically — the one case worth inferring from a code
   shape alone).
 
-  **Item numbers** (`extractItemNumberCandidates()`): `artikelnr` (Visma's own code) is always Item
-  #3 ("internal"). Item #1/#2 come from the count file's own manually-verified `Artikelnummer` when
-  given (always wins as #1), else up to two *distinct* codes pulled from the name itself, checked in
-  priority order and de-duplicated — a dotted code (`794.035`, optional trailing letter), a
-  letter-dash-digits code (`D-2728`), a digits-dash-letters-dash-digits code (`2261-CS-11`), a bare
-  6-8 digit part number (`1012785`), and a whitelisted "model-code prefix + digits" shape (`REP 990`
-  /`EXM 731` for Weber, `TE 726` for TEI, `IC 311`/`ZMP 725`/`MF 80` for HÄNY). That last one is
-  deliberately a curated whitelist rather than "any 2-5 letters" — checked against the full real
-  export, a generic version of it matches plenty of ordinary descriptive words followed by a
-  measurement or weight ("RING 142" from "O-RING 142,5 X...", "VIT 25" = "white, 25 kg", cement
-  grade "LL 42", etc.), which would have been a wrong item number every time. A name carrying two
-  different shapes at once (common for HÄNY, e.g. `"793.539 HÄNY LUFTFILTER HPU6 H-5075"`) yields
-  both.
+  **Item numbers** (`extractItemNumberCandidates()`, `firstTwoDistinctCodes()`): `artikelnr`
+  (Visma's own code) is always Item #3 ("internal"). Item #1/#2 come from pooling every source that
+  might have one and taking the first two genuinely distinct values, in priority order: the count
+  file's own manually-verified `Artikelnummer` (wins outright), a still-later ("v6") export's own
+  `article_code_1`/`article_code_2` columns (already extracted by whatever produced that file —
+  covering shapes this module's own regex whitelist doesn't, like `TE3549R25WS`/`CF2016PF`, for
+  roughly a third of rows), then up to two *distinct* codes pulled from the raw name itself for
+  whatever a higher source didn't already cover — a dotted code (`794.035`, optional trailing
+  letter), a letter-dash-digits code (`D-2728`), a digits-dash-letters-dash-digits code
+  (`2261-CS-11`), a bare 6-8 digit part number (`1012785`), and a whitelisted "model-code prefix +
+  digits" shape (`REP 990`/`EXM 731` for Weber, `TE 726` for TEI, `IC 311`/`ZMP 725`/`MF 80` for
+  HÄNY). That last one is deliberately a curated whitelist rather than "any 2-5 letters" — checked
+  against the full real export, a generic version of it matches plenty of ordinary descriptive words
+  followed by a measurement or weight ("RING 142" from "O-RING 142,5 X...", "VIT 25" = "white, 25
+  kg", cement grade "LL 42", etc.), which would have been a wrong item number every time. A name
+  carrying two different shapes at once (common for HÄNY, e.g. `"793.539 HÄNY LUFTFILTER HPU6
+  H-5075"`) yields both, same as before — the v6 columns are additive, not a replacement for rows
+  that don't have them (roughly two-thirds of the real export still relies on this regex fallback).
+
+  **Display name**: the same "v6" export's own `clean_name` column (the product description with
+  the brand and any part numbers already stripped, e.g. `"KOMPLETT RESERVDELSLÅDA"` for a raw name
+  of `"TEI TE 726 KOMPLETT RESERVDELSLÅDA"`) is used as the item's name when a row has one, falling
+  back to the raw `artikelnamn` otherwise. Manufacturer inference and the regex item-number fallback
+  above always run against the RAW name regardless — `clean_name` has the brand word deliberately
+  removed, which is exactly the signal `inferManufacturer()`/`findBrandPrefix()` need, and running
+  extraction against an already-stripped name would find less, not more.
 
   **Units** (`mapEnhetToUnitType()`): Visma's `enhet` column (Swedish unit words) is mapped onto
   webware's own `UNIT_TYPES` (index.html) rather than used verbatim, so the app's Add/Edit-item

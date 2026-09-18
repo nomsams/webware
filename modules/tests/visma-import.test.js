@@ -230,6 +230,39 @@ test('buildVismaImportDraft prefers the inventory-count file\'s Plats/Antal/Arti
   assert.equal(item.unitType, 'kg');
 });
 
+test('buildVismaImportDraft prefers the v6 export\'s own article_code_1/article_code_2 and clean_name over regex extraction from the raw name', () => {
+  const draft = buildVismaImportDraft([
+    {
+      artikelnr: '5c0d9f51TE726', artikelnamn: 'TEI TE 726 BORRHAMMARE 26,7 Kw', clean_name: 'BORRHAMMARE 26,7 Kw',
+      article_code_1: 'TE 726', article_code_2: 'RX2061K', enhet: 'Styck', ant_i_lager: '0', manufacturers: 'TEI Rock Drills',
+    },
+  ], []);
+  const item = draft.groups[0].items[0];
+  assert.equal(item.name, 'BORRHAMMARE 26,7 Kw'); // clean_name used for display, not the raw artikelnamn
+  assert.equal(item.itemnumber, 'TE 726'); // article_code_1, not the regex-extracted "TE 726" from the raw name (same value here, but sourced from the column)
+  assert.equal(item.itemnumber2, 'RX2061K'); // article_code_2 — a shape ("RX2061K") the regex whitelist wouldn't have found on its own
+  assert.equal(item.manufacturer, 'TEI Rock Drills');
+});
+
+test('buildVismaImportDraft falls back to regex extraction and the raw artikelnamn when a v6 row has neither article_code_1/2 nor clean_name', () => {
+  const draft = buildVismaImportDraft([
+    { artikelnr: '1733621MB', artikelnamn: '793.539 HÄNY LUFTFILTER HPU6 H-5075', enhet: 'Styck', ant_i_lager: '11' },
+  ], []);
+  const item = draft.groups[0].items[0];
+  assert.equal(item.name, '793.539 HÄNY LUFTFILTER HPU6 H-5075'); // no clean_name given — falls back to the raw name
+  assert.equal(item.itemnumber, '793.539');
+  assert.equal(item.itemnumber2, 'H-5075');
+});
+
+test('buildVismaImportDraft fills Item #2 from a regex-extracted code when only article_code_1 is given', () => {
+  const draft = buildVismaImportDraft([
+    { artikelnr: '1900005MB', artikelnamn: 'HÄNY 398.022C 3-WAY VALVE', article_code_1: 'CUSTOM-CODE', enhet: 'Styck', ant_i_lager: '2' },
+  ], []);
+  const item = draft.groups[0].items[0];
+  assert.equal(item.itemnumber, 'CUSTOM-CODE'); // article_code_1 wins Item #1
+  assert.equal(item.itemnumber2, '398.022C'); // still picks up a genuinely different code from the name for Item #2
+});
+
 test('buildVismaImportDraft does not treat a manual Artikelnummer as a distinct Item #2 when it only differs from a regex-extracted code by case', () => {
   const draft = buildVismaImportDraft(
     [{ artikelnr: '1900001MB', artikelnamn: 'D-2728 HÄNY VALVE', enhet: 'Styck', ant_i_lager: '5' }],

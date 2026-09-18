@@ -1296,6 +1296,10 @@
                 <select id="manufacturer-filter" onchange="onManufacturerFilterChange()" style="margin: 0; width: auto; padding: 6px 10px; min-height: unset; font-size: 0.8rem;">
                     <option value="">Manufacturers</option>
                 </select>
+                <label style="display:flex; align-items:center; gap:6px; font-size:0.8rem; color:var(--text-muted); cursor:pointer; margin:0;" title="A negative stock number usually means it needs a physical recount, not that there's really less than zero on the shelf">
+                    <input type="checkbox" id="hide-negative-qty-cb" onchange="toggleHideNegativeQty()" style="margin:0;">
+                    Hide negative-stock items
+                </label>
                 <button class="secondary" onclick="openBinLocatorView()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📍 Bin Locator</button>
                 <div class="select-all-banner" style="margin-left: auto; margin-bottom: 0; padding: 6px 12px; min-height: unset;" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
                     <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 8px; pointer-events: none;" aria-hidden="true">
@@ -1876,6 +1880,11 @@
     var dashboardEnabled = false; // off by default — opt-in via Settings
     var cameraScanSupported = true; // flipped off at startup if the browser has no camera API at all — see window.onload
     var manufacturerFilter = ''; // list-view filter — derived options, not a separate table
+    // On by default (unlike other list-view toggles) — a negative stock number is essentially
+    // always a data problem (an unreliable import figure, a stock-adjustment slip) rather than a
+    // real "less than zero on the shelf" fact, so it's more useful hidden from the everyday list
+    // than shown; per-device only, same as staticWarehousesEnabled below.
+    var hideNegativeQtyItems = localStorage.getItem('hideNegativeQtyItems') !== 'false';
     var globalManufacturers = []; // Supabase-mode only — global (not warehouse-scoped) entity list
     var currentManufacturerId = null;
     var selectedItemsQty = {}; // btk -> requested qty (set when selected from a kit's item list)
@@ -5218,6 +5227,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         filterList(false);
     }
 
+    function toggleHideNegativeQty() {
+        hideNegativeQtyItems = document.getElementById('hide-negative-qty-cb').checked;
+        localStorage.setItem('hideNegativeQtyItems', String(hideNegativeQtyItems));
+        filterList(false);
+    }
+
     function renderWarehouseMeta() {
         const meta = getWarehouseMeta(currentWarehouseId);
         document.getElementById('wh-meta-container').innerHTML =
@@ -5306,8 +5321,17 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     function filterList(forceAll = false) {
         populateManufacturerFilter();
+        document.getElementById('hide-negative-qty-cb').checked = hideNegativeQtyItems;
         const query = forceAll ? "" : document.getElementById('search-box').value.toLowerCase().trim();
         let filtered = globalInventory;
+        let hiddenNegativeCount = 0;
+        if (hideNegativeQtyItems) {
+            filtered = filtered.filter(item => {
+                const negative = (parseFloat(item.Numberofitems) || 0) < 0;
+                if (negative) hiddenNegativeCount++;
+                return !negative;
+            });
+        }
         if (manufacturerFilter) filtered = filtered.filter(item => item.Manufacturer === manufacturerFilter);
         if (query !== "") {
             filtered = filtered.filter(item => {
@@ -5321,7 +5345,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         }
         filtered = sortItems(filtered);
         currentlyVisibleIds = filtered.map(i => i.BTKnumber);
-        document.getElementById('list-stats').innerText = `Showing ${filtered.length} of ${globalInventory.length} items`;
+        document.getElementById('list-stats').innerText = `Showing ${filtered.length} of ${globalInventory.length} items`
+            + (hiddenNegativeCount ? ` (${hiddenNegativeCount} negative-stock item${hiddenNegativeCount === 1 ? '' : 's'} hidden)` : '');
         renderList(filtered);
         syncSelectAllCheckbox();
     }
