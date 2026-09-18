@@ -8798,9 +8798,13 @@ th { background: #eee; }
             const beforeRows = await Promise.all(beforeItems.map(itemToSupabaseRow));
             const { error } = await sb.from('items').delete().in('btk', ids);
             if (error) return showToast("Could not delete: " + error.message, "error");
-            beforeItems.forEach((item, idx) => {
-                logActivity('delete', item.BTKnumber, beforeRows[idx], null, summarizeItemChange('delete', item.BTKnumber, beforeRows[idx], null));
-            });
+            const { data: { user } } = await sb.auth.getUser();
+            const userId = user ? user.id : null;
+            const logEntries = beforeItems.map((item, idx) => ({
+                action: 'delete', btk: item.BTKnumber, beforeRow: beforeRows[idx], afterRow: null,
+                summary: summarizeItemChange('delete', item.BTKnumber, beforeRows[idx], null)
+            }));
+            await logActivityBulk(logEntries, null, { userId });
             // kit_items.btk has an ON DELETE CASCADE FK to items.btk, so the DB already dropped any
             // kit reference to these BTKs the instant the row above was deleted — this just keeps
             // the in-memory globalKits (which isn't reloaded by supabaseLoadList) in sync with that.
@@ -9304,6 +9308,35 @@ th { background: #eee; }
         if (error) console.error("Could not log activity:", error);
     }
 
+    // Splits an array into fixed-size pieces — used to keep a single bulk request (items
+    // upsert/activity_log insert) from growing unbounded on a very large import, while still
+    // doing far fewer round trips than one request per row.
+    function chunkArray(arr, size) {
+        const out = [];
+        for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+        return out;
+    }
+    const BULK_WRITE_CHUNK_SIZE = 200;
+
+    // Bulk counterpart to logActivity() — one INSERT for up to BULK_WRITE_CHUNK_SIZE entries
+    // instead of one request per entry, for a caller that already has its own list of {action,
+    // btk, beforeRow, afterRow, summary} rows to log (a CSV/Visma import). userId is resolved once
+    // by the caller and passed in, same reasoning as logActivity's own userId param. Best-effort,
+    // same as logActivity — a logging failure is console-logged, never thrown, since it must never
+    // roll back or block the writes it's describing.
+    async function logActivityBulk(entries, batchId, { warehouseId = currentWarehouseId, userId } = {}) {
+        if (!entries.length || getWarehouseMeta(warehouseId).mode !== 'supabase') return;
+        const rows = entries.map(e => ({
+            warehouse_id: warehouseId, user_id: userId, action: e.action,
+            entity_type: 'item', entity_id: e.btk, before_data: e.beforeRow || null, after_data: e.afterRow || null,
+            summary: e.summary, batch_id: batchId || null
+        }));
+        for (const chunk of chunkArray(rows, BULK_WRITE_CHUNK_SIZE)) {
+            const { error } = await sb.from('activity_log').insert(chunk);
+            if (error) console.error(`Could not log ${chunk.length} activity entries:`, error);
+        }
+    }
+
     // Reverts every not-yet-reverted activity_log entry sharing one batch_id — the counterpart to a
     // single-entry "↩️ Revert" in the Activity Log modal, but for a whole bulk operation at once.
     // Reused revert_activity_log_entry() one row at a time (no new RPC) rather than a bespoke batch
@@ -9386,22 +9419,54 @@ th { background: #eee; }
         let writeErrors = 0;
 
         if (isSupa) {
+            // Resolved once up front — every logActivity call below reuses it instead of each
+            // separately re-fetching the same signed-in user from the network.
+            const { data: { user } } = await sb.auth.getUser();
+            const userId = user ? user.id : null;
+
+            // Build every row (and, for updates, its before-snapshot) up front — pure/in-memory
+            // beyond resolveManufacturer's already-cached lookups — so the actual network writes
+            // go out as a couple of bulk upserts instead of one request per row. Every row gets the
+            // exact same set of keys (including warehouse_id/images even on an update, where they're
+            // a no-op) since a bulk upsert needs uniform shape across the whole array.
+            const entries = []; // { btk, row, beforeRow, isNew, item }
             for (const item of csvImportResolvedItems) {
                 const row = await itemToSupabaseRow(item);
-                const { error } = await sb.from('items').update(row).eq('btk', item.BTKnumber);
-                if (error) { writeErrors++; console.error(`Could not update ${item.BTKnumber}:`, error); continue; }
                 const queueEntry = csvImportQueue.find(q => q.existing.BTKnumber === item.BTKnumber);
                 const beforeRow = queueEntry ? await itemToSupabaseRow(queueEntry.existing) : null;
-                logActivity('update', item.BTKnumber, beforeRow, row, `CSV import: ${summarizeItemChange('update', item.BTKnumber, beforeRow, row)}`, batchId);
-                if (item.images) await attachCsvImageIfUrl(item.BTKnumber, item.images);
+                entries.push({ btk: item.BTKnumber, row: { ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: '' }, beforeRow, isNew: false, item });
             }
             for (const item of csvImportPendingNew) {
                 const row = await itemToSupabaseRow(item);
-                const { error } = await sb.from('items').insert({ ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: '' });
-                if (error) { writeErrors++; console.error(`Could not add ${item.BTKnumber}:`, error); continue; }
-                logActivity('create', item.BTKnumber, null, row, `CSV import: ${summarizeItemChange('create', item.BTKnumber, null, row)}`, batchId);
-                if (item.images) await attachCsvImageIfUrl(item.BTKnumber, item.images);
+                entries.push({ btk: item.BTKnumber, row: { ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: '' }, beforeRow: null, isNew: true, item });
             }
+
+            const succeededBTKs = new Set();
+            for (const chunk of chunkArray(entries, BULK_WRITE_CHUNK_SIZE)) {
+                const { error } = await sb.from('items').upsert(chunk.map(e => e.row), { onConflict: 'btk' });
+                if (!error) { chunk.forEach(e => succeededBTKs.add(e.btk)); continue; }
+                // A whole chunk failing (one bad row somewhere in it) shouldn't sink every other row
+                // in that chunk — fall back to one request per row, same as before this optimization,
+                // for just this chunk.
+                console.error(`Bulk save failed for a batch of ${chunk.length} item(s), retrying individually:`, error);
+                for (const e of chunk) {
+                    const { error: rowError } = await sb.from('items').upsert(e.row, { onConflict: 'btk' });
+                    if (rowError) { writeErrors++; console.error(`Could not save ${e.btk}:`, rowError); }
+                    else succeededBTKs.add(e.btk);
+                }
+            }
+
+            const logEntries = entries.filter(e => succeededBTKs.has(e.btk)).map(e => ({
+                action: e.isNew ? 'create' : 'update', btk: e.btk, beforeRow: e.beforeRow, afterRow: e.row,
+                summary: `CSV import: ${summarizeItemChange(e.isNew ? 'create' : 'update', e.btk, e.beforeRow, e.row)}`
+            }));
+            await logActivityBulk(logEntries, batchId, { userId });
+
+            // Images are a distinct fetch+upload per item, not batchable into the row upsert above.
+            for (const e of entries) {
+                if (succeededBTKs.has(e.btk) && e.item.images) await attachCsvImageIfUrl(e.btk, e.item.images);
+            }
+
             clearSelection();
             document.getElementById('search-box').value = '';
             if (activeView === 'merge-view') showListView('items');
@@ -9640,10 +9705,12 @@ th { background: #eee; }
                 bestGroup.skip = true;
                 bestWipeFailed = true;
             } else {
-                vismaImportBestExistingItems.forEach(row => {
-                    deleted++;
-                    logActivity('delete', row.btk, row, null, `Visma import: removed ${row.itemname_en || row.btk} (${row.btk}) before re-import`, batchId, { warehouseId: '1', userId });
-                });
+                deleted = vismaImportBestExistingItems.length;
+                const deleteLogEntries = vismaImportBestExistingItems.map(row => ({
+                    action: 'delete', btk: row.btk, beforeRow: row, afterRow: null,
+                    summary: `Visma import: removed ${row.itemname_en || row.btk} (${row.btk}) before re-import`
+                }));
+                await logActivityBulk(deleteLogEntries, batchId, { warehouseId: '1', userId });
             }
         }
 
@@ -9683,6 +9750,11 @@ th { background: #eee; }
                 else existingItemsForBtk = data || [];
             }
             const reserved = new Set();
+            // Build every row up front (pure/in-memory beyond resolveManufacturer's cached lookups),
+            // then write this group's items as a couple of bulk inserts instead of one request per
+            // item — a several-hundred-row Visma export used to mean several hundred sequential
+            // round trips just for the item writes, plus one more each for their activity_log entry.
+            const groupEntries = []; // { btk, row, name }
             for (const item of group.items) {
                 const btk = generateUniqueBTK(reserved, { existingItems: existingItemsForBtk, warehouseId });
                 reserved.add(parseInt(btk.slice(3), 10));
@@ -9700,11 +9772,28 @@ th { background: #eee; }
                     LocationCode: item.locationCode || 'None', Comments: item.comment || 'None', Link: 'None',
                 };
                 const row = await itemToSupabaseRow(legacyItem);
-                const { error } = await sb.from('items').insert({ ...row, btk, warehouse_id: warehouseId, images: '' });
-                if (error) { createFailed++; console.error(`Could not create item "${item.name}":`, error); continue; }
-                created++;
-                logActivity('create', btk, null, row, `Visma import: added ${item.name} (${btk})`, batchId, { warehouseId, userId });
+                groupEntries.push({ btk, row: { ...row, btk, warehouse_id: warehouseId, images: '' }, name: item.name });
             }
+
+            const succeededBTKs = new Set();
+            for (const chunk of chunkArray(groupEntries, BULK_WRITE_CHUNK_SIZE)) {
+                const { error } = await sb.from('items').insert(chunk.map(e => e.row));
+                if (!error) { chunk.forEach(e => succeededBTKs.add(e.btk)); continue; }
+                // Same "don't let one bad row sink the whole chunk" fallback as commitCSVImport.
+                console.error(`Bulk create failed for a batch of ${chunk.length} item(s) in "${group.warehouseName}", retrying individually:`, error);
+                for (const e of chunk) {
+                    const { error: rowError } = await sb.from('items').insert(e.row);
+                    if (rowError) { console.error(`Could not create item "${e.name}":`, rowError); }
+                    else succeededBTKs.add(e.btk);
+                }
+            }
+            created += succeededBTKs.size;
+            createFailed += groupEntries.length - succeededBTKs.size;
+
+            const createLogEntries = groupEntries.filter(e => succeededBTKs.has(e.btk)).map(e => ({
+                action: 'create', btk: e.btk, beforeRow: null, afterRow: e.row, summary: `Visma import: added ${e.name} (${e.btk})`
+            }));
+            await logActivityBulk(createLogEntries, batchId, { warehouseId, userId });
         }
 
         document.getElementById('visma-import-summary-modal').classList.remove('open');
