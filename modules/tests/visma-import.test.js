@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifySuffix, findBrandPrefix, extractHanyStyleCode, extractItemNumberCandidates, inferManufacturer,
-  resolveQuantity, parsePlatsLocation, mapEnhetToUnitType, buildVismaImportDraft,
+  resolveQuantity, parsePlatsLocation, mapEnhetToUnitType, lookupEnhetUnitType, buildVismaImportDraft,
   UNRECOGNIZED_SUFFIX, UNRECOGNIZED_WAREHOUSE_NAME,
 } from '../visma-import.js';
 
@@ -107,6 +107,15 @@ test('mapEnhetToUnitType falls back to \'st\' for an unrecognized or missing uni
   assert.equal(mapEnhetToUnitType('Something Else'), 'st');
   assert.equal(mapEnhetToUnitType(''), 'st');
   assert.equal(mapEnhetToUnitType(undefined), 'st');
+});
+
+test('lookupEnhetUnitType tells a real unit apart from an unrecognized one instead of falling back to \'st\' for both', () => {
+  assert.equal(lookupEnhetUnitType('Kilo'), 'kg');
+  assert.equal(lookupEnhetUnitType('  PALL '), 'pallet');
+  assert.equal(lookupEnhetUnitType('Styck'), 'st'); // a genuine "each", not a fallback
+  assert.equal(lookupEnhetUnitType('Something Else'), null);
+  assert.equal(lookupEnhetUnitType(''), null);
+  assert.equal(lookupEnhetUnitType(undefined), null);
 });
 
 test('resolveQuantity uses the inventering match\'s physical count when present, ignoring ant_i_lager entirely', () => {

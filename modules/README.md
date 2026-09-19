@@ -164,6 +164,12 @@ node --test modules/tests/*.test.js
   webware's own `UNIT_TYPES` (index.html) rather than used verbatim, so the app's Add/Edit-item
   dropdown and this import agree on one canonical value — falls back to `'st'` for anything
   unrecognized, same as `itemToSupabaseRow()` already does for any `UnitType` outside `UNIT_TYPES`.
+  `lookupEnhetUnitType()` is the strict form of the same table: `null` for an unrecognized word
+  instead of `'st'`, so a caller can tell a real "Styck" from "no idea" — index.html uses it (via
+  `unitTypeFromText()`) in the plain Items import and in Quick Update, where an unknown unit should
+  be left alone rather than overwritten with a guess. `parsePlatsLocation()` is likewise exposed to
+  index.html (as `window.parsePlatsLocation`) so a `A 3-2 2-1` bin coordinate becomes a real
+  `LocationCode` from any import path, not only this one.
 
   **Quantity** (`resolveQuantity()`): prefers the count file's physically-counted `Antal` when a row
   matches one; otherwise Visma's own `ant_i_lager` is used only when non-negative — it's unreliable

@@ -138,6 +138,10 @@
         .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px; }
         .list-header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .list-stats { font-size: 0.85rem; color: var(--text-muted); font-weight: 500; margin-bottom: 0.5rem; }
+        /* A plain inline text link inside the stats line — resets the global button styling
+           (blue fill, padding, min-height) so it reads as text, not as another toolbar button. */
+        .stats-link { background: none; border: none; box-shadow: none; padding: 0; margin: 0; min-height: 0; width: auto; border-radius: 0; font: inherit; color: var(--primary); text-decoration: underline; cursor: pointer; }
+        .stats-link:hover { background: none; color: var(--primary-hover); transform: none; }
         
         .select-all-banner { display: flex; align-items: center; background: var(--primary-light); padding: 12px 16px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 1rem; cursor: pointer; transition: background 0.2s; min-height: 48px; }
         .select-all-banner:active { opacity: 0.8; }
@@ -1008,7 +1012,7 @@
             <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">How would you like to bring in a CSV?</p>
             <button class="full-width" onclick="triggerCSVImport()" style="margin-bottom:0.75rem;">📁 Upload a CSV File</button>
             <button class="secondary full-width" onclick="showImportPasteBox()" style="margin-bottom:0.75rem;">📋 Paste CSV Text</button>
-            <button class="secondary full-width" onclick="showStockUpdatePasteBox()">📊 Quick Stock Update (quantities only)</button>
+            <button class="secondary full-width" onclick="showStockUpdatePasteBox()">📊 Quick Update (stock, unit, bin location)</button>
         </div>
         <div id="import-items-paste" class="hidden">
             <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:0.5rem;">Paste the CSV content below, headers and all.</p>
@@ -1018,12 +1022,14 @@
                 <button style="flex:1;" onclick="submitPastedCSV()">Parse &amp; Continue</button>
             </div>
         </div>
-        <!-- A deliberately lighter path than the full import above: just BTK (or a part number) plus
-             a quantity column, matched against what's already here and applied directly — no
-             conflict/merge review, since a single-field overwrite has nothing else to merge. -->
+        <!-- A deliberately lighter path than the full import above: a BTK (or part number) column to
+             match on, plus any of a quantity, unit, and bin-location column, applied directly to what's
+             already here — no conflict/merge review, since only those fields are ever touched. -->
         <div id="import-items-stock-update" class="hidden">
-            <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:0.5rem;">Paste a CSV with a BTK or item-number column and a quantity column — e.g. from a stocktake export. Every matched item's quantity is set to the file's number; nothing else about it changes.</p>
-            <textarea id="stock-update-paste-textarea" rows="10" style="width:100%; font-family:monospace; font-size:0.8rem; min-height:200px;" placeholder="BTKnumber,quantity&#10;BTK000001,25"></textarea>
+            <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:0.5rem;">Upload or paste a CSV with a BTK or item-number column to match on, plus any of: a <strong>quantity</strong>, a <strong>unit</strong> (Styck, Kilo, Pall… or st, kg, pallet…), or a <strong>bin location</strong> (<code>A 3-2 2-1</code> or <code>A3-2-02</code>). Matched items get just those fields set — nothing else changes, nothing is added or removed. A Visma export works as-is (matched on its article number) to fix units and bin codes on items that are already imported.</p>
+            <button class="secondary full-width" onclick="document.getElementById('stock-update-file').click()" style="margin-bottom:0.5rem;">📁 Upload a CSV File</button>
+            <input type="file" id="stock-update-file" accept=".csv,text/csv,text/plain" class="hidden" onchange="handleStockUpdateFileUpload(event)" aria-label="CSV file for Quick Update">
+            <textarea id="stock-update-paste-textarea" rows="8" style="width:100%; font-family:monospace; font-size:0.8rem; min-height:160px;" placeholder="artikelnr,enhet,location&#10;TE726,Styck,A 3-2 2-1"></textarea>
             <div class="modal-actions" style="margin-top:0.75rem;">
                 <button class="secondary" onclick="showImportChooser()">← Back</button>
                 <button style="flex:1;" onclick="submitStockUpdateCSV()">Parse &amp; Continue</button>
@@ -1180,7 +1186,7 @@
         <h3 id="confirm-modal-title" style="margin-top:0;"></h3>
         <div id="confirm-modal-body" style="color:var(--text-main); line-height:1.6; white-space:pre-line; font-size:0.92rem; max-height:45vh; overflow-y:auto;"></div>
         <div class="modal-actions">
-            <button class="secondary full-width" onclick="closeConfirmModal()">Cancel</button>
+            <button class="secondary full-width" id="confirm-modal-cancel-btn" onclick="cancelConfirmModal()">Cancel</button>
             <button class="danger full-width" id="confirm-modal-confirm-btn" onclick="runConfirmModalAction()">Confirm</button>
         </div>
     </div>
@@ -1296,10 +1302,6 @@
                 <select id="manufacturer-filter" onchange="onManufacturerFilterChange()" style="margin: 0; width: auto; padding: 6px 10px; min-height: unset; font-size: 0.8rem;">
                     <option value="">Manufacturers</option>
                 </select>
-                <label style="display:flex; align-items:center; gap:6px; font-size:0.8rem; color:var(--text-muted); cursor:pointer; margin:0;" title="A negative stock number usually means it needs a physical recount, not that there's really less than zero on the shelf">
-                    <input type="checkbox" id="hide-negative-qty-cb" onchange="toggleHideNegativeQty()" style="margin:0;">
-                    Hide negative-stock items
-                </label>
                 <button class="secondary" onclick="openBinLocatorView()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📍 Bin Locator</button>
                 <div class="select-all-banner" style="margin-left: auto; margin-bottom: 0; padding: 6px 12px; min-height: unset;" onclick="toggleSelectAllBanner()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ') toggleSelectAllBanner()">
                     <input type="checkbox" id="select-all-cb" class="custom-checkbox" style="margin-right: 8px; pointer-events: none;" aria-hidden="true">
@@ -1929,7 +1931,7 @@
     var imgEditorFineRotateBase = null; // clean pre-preview canvas snapshot, for non-destructive slider drag
     var imgEditorPanStart = null;
     var WAREHOUSES = [
-        { l: '1', name: 'Main Warehouse — Best', address: 'Best, Sweden', mode: 'supabase' },
+        { l: '1', name: 'Malmö Best', address: 'Malmö, Sweden', mode: 'supabase' },
         { l: '2', name: 'North Depot', address: 'Stockholm, Sweden' },
         { l: '3', name: 'South Depot', address: 'Malmö, Sweden' }
     ];
@@ -2223,6 +2225,16 @@
         const sel = selected || 'st';
         return UNIT_TYPES.map(u => `<option value="${u.value}" ${u.value === sel ? 'selected' : ''}>${u.label}</option>`).join('');
     }
+    // A CSV's unit column holds either one of our own unit codes ("kg") or, from a Visma export, a
+    // Swedish unit word ("Kilo", "Pall", "Styck") — both accepted, case-insensitively. null when the
+    // text is neither, so a caller can choose: a fresh import falls back to 'st', an update to
+    // existing items leaves whatever unit they already have alone.
+    function unitTypeFromText(text) {
+        const t = String(text || '').trim().toLowerCase();
+        if (!t) return null;
+        if (UNIT_TYPES.some(u => u.value === t)) return t;
+        return (typeof window.lookupEnhetUnitType === 'function' ? window.lookupEnhetUnitType(t) : null) || null;
+    }
 
     // ── Items CSV "smart repair" — column-name matching for a file whose headers don't already
     // match COLUMNS_B verbatim. Common alternate spellings a real-world export might use, keyed by
@@ -2235,12 +2247,14 @@
         'itemnumber': ['itemnumber1', 'partnumber', 'partno', 'itemno', 'item1', 'articlenumber', 'articleno'],
         'itemnumber2': ['item2', 'altpartnumber', 'secondarynumber', 'secondarypartnumber'],
         'itemnumber3': ['item3', 'internalnumber', 'internalid', 'internalpartnumber'],
-        'Manufacturer': ['manufacturer', 'brand', 'supplier', 'vendor', 'maker'],
-        'Numberofitems': ['quantity', 'qty', 'stock', 'count', 'amount', 'onhand'],
-        'UnitType': ['unittype', 'unit', 'uom', 'unitofmeasure'],
+        'Manufacturer': ['manufacturer', 'manufacturers', 'brand', 'supplier', 'vendor', 'maker', 'tillverkare'],
+        'Numberofitems': ['quantity', 'qty', 'stock', 'count', 'amount', 'onhand', 'antal'],
+        // "enhet" is Swedish for unit — the values under it ("Styck", "Kilo", "Pall") are translated
+        // by unitTypeFromText() when the import is normalized, not just matched by header name.
+        'UnitType': ['unittype', 'unit', 'uom', 'unitofmeasure', 'enhet'],
         'Inventorylocation': ['location', 'warehouselocation', 'storage'],
         'MapPosition': ['zone', 'area', 'map'],
-        'LocationCode': ['bincode', 'binlocation', 'binlocationcode', 'shelf', 'shelflocation'],
+        'LocationCode': ['bincode', 'binlocation', 'binlocationcode', 'shelf', 'shelflocation', 'plats', 'lagerplats'],
         'Comments': ['comment', 'notes', 'note', 'remarks'],
         'Link': ['url', 'weblink', 'website', 'producturl', 'datasheet', 'productlink'],
         'images': ['image', 'photo', 'photos', 'picture', 'imagefile', 'imagefilename'],
@@ -4225,7 +4239,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 COLUMNS_B.forEach(c => { item[c] = (r[c] != null ? String(r[c]).trim() : ''); });
                 if (item['itemname(english)'] === '') item['itemname(english)'] = 'Unnamed';
                 if (item['Numberofitems'] === '') item['Numberofitems'] = '0';
-                if (item['UnitType'] === '' || !UNIT_TYPES.some(u => u.value === item['UnitType'])) item['UnitType'] = 'st';
+                item['UnitType'] = unitTypeFromText(item['UnitType']) || 'st';
                 return item;
             });
     }
@@ -4534,6 +4548,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const text = document.getElementById('stock-update-paste-textarea').value;
         beginStockUpdateImport(text);
     }
+    function handleStockUpdateFileUpload(event) {
+        const file = event.target.files?.[0];
+        event.target.value = ''; // allow re-selecting the same file later
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => beginStockUpdateImport(String(reader.result));
+        reader.readAsText(file);
+    }
 
     // ── Import Kits — chooser (upload vs paste), same shape as Import Items ──────────────────
     function openImportKitsModal() {
@@ -4599,13 +4621,45 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // frictionless case) or opens the column-mapping review step first, so a differently-named or
     // reordered export still imports correctly instead of silently losing data in columns that
     // don't line up ("smart repair" — see suggestColumnMapping()).
-    function beginItemsCSVImport(csvText) {
+    // A Visma article export (artikelnr + artikelnamn are its own columns) is meant for the
+    // dedicated "📥 Import from Visma" — this generic path has no idea a row's article-number suffix
+    // decides which warehouse it belongs in, that "A 3-2 2-1" is a bin coordinate, or that its
+    // stock figure is unreliable, so a Visma file run through here lands every row in whichever
+    // warehouse is open, units and bin codes half-mapped.
+    function looksLikeVismaExport(rawHeaders) {
+        const norm = rawHeaders.map(normalizeHeaderName);
+        return norm.includes('artikelnr') && norm.includes('artikelnamn');
+    }
+
+    function beginItemsCSVImport(csvText, skipVismaCheck = false) {
         if (!csvText || !csvText.trim()) { showToast("Nothing to import — paste or choose a CSV first.", "error"); return; }
         const parsed = Papa.parse(csvText.trim(), { header: true, skipEmptyLines: true });
         const rawHeaders = parsed.meta.fields || [];
         if (!rawHeaders.length || !parsed.data.length) { showToast("Couldn't find a header row and at least one data row in that CSV.", "error"); return; }
 
         closeImportItemsModal();
+        if (!skipVismaCheck && looksLikeVismaExport(rawHeaders)) {
+            const canUseVisma = getWarehouseMeta(currentWarehouseId).mode === 'supabase' && currentUserRole === 'admin';
+            const explainer = "This file looks like a Visma article export. The dedicated \"📥 Import from Visma\" sends each row to the right warehouse by its article-number suffix (MB → Malmö Best), turns bin locations into real bin codes, translates units (Styck, Kilo, Pall…), and pulls item numbers out of the names. Importing it here as plain items instead puts every row into the warehouse that's open right now.";
+            if (canUseVisma) {
+                showConfirmModal({
+                    title: 'Use Visma Import instead?',
+                    body: explainer,
+                    confirmLabel: '📥 Use Visma Import',
+                    onConfirm: () => { openVismaImportModal(); document.getElementById('visma-import-articles-textarea').value = csvText; },
+                    cancelLabel: 'Import as plain items anyway',
+                    onCancel: () => beginItemsCSVImport(csvText, true),
+                });
+            } else {
+                showConfirmModal({
+                    title: 'This looks like a Visma export',
+                    body: explainer + "\n\nImport from Visma is admin-only, in Supabase mode — ask an admin to run it if the rows should be split across warehouses.",
+                    confirmLabel: 'Import as plain items anyway',
+                    onConfirm: () => beginItemsCSVImport(csvText, true),
+                });
+            }
+            return;
+        }
         const exactMatch = rawHeaders.every(h => COLUMNS_B.includes(h));
         if (exactMatch) {
             proceedWithColumnMapping(parsed, rawHeaders.map(h => ({ header: h, target: h, confident: true })));
@@ -4824,14 +4878,20 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         event.target.value = '';
     }
 
-    // ── Quick Stock Update — a deliberately lighter CSV path than the full items import above: just
-    // a BTK-or-part-number column plus a quantity column (e.g. a stocktake export), matched against
-    // what's already here and the quantity set directly. No merge grid, since there's only one
-    // field involved — nothing else about a matched item changes, and nothing is added or removed.
+    // ── Quick Update — a deliberately lighter CSV path than the full items import above: a BTK-or-
+    // part-number column to match on, plus any of a quantity, a unit, and a bin-location column,
+    // applied straight to what's already here. No merge grid — only those fields are ever touched,
+    // nothing is added or removed, and a value that can't be understood (an unknown unit word, a
+    // location that isn't a bin coordinate, a negative quantity) is skipped rather than overwriting
+    // what the item already has. Also the non-destructive way to repair items that went in through
+    // the plain Items import with the wrong unit or no bin code: feed the same export back in,
+    // matched on its own article number.
     const STOCK_QTY_ALIASES = ['quantity', 'qty', 'stock', 'count', 'amount', 'onhand', 'numberofitems'];
+    const STOCK_UNIT_ALIASES = ['unittype', 'unit', 'uom', 'unitofmeasure', 'enhet'];
+    const STOCK_BIN_ALIASES = ['locationcode', 'bincode', 'binlocation', 'binlocationcode', 'plats', 'lagerplats', 'location', 'inventorylocation'];
     const STOCK_BTK_ALIASES = ['btk', 'btknumber', 'btknum', 'btkno', 'systemid', 'id'];
-    const STOCK_PART_ALIASES = ['itemnumber', 'itemnumber1', 'partnumber', 'partno', 'itemno', 'articlenumber', 'articleno', 'barcode', 'ean', 'upc'];
-    var stockUpdatePending = null; // [{ item, qty }] held between parse and confirm
+    const STOCK_PART_ALIASES = ['itemnumber', 'itemnumber1', 'itemnumber3', 'partnumber', 'partno', 'itemno', 'articlenumber', 'articleno', 'artikelnr', 'artikelnummer', 'vismaartikelnummer', 'barcode', 'ean', 'upc'];
+    var stockUpdatePending = null; // [{ item, changes: { qty?, unitType?, locationCode? } }] held between parse and confirm
 
     function beginStockUpdateImport(csvText) {
         if (!csvText || !csvText.trim()) { showToast("Nothing to import — paste a CSV first.", "error"); return; }
@@ -4839,72 +4899,149 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const rawHeaders = parsed.meta.fields || [];
         if (!rawHeaders.length || !parsed.data.length) { showToast("Couldn't find a header row and at least one data row in that CSV.", "error"); return; }
 
-        const qtyHeader = rawHeaders.find(h => STOCK_QTY_ALIASES.includes(normalizeHeaderName(h)));
-        const btkHeader = rawHeaders.find(h => STOCK_BTK_ALIASES.includes(normalizeHeaderName(h)));
-        const partHeader = rawHeaders.find(h => STOCK_PART_ALIASES.includes(normalizeHeaderName(h)));
-        if (!qtyHeader || (!btkHeader && !partHeader)) {
-            showToast("Couldn't find a quantity column plus a BTK or item-number column to match against.", "error", 7000);
+        const headersIn = aliases => rawHeaders.filter(h => aliases.includes(normalizeHeaderName(h)));
+        const qtyHeader = headersIn(STOCK_QTY_ALIASES)[0];
+        const unitHeader = headersIn(STOCK_UNIT_ALIASES)[0];
+        const binHeaders = headersIn(STOCK_BIN_ALIASES);
+        const btkHeader = headersIn(STOCK_BTK_ALIASES)[0];
+        const partHeaders = headersIn(STOCK_PART_ALIASES);
+        if (!qtyHeader && !unitHeader && !binHeaders.length) {
+            showToast("Couldn't find anything to update — need at least one of a quantity, unit, or bin location column.", "error", 7000);
+            return;
+        }
+        if (!btkHeader && !partHeaders.length) {
+            showToast("Couldn't find a BTK or item-number column to match rows against.", "error", 7000);
             return;
         }
 
-        const matched = [];
-        const notFound = [];
-        parsed.data.forEach(row => {
-            const qty = parseInt((row[qtyHeader] || '').toString().trim(), 10);
-            if (isNaN(qty) || qty < 0) return; // no usable quantity on this row — silently skipped
-            let item = null;
+        // Every code an existing item carries, lowercased, pointing back at the item(s) that carry
+        // it — built once instead of scanning the whole inventory per CSV row.
+        const norm = v => (v || '').toString().trim().toLowerCase();
+        const byCode = new Map();
+        globalInventory.forEach(item => ['itemnumber3', 'itemnumber', 'itemnumber2'].forEach(field => {
+            const key = norm(item[field]);
+            if (!key || key === 'none') return;
+            if (!byCode.has(key)) byCode.set(key, []);
+            byCode.get(key).push({ item, field });
+        }));
+        const findItemForRow = row => {
             if (btkHeader) {
                 const btk = (row[btkHeader] || '').toString().trim().toUpperCase();
-                if (btk) item = globalInventory.find(i => i.BTKnumber === btk);
+                if (btk) { const hit = globalInventory.find(i => i.BTKnumber === btk); if (hit) return { item: hit }; }
             }
-            if (!item && partHeader) {
-                const num = (row[partHeader] || '').toString().trim().toLowerCase();
-                if (num) item = globalInventory.find(i => [i.itemnumber, i.itemnumber2, i.itemnumber3].some(n => (n || '').trim().toLowerCase() === num));
+            for (const h of partHeaders) {
+                const hits = byCode.get(norm(row[h]));
+                if (!hits) continue;
+                const distinct = [...new Set(hits.map(x => x.item))];
+                if (distinct.length === 1) return { item: distinct[0] };
+                // Several items share this code — the Visma article number lives in Item #3, so prefer
+                // whichever of them carries it there; still more than one means guessing, so skip it.
+                const asItem3 = [...new Set(hits.filter(x => x.field === 'itemnumber3').map(x => x.item))];
+                return asItem3.length === 1 ? { item: asItem3[0] } : { ambiguous: true };
             }
-            if (item) matched.push({ item, qty });
-            else notFound.push((row[btkHeader] || row[partHeader] || '').toString().trim() || '(blank)');
+            return {};
+        };
+
+        const pending = new Map(); // BTK -> { item, changes } — a code repeated in the file just merges into one entry
+        const notFound = [], ambiguous = [];
+        let unitSkipped = 0, binSkipped = 0;
+        parsed.data.forEach(row => {
+            const label = (row[btkHeader] || row[partHeaders[0]] || '').toString().trim() || '(blank)';
+            const found = findItemForRow(row);
+            if (found.ambiguous) { ambiguous.push(label); return; }
+            if (!found.item) { notFound.push(label); return; }
+            const item = found.item;
+            const changes = {};
+            if (qtyHeader) {
+                const qty = parseInt((row[qtyHeader] || '').toString().trim(), 10);
+                if (!isNaN(qty) && qty >= 0 && String(qty) !== String(item.Numberofitems)) changes.qty = qty;
+            }
+            if (unitHeader && norm(row[unitHeader])) {
+                const unit = unitTypeFromText(row[unitHeader]);
+                if (!unit) unitSkipped++;
+                else if (unit !== (item.UnitType || 'st')) changes.unitType = unit;
+            }
+            for (const h of binHeaders) {
+                if (!norm(row[h])) continue;
+                const code = normalizeBinCode(row[h]);
+                if (!code) { binSkipped++; continue; }
+                if (code !== normalizeBinCode(item.LocationCode)) changes.locationCode = code;
+                break;
+            }
+            if (!Object.keys(changes).length) return;
+            const existing = pending.get(item.BTKnumber);
+            pending.set(item.BTKnumber, { item, changes: { ...(existing ? existing.changes : {}), ...changes } });
         });
 
-        if (!matched.length) { showToast("No rows matched an existing item in this warehouse.", "error"); return; }
+        if (!pending.size) {
+            const why = notFound.length && !ambiguous.length ? `${notFound.length} row(s) didn't match any item in this warehouse` : 'every matched item already has these values';
+            showToast(`Nothing to update — ${why}.`, "warning", 7000);
+            return;
+        }
         closeImportItemsModal();
-        stockUpdatePending = matched;
-        const notFoundNote = notFound.length
-            ? ` ${notFound.length} row(s) didn't match any existing item and will be skipped: ${notFound.slice(0, 5).join(', ')}${notFound.length > 5 ? '…' : ''}.`
-            : '';
+        stockUpdatePending = [...pending.values()];
+        const counts = { qty: 0, unitType: 0, locationCode: 0 };
+        stockUpdatePending.forEach(p => Object.keys(p.changes).forEach(k => counts[k]++));
+        const parts = [];
+        if (counts.qty) parts.push(`${counts.qty} quantit${counts.qty === 1 ? 'y' : 'ies'}`);
+        if (counts.unitType) parts.push(`${counts.unitType} unit type${counts.unitType === 1 ? '' : 's'}`);
+        if (counts.locationCode) parts.push(`${counts.locationCode} bin location${counts.locationCode === 1 ? '' : 's'}`);
+        const notes = [];
+        const sample = list => `${list.slice(0, 5).join(', ')}${list.length > 5 ? '…' : ''}`;
+        if (notFound.length) notes.push(`${notFound.length} row(s) didn't match any existing item and are skipped: ${sample(notFound)}.`);
+        if (ambiguous.length) notes.push(`${ambiguous.length} row(s) matched more than one item and are skipped: ${sample(ambiguous)}.`);
+        if (unitSkipped) notes.push(`${unitSkipped} unit value(s) weren't recognized and left alone.`);
+        if (binSkipped) notes.push(`${binSkipped} location value(s) weren't a bin coordinate and left alone.`);
         showConfirmModal({
-            title: `Update stock for ${matched.length} item(s)?`,
-            body: `This sets each matched item's quantity to the number in the file — nothing else about it changes.${notFoundNote}`,
-            confirmLabel: '✅ Update Stock',
+            title: `Update ${stockUpdatePending.length} item(s)?`,
+            body: `Sets ${parts.join(', ')} from the file — nothing else about these items changes.${notes.length ? '\n\n' + notes.join('\n') : ''}`,
+            confirmLabel: '✅ Update',
             onConfirm: commitStockUpdateImport
         });
     }
 
     async function commitStockUpdateImport() {
         if (!stockUpdatePending) return;
-        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
-        const batchId = (isSupa && window.crypto?.randomUUID) ? window.crypto.randomUUID() : null;
-        let updated = 0, failed = 0;
-        for (const { item, qty } of stockUpdatePending) {
-            try {
-                if (isSupa) {
-                    const beforeRow = await itemToSupabaseRow(item);
-                    const { error } = await sb.from('items').update({ numberofitems: qty }).eq('btk', item.BTKnumber);
-                    if (error) throw error;
-                    item.Numberofitems = String(qty);
-                    const afterRow = { ...beforeRow, numberofitems: qty };
-                    logActivity('update', item.BTKnumber, beforeRow, afterRow, `Stock update: ${summarizeItemChange('update', item.BTKnumber, beforeRow, afterRow)}`, batchId);
-                } else {
-                    item.Numberofitems = String(qty);
-                }
-                updated++;
-            } catch (e) { console.error('Stock update failed for', item.BTKnumber, e); failed++; }
-        }
-        const matchedCount = stockUpdatePending.length;
+        const pending = stockUpdatePending;
         stockUpdatePending = null;
-        if (!isSupa) { saveDraft(currentWarehouseId); filterList(true); }
-        else await supabaseLoadList(currentWarehouseId);
-        const canUndo = isSupa && batchId && updated > 0;
-        showToast(`Updated ${updated} of ${matchedCount} item(s).${failed ? ` ${failed} failed — see console.` : ''}${!isSupa ? ' (draft autosaved).' : ''}`,
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        const applyChanges = (item, changes) => {
+            const updated = { ...item };
+            if (changes.qty !== undefined) updated.Numberofitems = String(changes.qty);
+            if (changes.unitType) updated.UnitType = changes.unitType;
+            if (changes.locationCode) updated.LocationCode = changes.locationCode;
+            return updated;
+        };
+
+        if (!isSupa) {
+            pending.forEach(({ item, changes }) => Object.assign(item, applyChanges(item, changes)));
+            saveDraft(currentWarehouseId);
+            filterList(true);
+            showToast(`Updated ${pending.length} item(s) (draft autosaved).`, 'success', 6000);
+            return;
+        }
+
+        const batchId = window.crypto?.randomUUID ? window.crypto.randomUUID() : null;
+        const { data: { user } } = await sb.auth.getUser();
+        const userId = user ? user.id : null;
+        const entries = [];
+        for (const { item, changes } of pending) {
+            // The "before" snapshot has to be what's actually stored — itemToSupabaseRow() would fill
+            // location_code in from a bin coordinate sitting in Inventorylocation, which the item
+            // doesn't really have yet, so an Undo would then "restore" a code that was never there.
+            const beforeRow = await itemToSupabaseRow(item);
+            beforeRow.location_code = (item.LocationCode && item.LocationCode !== 'None') ? item.LocationCode : null;
+            const row = await itemToSupabaseRow(applyChanges(item, changes));
+            entries.push({ btk: item.BTKnumber, beforeRow, row: { ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: item.images || '' } });
+        }
+        const { succeeded, failed } = await bulkUpsertItemRows(entries);
+        await logActivityBulk(entries.filter(e => succeeded.has(e.btk)).map(e => ({
+            action: 'update', btk: e.btk, beforeRow: e.beforeRow, afterRow: e.row,
+            summary: `Quick update: ${summarizeItemChange('update', e.btk, e.beforeRow, e.row)}`
+        })), batchId, { userId });
+        await supabaseLoadList(currentWarehouseId);
+        const canUndo = batchId && succeeded.size > 0;
+        showToast(`Updated ${succeeded.size} of ${pending.length} item(s).${failed ? ` ${failed} failed — see console.` : ''}`,
             failed ? 'warning' : 'success', canUndo ? 15000 : 6000,
             canUndo ? { label: '↩️ Undo', onClick: () => undoImportBatch(batchId) } : null);
     }
@@ -5228,7 +5365,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     function toggleHideNegativeQty() {
-        hideNegativeQtyItems = document.getElementById('hide-negative-qty-cb').checked;
+        hideNegativeQtyItems = !hideNegativeQtyItems;
         localStorage.setItem('hideNegativeQtyItems', String(hideNegativeQtyItems));
         filterList(false);
     }
@@ -5321,20 +5458,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     function filterList(forceAll = false) {
         populateManufacturerFilter();
-        document.getElementById('hide-negative-qty-cb').checked = hideNegativeQtyItems;
         const query = forceAll ? "" : document.getElementById('search-box').value.toLowerCase().trim();
-        let filtered = globalInventory;
-        let hiddenNegativeCount = 0;
-        if (hideNegativeQtyItems) {
-            filtered = filtered.filter(item => {
-                const negative = (parseFloat(item.Numberofitems) || 0) < 0;
-                if (negative) hiddenNegativeCount++;
-                return !negative;
-            });
-        }
-        if (manufacturerFilter) filtered = filtered.filter(item => item.Manufacturer === manufacturerFilter);
+        let matching = globalInventory;
+        if (manufacturerFilter) matching = matching.filter(item => item.Manufacturer === manufacturerFilter);
         if (query !== "") {
-            filtered = filtered.filter(item => {
+            matching = matching.filter(item => {
                 const fields = [
                     item['itemname(english)'], item['itemname(swedish)'], item.BTKnumber,
                     item.itemnumber, item.itemnumber2, item.itemnumber3,
@@ -5343,10 +5471,21 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 return fields.some(f => f && f.toString().toLowerCase().includes(query));
             });
         }
+        // Counted among what the current search/manufacturer filter already matches, so the note
+        // always describes what's actually missing from *this* view, not the whole warehouse.
+        const isNegative = item => (parseFloat(item.Numberofitems) || 0) < 0;
+        const negativeCount = matching.filter(isNegative).length;
+        let filtered = hideNegativeQtyItems ? matching.filter(item => !isNegative(item)) : matching;
         filtered = sortItems(filtered);
         currentlyVisibleIds = filtered.map(i => i.BTKnumber);
-        document.getElementById('list-stats').innerText = `Showing ${filtered.length} of ${globalInventory.length} items`
-            + (hiddenNegativeCount ? ` (${hiddenNegativeCount} negative-stock item${hiddenNegativeCount === 1 ? '' : 's'} hidden)` : '');
+        // The show/hide switch lives inline in this line rather than as its own toolbar control —
+        // it only appears when there's actually something negative to hide or show, and costs no
+        // extra room in the (already crowded) sort/filter row above.
+        const negWord = `negative-stock item${negativeCount === 1 ? '' : 's'}`;
+        const negToggle = negativeCount
+            ? ` · <button type="button" class="stats-link" onclick="toggleHideNegativeQty()">${hideNegativeQtyItems ? `${negativeCount} ${negWord} hidden — show` : `showing ${negativeCount} ${negWord} — hide`}</button>`
+            : '';
+        document.getElementById('list-stats').innerHTML = `Showing ${filtered.length} of ${globalInventory.length} items${negToggle}`;
         renderList(filtered);
         syncSelectAllCheckbox();
     }
@@ -8218,13 +8357,31 @@ th { background: #eee; }
     // an import over that, an invalid value is sent as no bin code at all, with its raw text folded
     // into Inventorylocation instead (only when that field doesn't already have something more
     // specific) so it isn't silently thrown away, just moved to the free-text field it actually is.
+    // A bin coordinate arrives in two shapes in practice: webware's own code ("A3-2-02") and the
+    // warehouse's paper/Visma notation ("A 3-2 2-1" — Zone, Depth-Level, Bin-Row, see
+    // parsePlatsLocation() in modules/visma-import.js). Either becomes the real code; anything else
+    // is null. The converted code is re-checked against parseLocationCode() too, since Plats
+    // accepts zone letters (Å/Ä/Ö) the database's uppercase-ASCII CHECK constraint doesn't.
+    function normalizeBinCode(text) {
+        const t = String(text || '').trim();
+        if (!t || t === 'None') return null;
+        if (parseLocationCode(t)) return t.toUpperCase();
+        const plats = typeof window.parsePlatsLocation === 'function' ? window.parsePlatsLocation(t) : null;
+        return plats && parseLocationCode(plats.locationCode) ? plats.locationCode : null;
+    }
+
     function sanitizeLocationCodeForRow(locationCode, inventoryLocation) {
-        const raw = (locationCode && locationCode !== 'None') ? String(locationCode).trim() : '';
+        const rawCode = (locationCode && locationCode !== 'None') ? String(locationCode).trim() : '';
         const invLoc = (!inventoryLocation || inventoryLocation === 'None') ? null : inventoryLocation;
-        if (!raw) return { location_code: null, inventorylocation: invLoc };
-        const parsed = parseLocationCode(raw);
-        if (parsed) return { location_code: raw.toUpperCase(), inventorylocation: invLoc };
-        return { location_code: null, inventorylocation: invLoc || raw };
+        // The LocationCode field itself first; failing that, the free-text Inventorylocation — a CSV's
+        // single "location" column maps there by default (see CSV_COLUMN_ALIASES), so a real bin
+        // coordinate sitting in it is still a bin coordinate, and the item still belongs on the bin
+        // map. Inventorylocation keeps its original text either way.
+        const code = normalizeBinCode(rawCode) || normalizeBinCode(invLoc);
+        if (code) return { location_code: code, inventorylocation: invLoc };
+        // Not a bin coordinate in any shape: never sent as location_code (would fail the CHECK), but
+        // not thrown away either — kept as the free-text location when nothing better is there.
+        return { location_code: null, inventorylocation: invLoc || rawCode || null };
     }
 
     // Walking order for "Sort: Bin Location" — zone alphabetically, then depth/level/bin
@@ -8737,16 +8894,28 @@ th { background: #eee; }
     // only after the Confirm button is actually clicked; Cancel/overlay-click/away-navigation just
     // drop it on the floor.
     var confirmModalAction = null;
+    var confirmModalCancelAction = null;
+    // opts.cancelLabel/opts.onCancel (both optional): for a prompt whose "no" isn't really "stop" —
+    // e.g. "open the better importer" vs "carry on with this one anyway" — the left-hand button can
+    // be a real alternative instead of a bare Cancel. Clicking outside the box still just dismisses.
     function showConfirmModal(opts) {
         document.getElementById('confirm-modal-title').textContent = opts.title || 'Are you sure?';
         document.getElementById('confirm-modal-body').textContent = opts.body || '';
         document.getElementById('confirm-modal-confirm-btn').textContent = opts.confirmLabel || 'Confirm';
+        document.getElementById('confirm-modal-cancel-btn').textContent = opts.cancelLabel || 'Cancel';
         confirmModalAction = opts.onConfirm || null;
+        confirmModalCancelAction = opts.onCancel || null;
         document.getElementById('confirm-modal').classList.add('open');
     }
     function closeConfirmModal() {
         document.getElementById('confirm-modal').classList.remove('open');
         confirmModalAction = null;
+        confirmModalCancelAction = null;
+    }
+    function cancelConfirmModal() {
+        const action = confirmModalCancelAction;
+        closeConfirmModal();
+        if (action) action();
     }
     function runConfirmModalAction() {
         const action = confirmModalAction;
@@ -9370,6 +9539,28 @@ th { background: #eee; }
         }
     }
 
+    // Saves already-built { btk, row } entries as chunked bulk upserts (INSERT ... ON CONFLICT (btk)
+    // DO UPDATE), where every row must carry the same full set of keys — a bulk upsert needs a
+    // uniform shape, and its INSERT half needs the NOT NULL columns present even for a row that
+    // will turn out to be an update. A chunk that fails as a whole (one bad row somewhere in it) is
+    // retried one row at a time, so it costs only that row instead of the ~200 around it.
+    // Returns { succeeded: Set<btk>, failed: count }.
+    async function bulkUpsertItemRows(entries) {
+        const succeeded = new Set();
+        let failed = 0;
+        for (const chunk of chunkArray(entries, BULK_WRITE_CHUNK_SIZE)) {
+            const { error } = await sb.from('items').upsert(chunk.map(e => e.row), { onConflict: 'btk' });
+            if (!error) { chunk.forEach(e => succeeded.add(e.btk)); continue; }
+            console.error(`Bulk save failed for a batch of ${chunk.length} item(s), retrying individually:`, error);
+            for (const e of chunk) {
+                const { error: rowError } = await sb.from('items').upsert(e.row, { onConflict: 'btk' });
+                if (rowError) { failed++; console.error(`Could not save ${e.btk}:`, rowError); }
+                else succeeded.add(e.btk);
+            }
+        }
+        return { succeeded, failed };
+    }
+
     // Reverts every not-yet-reverted activity_log entry sharing one batch_id — the counterpart to a
     // single-entry "↩️ Revert" in the Activity Log modal, but for a whole bulk operation at once.
     // Reused revert_activity_log_entry() one row at a time (no new RPC) rather than a bespoke batch
@@ -9467,27 +9658,17 @@ th { background: #eee; }
                 const row = await itemToSupabaseRow(item);
                 const queueEntry = csvImportQueue.find(q => q.existing.BTKnumber === item.BTKnumber);
                 const beforeRow = queueEntry ? await itemToSupabaseRow(queueEntry.existing) : null;
-                entries.push({ btk: item.BTKnumber, row: { ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: '' }, beforeRow, isNew: false, item });
+                // An update leaves the legacy items.images column as it already was (the old
+                // per-row .update(row) never touched it); only a brand-new row starts it blank.
+                entries.push({ btk: item.BTKnumber, row: { ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: (queueEntry && queueEntry.existing.images) || '' }, beforeRow, isNew: false, item });
             }
             for (const item of csvImportPendingNew) {
                 const row = await itemToSupabaseRow(item);
                 entries.push({ btk: item.BTKnumber, row: { ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: '' }, beforeRow: null, isNew: true, item });
             }
 
-            const succeededBTKs = new Set();
-            for (const chunk of chunkArray(entries, BULK_WRITE_CHUNK_SIZE)) {
-                const { error } = await sb.from('items').upsert(chunk.map(e => e.row), { onConflict: 'btk' });
-                if (!error) { chunk.forEach(e => succeededBTKs.add(e.btk)); continue; }
-                // A whole chunk failing (one bad row somewhere in it) shouldn't sink every other row
-                // in that chunk — fall back to one request per row, same as before this optimization,
-                // for just this chunk.
-                console.error(`Bulk save failed for a batch of ${chunk.length} item(s), retrying individually:`, error);
-                for (const e of chunk) {
-                    const { error: rowError } = await sb.from('items').upsert(e.row, { onConflict: 'btk' });
-                    if (rowError) { writeErrors++; console.error(`Could not save ${e.btk}:`, rowError); }
-                    else succeededBTKs.add(e.btk);
-                }
-            }
+            const { succeeded: succeededBTKs, failed: saveFailures } = await bulkUpsertItemRows(entries);
+            writeErrors += saveFailures;
 
             const logEntries = entries.filter(e => succeededBTKs.has(e.btk)).map(e => ({
                 action: e.isNew ? 'create' : 'update', btk: e.btk, beforeRow: e.beforeRow, afterRow: e.row,
@@ -9627,7 +9808,7 @@ th { background: #eee; }
     function renderVismaImportGroup(groupIndex, group) {
         const rowsHtml = group.items.map((item, i) => vismaImportItemRowHtml(groupIndex, i, item)).join('');
         const wipeNote = group.isBest
-            ? `<p style="color:var(--danger); font-weight:600; font-size:0.85rem;">⚠️ Importing will permanently delete all ${vismaImportBestExistingItems.length} current item(s) in Best — including their photos — before these ${group.items.length} are added. Kit recipes and past orders referencing today's items will end up pointing at BTKs that no longer exist.</p>`
+            ? `<p style="color:var(--danger); font-weight:600; font-size:0.85rem;">⚠️ Importing will permanently delete all ${vismaImportBestExistingItems.length} current item(s) in ${escapeHtml(group.warehouseName)} — including their photos — before these ${group.items.length} are added. Kit recipes and past orders referencing today's items will end up pointing at BTKs that no longer exist.</p>`
             : '';
         const nameField = group.needsNewWarehouse
             ? `<input type="text" value="${escapeHtml(group.warehouseName)}" oninput="updateVismaImportGroupName(${groupIndex}, this.value)" style="font-weight:700; font-size:1rem; width:auto; display:inline-block; margin:0; padding:2px 6px;">`
@@ -11657,13 +11838,18 @@ Respond with ONLY the JSON object, nothing else.`;
     import { parseOrderRequest } from './modules/order-parser.js';
     import { createEmailClient, buildMailtoLink, buildPackOrderEmailTemplate } from './modules/email-sender.js';
     import { parseDeliveryNoteImage, resolveDeliveryNoteItems } from './modules/delivery-note-parser.js';
-    import { buildVismaImportDraft } from './modules/visma-import.js';
+    import { buildVismaImportDraft, parsePlatsLocation, lookupEnhetUnitType } from './modules/visma-import.js';
     window.parseVCardFile = parseVCardFile;
     window.generateVCard = generateVCard;
     window.parseOrderRequest = parseOrderRequest;
     window.parseDeliveryNoteImage = parseDeliveryNoteImage;
     window.resolveDeliveryNoteItems = resolveDeliveryNoteItems;
     window.buildVismaImportDraft = buildVismaImportDraft;
+    // Also used outside the Visma importer itself — by normalizeBinCode() (a Plats-style
+    // "A 3-2 2-1" bin coordinate from ANY import path becomes a real LocationCode) and by
+    // unitTypeFromText() (a Swedish unit word from any CSV becomes an internal unit code).
+    window.parsePlatsLocation = parsePlatsLocation;
+    window.lookupEnhetUnitType = lookupEnhetUnitType;
     window.buildMailtoLink = buildMailtoLink;
     window.buildPackOrderEmailTemplate = buildPackOrderEmailTemplate;
     // Built once at load, same as window.aiGroq — sendEmail() itself still fails cleanly (a plain

@@ -66,7 +66,7 @@
 //   // }
 
 export const KNOWN_ARTICLE_SUFFIXES = {
-  MB:  { city: 'Malmö',     company: 'Best',  warehouseName: 'Best',             existingWarehouseId: '1' },
+  MB:  { city: 'Malmö',     company: 'Best',  warehouseName: 'Malmö Best',       existingWarehouseId: '1' },
   BBD: { city: 'Malmö',     company: 'BBD',   warehouseName: 'BBD',              existingWarehouseId: null },
   GN:  { city: 'Göteborg',  company: 'Ntex',  warehouseName: 'Ntex (Göteborg)',  existingWarehouseId: null },
   GJ:  { city: 'Göteborg',  company: 'Johns', warehouseName: 'Johns (Göteborg)', existingWarehouseId: null },
@@ -194,9 +194,16 @@ const ENHET_TO_UNIT_TYPE = {
   'månad': 'manad', 'förpackning': 'forpackning', kilometer: 'kilometer',
 };
 
-export function mapEnhetToUnitType(enhet) {
+// The strict lookup: null for anything that isn't a known Swedish unit word, instead of quietly
+// becoming 'st' — for a caller that needs to tell "Styck" apart from "no idea what this says"
+// (e.g. an update that should leave an item's unit alone rather than overwrite it with a guess).
+export function lookupEnhetUnitType(enhet) {
   const key = String(enhet || '').trim().toLowerCase();
-  return ENHET_TO_UNIT_TYPE[key] || 'st';
+  return ENHET_TO_UNIT_TYPE[key] || null;
+}
+
+export function mapEnhetToUnitType(enhet) {
+  return lookupEnhetUnitType(enhet) || 'st';
 }
 
 // Visma exports Swedish-formatted numbers (comma decimal, space thousands-separator, e.g.
