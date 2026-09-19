@@ -280,6 +280,19 @@
         .zone-manual-row input[data-field="max_level"], .zone-manual-row input[data-field="max_bin"] { width: 64px; text-align: center; }
         .zone-manual-row input[data-field="shelf_width_cm"], .zone-manual-row input[data-field="shelf_height_cm"] { width: 72px; text-align: center; }
 
+        /* --- ISOMETRIC BIN VIEW + DIMENSIONS (see modules/iso-rack.js) --- */
+        .iso-canvas { background: var(--border); border-radius: 12px; padding: 8px; margin-top: 0.5rem; }
+        .iso-canvas svg { max-height: 460px; }
+        .dim-group { margin-bottom: 0.9rem; }
+        .dim-group h4 { margin: 0 0 0.35rem; font-size: 0.85rem; }
+        .dim-group h4 span { color: var(--text-muted); font-weight: 400; font-size: 0.78rem; }
+        .dim-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .dim-row label { font-size: 0.72rem; color: var(--text-muted); margin: 0; display: block; }
+        .dim-row input { margin: 2px 0 0; padding: 6px 8px; min-height: unset; font-size: 0.85rem; width: 100%; }
+        .zone-block .zone-size { display: block; font-size: 0.58rem; font-weight: 500; opacity: 0.9; }
+        .segmented-mini { display: inline-flex; gap: 6px; }
+        .segmented-mini button.active { background: var(--primary); color: white; }
+
         .rack-image-card { position: relative; border-radius: 10px; overflow: hidden; background: var(--card-bg); border: 1px solid var(--border); }
         .rack-image-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
         .rack-image-card .rack-image-label { padding: 6px 8px; font-size: 0.78rem; color: var(--text-muted); }
@@ -1355,12 +1368,17 @@
 
         <div id="bin-map-section" class="hidden" style="margin-top: 2rem; margin-bottom: 1rem;">
             <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Bin Location Map (Rack Depth × Level)</strong>
+                <strong id="bin-map-title" style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Bin Location Map (Rack Depth × Level)</strong>
                 <span id="bin-map-zone-select-wrap" class="hidden">
                     <select id="bin-map-zone-select" onchange="onBinMapZoneChange()" style="width:auto; margin:0; padding:4px 8px; font-size:0.8rem;"></select>
                 </span>
+                <span id="bin-iso-scope-toggle" class="segmented-mini hidden">
+                    <button class="secondary active" id="btn-iso-scope-rack" onclick="setIsoBinScope('rack')" style="padding:0.25rem 0.6rem; min-height:auto; font-size:0.78rem;">🗄️ Rack</button>
+                    <button class="secondary" id="btn-iso-scope-floor" onclick="setIsoBinScope('floor')" style="padding:0.25rem 0.6rem; min-height:auto; font-size:0.78rem;">🏭 Floor</button>
+                </span>
             </div>
             <div class="warehouse-map" id="bin-location-map"></div>
+            <div class="iso-canvas hidden" id="bin-iso-canvas" onclick="onBinIsoClick(event)"></div>
             <p id="bin-map-caption" style="color:var(--text-muted); font-size:0.82rem; margin-top:0.5rem;"></p>
         </div>
 
@@ -1443,6 +1461,30 @@
         <div id="zone-manual-mode" class="hidden">
             <div id="zone-manual-rows"></div>
             <button class="secondary" id="btn-add-zone-manual" onclick="addManualZoneRow()" style="margin-top:6px;">+ Add Zone</button>
+        </div>
+
+        <!-- Rack / shelf / bin dimensions per rack area, drawn to scale in isometric 3D as they're
+             typed. Edits the same globalWarehouseZones the designer above does (same undo history,
+             same Save Layout); see renderDimPanel() and modules/iso-rack.js. -->
+        <div id="zone-dimensions-panel" style="margin-top:2rem;">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:0.5rem;">
+                <strong style="color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">📏 Dimensions &amp; 3D View</strong>
+                <select id="dim-zone-select" onchange="onDimZoneChange()" aria-label="Rack area" style="width:auto; margin:0; padding:4px 8px; font-size:0.85rem;"></select>
+                <span class="segmented-mini">
+                    <button class="secondary active" id="btn-dim-scope-rack" onclick="setDimScope('rack')" style="padding:0.3rem 0.7rem; min-height:auto; font-size:0.8rem;">🗄️ Rack</button>
+                    <button class="secondary" id="btn-dim-scope-floor" onclick="setDimScope('floor')" style="padding:0.3rem 0.7rem; min-height:auto; font-size:0.8rem;">🏭 Warehouse floor</button>
+                </span>
+            </div>
+            <p style="color:var(--text-muted); font-size:0.82rem; margin-bottom:0.75rem;">Enter what you know, in centimetres — anything left blank is drawn with placeholder proportions and marked <em>≈</em>. The blue box is a sample bin; the rack itself stays see-through.</p>
+            <p id="dim-panel-empty" class="hidden" style="color:var(--text-muted); font-size:0.9rem;">Draw or add a rack area above to give it dimensions.</p>
+            <div id="dim-panel-body" style="display:flex; gap:1.25rem; flex-wrap:wrap; align-items:flex-start;">
+                <div id="dim-inputs" style="flex:1; min-width:260px; max-width:380px;"></div>
+                <div style="flex:2; min-width:300px;">
+                    <div class="iso-canvas" id="dim-preview" style="margin-top:0;" onclick="onDimPreviewClick(event)"></div>
+                    <p id="dim-summary" style="color:var(--text-main); font-size:0.82rem; margin:0.5rem 0 0.25rem;"></p>
+                    <p id="dim-notes" style="color:var(--text-muted); font-size:0.8rem; margin:0;"></p>
+                </div>
+            </div>
         </div>
 
         <div style="margin-top:2rem;">
@@ -1655,6 +1697,7 @@
             <select id="bin-locator-zone-select" onchange="onBinLocatorZoneChange()" style="width:auto; margin:0; padding:6px 10px; font-size:0.85rem;"></select>
         </div>
         <div class="warehouse-map" id="bin-locator-grid"></div>
+        <div class="iso-canvas hidden" id="bin-locator-iso" onclick="onBinLocatorIsoClick(event)"></div>
         <p id="bin-locator-grid-caption" style="color:var(--text-muted); font-size:0.82rem; margin-top:0.5rem;"></p>
 
         <div id="bin-locator-detail" class="hidden" style="margin-top:1.5rem; border-top:1px solid var(--border); padding-top:1rem;">
@@ -1737,6 +1780,14 @@
                 📊 Dashboard
             </label>
             <p class="setting-desc">Off by default. When on, a 📊 button appears in the header with an at-a-glance view of stock, kits, and (in Supabase mode) open orders.</p>
+        </div>
+
+        <div class="setting-row">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="iso-bin-view-enabled" onchange="onIsoBinViewSettingChange()" style="width:auto; min-height:unset; margin:0;">
+                🧊 Isometric bin locator
+            </label>
+            <p class="setting-desc">Off by default. When on, an item's Bin Location Map and the Bin Locator are drawn as an isometric 3D rack instead of the flat Depth × Level grid: the rack is semi-transparent and the bin you're looking for is a solid blue box labelled with its coordinates (with a 🏭 floor view showing where the rack area sits in the warehouse). Rack, shelf and bin sizes entered on the Warehouse page make it to scale.</p>
         </div>
 
         <div class="setting-row">
@@ -1880,6 +1931,8 @@
     var lowStockEnabled = false; // off by default — opt-in via Settings
     var lowStockThreshold = 5;
     var dashboardEnabled = false; // off by default — opt-in via Settings
+    var isoBinViewEnabled = false; // off by default — opt-in via Settings; draws the bin map / Bin Locator as an isometric rack (modules/iso-rack.js)
+    var isoBinScope = 'rack';      // item page: 'rack' (one rack area, zoomed) or 'floor' (every rack area on the warehouse floor)
     var cameraScanSupported = true; // flipped off at startup if the browser has no camera API at all — see window.onload
     var manufacturerFilter = ''; // list-view filter — derived options, not a separate table
     // On by default (unlike other list-view toggles) — a negative stock number is essentially
@@ -6010,6 +6063,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         zoneHistoryIndex = 0;
         setZoneDesignerMode('draw');
         updateUndoRedoButtons();
+        dimScope = 'rack';
+        renderDimPanel(true);
         if (!globalRackImages.length) await supabaseLoadRackImages(currentWarehouseId);
         renderRackImageForm();
         renderRackImageGallery();
@@ -6069,8 +6124,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             block.style.top = (z.grid_row * ZONE_CELL_SIZE) + 'px';
             block.style.width = ((z.max_aisle || 1) * ZONE_CELL_SIZE) + 'px';
             block.style.height = ((z.max_rack || 1) * ZONE_CELL_SIZE) + 'px';
-            block.innerText = z.zone;
-            block.title = `Rack Area ${z.zone}${z.label ? ' — ' + z.label : ''} (${z.max_aisle || 1} bays wide × ${z.max_rack || 1} racks deep) — drag to move, double-click to edit`;
+            const sizeTxt = zoneSizeLabel(z);
+            block.innerHTML = `<div style="text-align:center; line-height:1.15; pointer-events:none;">${escapeHtml(z.zone)}${sizeTxt && (z.max_aisle || 1) >= 3 ? `<span class="zone-size">${escapeHtml(sizeTxt)}</span>` : ''}</div>`;
+            block.title = `Rack Area ${z.zone}${z.label ? ' — ' + z.label : ''} (${z.max_aisle || 1} bays wide × ${z.max_rack || 1} racks deep${sizeTxt ? ', about ' + sizeTxt : ''}) — drag to move, double-click to edit`;
             block.ondblclick = (e) => { e.stopPropagation(); selectZoneBlock(z.zone); };
             if (currentUserRole === 'admin') {
                 block.onmousedown = (e) => {
@@ -6252,7 +6308,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function renderZoneInspector() {
         const box = document.getElementById('zone-inspector');
         const z = globalWarehouseZones.find(z => z.zone === selectedZoneLetter);
-        if (!z) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+        if (!z) { box.classList.add('hidden'); box.innerHTML = ''; renderDimPanel(true); return; }
         box.classList.remove('hidden');
         const readOnly = currentUserRole !== 'admin';
         box.innerHTML = `
@@ -6273,16 +6329,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                     <input type="number" id="zone-inspector-bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('max_bin', this.value)">
                 </div>
             </div>
-            <div style="display:flex; gap:12px;">
-                <div style="flex:1;">
-                    <label class="modal-label" for="zone-inspector-shelf-width">Shelf width (cm)</label>
-                    <input type="number" id="zone-inspector-shelf-width" min="0" step="0.1" value="${z.shelf_width_cm ?? ''}" placeholder="e.g. 120" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('shelf_width_cm', this.value)">
-                </div>
-                <div style="flex:1;">
-                    <label class="modal-label" for="zone-inspector-shelf-height">Shelf height (cm)</label>
-                    <input type="number" id="zone-inspector-shelf-height" min="0" step="0.1" value="${z.shelf_height_cm ?? ''}" placeholder="e.g. 200" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('shelf_height_cm', this.value)">
-                </div>
+            <div style="margin-top:0.75rem; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <button class="secondary" onclick="focusDimPanel('${escapeHtml(z.zone)}')" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.82rem;">📏 Rack, shelf &amp; bin dimensions…</button>
+                <span style="color:var(--text-muted); font-size:0.8rem;">${escapeHtml(dimShortSummary(z))}</span>
             </div>`;
+        renderDimPanel(true);
     }
 
     function updateSelectedZoneField(field, value) {
@@ -6320,10 +6371,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Depth <input type="number" data-field="max_rack" min="1" value="${z.max_rack || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_rack', this.value)"></label>
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Levels <input type="number" data-field="max_level" min="1" value="${z.max_level || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_level', this.value)"></label>
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Bins <input type="number" data-field="max_bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_bin', this.value)"></label>
-                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Width cm <input type="number" data-field="shelf_width_cm" min="0" step="0.1" value="${z.shelf_width_cm ?? ''}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'shelf_width_cm', this.value)"></label>
-                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Height cm <input type="number" data-field="shelf_height_cm" min="0" step="0.1" value="${z.shelf_height_cm ?? ''}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'shelf_height_cm', this.value)"></label>
+                <button class="secondary" onclick="focusDimPanel('${escapeHtml(z.zone)}')" title="Rack, shelf and bin dimensions${dimShortSummary(z) !== 'no dimensions recorded yet' ? ' — ' + escapeHtml(dimShortSummary(z)) : ''}" style="padding:0.35rem 0.6rem; min-height:auto;">📏</button>
                 ${readOnly ? '' : `<button class="secondary" onclick="removeManualZoneRow(${idx})" style="color:var(--danger); padding:0.35rem 0.6rem; min-height:auto;">✕</button>`}
             </div>`).join('') || `<p style="color:var(--text-muted); font-size:0.85rem;">No zones defined yet.</p>`;
+        renderDimPanel(true);
     }
 
     function updateManualZoneField(idx, field, value) {
@@ -6351,32 +6402,168 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         pushZoneHistory(true);
     }
 
+    // ── Dimensions & 3D view (Warehouse page) ────────────────────────────────────────────────────
+    // Rack / shelf / bin sizes per rack area, typed in cm and drawn to scale in isometric 3D as they
+    // change (modules/iso-rack.js). Edits the same globalWarehouseZones the designer above edits —
+    // same undo history, same Save Layout — so there's no second thing to remember to save.
+    // shelf_width_cm / shelf_height_cm are the older columns (schema_zone_shelf_dimensions.sql), the
+    // other seven are new (schema_zone_dimensions.sql). Shelf height means the CLEAR height of one
+    // level (top of a shelf board to the underside of the next), not the height of the whole rack.
+    const ZONE_NEW_DIM_COLUMNS = ['rack_width_cm', 'rack_depth_cm', 'rack_height_cm', 'shelf_depth_cm', 'bin_width_cm', 'bin_depth_cm', 'bin_height_cm'];
+    const DIM_GROUPS = [
+        { title: 'Rack', hint: 'the whole shelving frame', fields: [['rack_width_cm', 'Width (one bay)', '120'], ['rack_depth_cm', 'Depth', '60'], ['rack_height_cm', 'Height', '250']] },
+        { title: 'Shelf', hint: 'one level of it', fields: [['shelf_width_cm', 'Width', '120'], ['shelf_depth_cm', 'Depth', '60'], ['shelf_height_cm', 'Clear height', '45']] },
+        { title: 'Bin', hint: 'one bin or box on a shelf', fields: [['bin_width_cm', 'Width', '40'], ['bin_depth_cm', 'Depth', '60'], ['bin_height_cm', 'Height', '30']] },
+    ];
+    var dimZoneLetter = null;
+    var dimScope = 'rack';
+    var dimPreviewTimer = null;
+
+    const dimVal = v => (v === null || v === undefined || v === '' || !(parseFloat(v) > 0)) ? '?' : String(parseFloat(v));
+    function dimShortSummary(z) {
+        const any = DIM_GROUPS.some(g => g.fields.some(([f]) => parseFloat(z[f]) > 0));
+        if (!any) return 'no dimensions recorded yet';
+        return `rack ${dimVal(z.rack_width_cm)}×${dimVal(z.rack_depth_cm)}×${dimVal(z.rack_height_cm)} · shelf ${dimVal(z.shelf_width_cm)}×${dimVal(z.shelf_depth_cm)}×${dimVal(z.shelf_height_cm)} · bin ${dimVal(z.bin_width_cm)}×${dimVal(z.bin_depth_cm)}×${dimVal(z.bin_height_cm)} cm`;
+    }
+
+    // "9.6×1.3 m" for a rack area whose bay width (and depth) is known — shown on its block in the
+    // top-down designer and in its tooltip; empty when nothing's recorded, so nothing is implied.
+    function zoneSizeLabel(z) {
+        if (typeof window.resolveRackGeometry !== 'function') return '';
+        const g = window.resolveRackGeometry(z, { maxDepth: z.max_rack || 1, maxLevel: z.max_level || 1, maxBin: z.max_bin || 1 });
+        if (!(g.recorded.rackW || g.recorded.shelfW)) return '';
+        const w = (g.runLength / 100).toFixed(1);
+        return (g.recorded.rackD || g.recorded.shelfD) ? `${w}×${(g.totalDepth / 100).toFixed(1)} m` : `${w} m`;
+    }
+
+    function renderDimPanel(rebuildInputs = true) {
+        const zones = globalWarehouseZones;
+        const select = document.getElementById('dim-zone-select');
+        if (!select) return;
+        document.getElementById('dim-panel-empty').classList.toggle('hidden', zones.length > 0);
+        document.getElementById('dim-panel-body').classList.toggle('hidden', !zones.length);
+        select.classList.toggle('hidden', !zones.length);
+        if (!zones.length) { dimZoneLetter = null; return; }
+        if (selectedZoneLetter && zones.some(z => z.zone === selectedZoneLetter)) dimZoneLetter = selectedZoneLetter;
+        else if (!dimZoneLetter || !zones.some(z => z.zone === dimZoneLetter)) dimZoneLetter = zones[0].zone;
+        select.innerHTML = zones.map(z => `<option value="${escapeHtml(z.zone)}" ${z.zone === dimZoneLetter ? 'selected' : ''}>Rack area ${escapeHtml(z.zone)}${z.label ? ' — ' + escapeHtml(z.label) : ''}</option>`).join('');
+        if (rebuildInputs) renderDimInputs();
+        renderDimPreview();
+    }
+
+    function renderDimInputs() {
+        const z = globalWarehouseZones.find(z => z.zone === dimZoneLetter);
+        if (!z) return;
+        const readOnly = currentUserRole !== 'admin';
+        document.getElementById('dim-inputs').innerHTML = DIM_GROUPS.map(g => `
+            <div class="dim-group">
+                <h4>${g.title} <span>${g.hint}</span></h4>
+                <div class="dim-row">${g.fields.map(([field, label, placeholder]) => `
+                    <label>${label}<input type="number" min="0" step="0.1" id="dim-${field}" value="${z[field] ?? ''}" placeholder="${placeholder}" ${readOnly ? 'disabled' : ''} oninput="onDimInput('${field}', this.value)"></label>`).join('')}
+                </div>
+            </div>`).join('');
+    }
+
+    function onDimZoneChange() {
+        selectZoneBlock(document.getElementById('dim-zone-select').value);
+    }
+    function setDimScope(scope) { dimScope = scope; renderDimPreview(); }
+    function focusDimPanel(letter) {
+        selectedZoneLetter = letter;
+        dimZoneLetter = letter;
+        renderDimPanel(true);
+        document.getElementById('zone-dimensions-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    function onDimPreviewClick(e) {
+        const el = e.target.closest('[data-zone]');
+        if (el) selectZoneBlock(el.dataset.zone);
+    }
+
+    function onDimInput(field, value) {
+        const z = globalWarehouseZones.find(z => z.zone === dimZoneLetter);
+        if (!z || currentUserRole !== 'admin') return;
+        // Optional and decimal: blank means "not recorded", never zero or one.
+        z[field] = value === '' ? null : (parseFloat(value) > 0 ? parseFloat(value) : null);
+        pushZoneHistory(false);
+        clearTimeout(dimPreviewTimer);
+        dimPreviewTimer = setTimeout(() => { renderDimPreview(); if (zoneDesignerMode === 'draw') renderZoneDrawGrid(); }, 90);
+    }
+
+    function dimConsistencyNotes(g) {
+        const r = g.recorded, notes = [];
+        const cm = v => `${Math.round(v * 10) / 10} cm`;
+        if (!Object.values(r).some(Boolean)) return ['Nothing recorded yet — the drawing uses placeholder proportions.'];
+        if (r.rackH && r.shelfH && Math.abs(g.impliedHeight - r.rackH) / r.rackH > 0.1) {
+            notes.push(`⚠️ ${g.levels} level${g.levels > 1 ? 's' : ''} × ${cm(r.shelfH)} clear height (plus the shelf boards) comes to about ${cm(g.impliedHeight)}, but the rack height is ${cm(r.rackH)} — one of them is off.`);
+        } else if (r.shelfH && !r.rackH && g.height > 600) {
+            notes.push(`⚠️ ${g.levels} level${g.levels > 1 ? 's' : ''} × ${cm(r.shelfH)} makes a rack ${(g.height / 100).toFixed(1)} m tall — shelf height is the clear height of a single level, not the whole rack.`);
+        }
+        if (r.binH && r.shelfH && r.binH > r.shelfH) notes.push(`⚠️ Bin height ${cm(r.binH)} is taller than the shelf's clear height ${cm(r.shelfH)}.`);
+        if (r.binW && (r.rackW || r.shelfW)) {
+            const across = g.binsPerLevel * r.binW;
+            if (Math.abs(across - g.runLength) / g.runLength > 0.1) notes.push(`ℹ️ ${g.binsPerLevel} bins × ${cm(r.binW)} = ${cm(across)}, but the rack run is ${cm(g.runLength)} (${g.bays} bay${g.bays > 1 ? 's' : ''}).`);
+        }
+        if (Object.values(r).some(v => !v)) notes.push('Anything blank is drawn with placeholder proportions and marked ≈ on the picture.');
+        return notes;
+    }
+
+    function renderDimPreview() {
+        const canvas = document.getElementById('dim-preview');
+        const z = globalWarehouseZones.find(z => z.zone === dimZoneLetter);
+        if (!canvas || !z || typeof window.buildIsoRackSVG !== 'function') return;
+        document.getElementById('btn-dim-scope-rack').classList.toggle('active', dimScope === 'rack');
+        document.getElementById('btn-dim-scope-floor').classList.toggle('active', dimScope === 'floor');
+        const bounds = getZoneBounds(z.zone) || { maxDepth: z.max_rack || 1, maxLevel: z.max_level || 1, maxBin: z.max_bin || 1 };
+        const geom = window.resolveRackGeometry({ ...z }, bounds);
+        if (dimScope === 'floor') {
+            const svg = window.buildIsoFloorSVG(globalWarehouseZones, { selectedZone: z.zone, interactive: true, ariaLabel: `Warehouse floor with rack area ${z.zone} selected` });
+            canvas.innerHTML = svg || `<p style="color:var(--text-muted); font-size:0.85rem; margin:1rem;">No rack areas are placed on the floor grid yet — draw one above.</p>`;
+        } else {
+            canvas.innerHTML = window.buildIsoRackSVG(geom, { showDimensions: true, sampleBin: true, ariaLabel: `Isometric view of rack area ${z.zone} with its dimensions` });
+        }
+        document.getElementById('dim-summary').textContent = `Rack area ${z.zone}: ${geom.bays} bay${geom.bays > 1 ? 's' : ''} × ${geom.depthCount} rack${geom.depthCount > 1 ? 's' : ''} deep × ${geom.levels} level${geom.levels > 1 ? 's' : ''}, ${geom.binsPerLevel} bin${geom.binsPerLevel > 1 ? 's' : ''} per level — ${dimShortSummary(z)}`;
+        document.getElementById('dim-notes').innerHTML = dimConsistencyNotes(geom).map(escapeHtml).join('<br>');
+    }
+
     async function saveZoneLayout() {
         if (currentUserRole !== 'admin') return;
         const letters = globalWarehouseZones.map(z => z.zone.trim().toUpperCase()).filter(Boolean);
         if (new Set(letters).size !== letters.length) { showToast("Zone letters must be unique.", "error"); return; }
         if (letters.length !== globalWarehouseZones.length) { showToast("Every zone needs a letter.", "error"); return; }
 
-        const rows = globalWarehouseZones.map(z => ({
+        const baseRow = z => ({
             warehouse_id: currentWarehouseId, zone: z.zone.trim().toUpperCase(), label: z.label || null,
             max_aisle: z.max_aisle || 1, max_rack: z.max_rack || 1, max_level: z.max_level || 1, max_bin: z.max_bin || 1,
             shelf_width_cm: z.shelf_width_cm ?? null, shelf_height_cm: z.shelf_height_cm ?? null,
             grid_col: z.grid_col ?? null, grid_row: z.grid_row ?? null
-        }));
+        });
+        const rows = globalWarehouseZones.map(z => ({ ...baseRow(z), ...Object.fromEntries(ZONE_NEW_DIM_COLUMNS.map(c => [c, z[c] ?? null])) }));
+        const localBySaved = new Map(globalWarehouseZones.map(z => [z.zone.trim().toUpperCase(), z]));
 
         // Small admin-configured table, rewritten wholesale rather than diffed — simplest correct
         // option given how infrequently this changes and how few rows it ever has.
         const del = await sb.from('warehouse_zones').delete().eq('warehouse_id', currentWarehouseId);
         if (del.error) { showToast("Save blocked: " + del.error.message, "error"); return; }
+        let dimsSkipped = false;
         if (rows.length) {
-            const ins = await sb.from('warehouse_zones').insert(rows).select();
-            if (ins.error) { showToast("Save blocked: " + ins.error.message, "error"); return; }
-            globalWarehouseZones = ins.data;
+            let ins = await sb.from('warehouse_zones').insert(rows).select();
+            // schema_zone_dimensions.sql not run yet: the old layout is already deleted at this point,
+            // so rather than fail and lose it, save everything the old schema does have and say so.
+            const msg = (ins.error && ins.error.message) || '';
+            if (ins.error && /column|schema cache/i.test(msg) && ZONE_NEW_DIM_COLUMNS.some(c => msg.includes(c))) {
+                ins = await sb.from('warehouse_zones').insert(globalWarehouseZones.map(baseRow)).select();
+                dimsSkipped = !ins.error;
+            }
+            if (ins.error) { showToast("Save failed after the old layout was cleared — your edits are still on screen, press Save Layout again. (" + ins.error.message + ")", "error", 10000); return; }
+            globalWarehouseZones = dimsSkipped
+                ? ins.data.map(r => ({ ...r, ...Object.fromEntries(ZONE_NEW_DIM_COLUMNS.map(c => [c, (localBySaved.get(r.zone) || {})[c] ?? null])) }))
+                : ins.data;
         } else {
             globalWarehouseZones = [];
         }
         selectedZoneLetter = null;
-        showToast("Layout saved.", "success");
+        if (dimsSkipped) showToast("Layout saved — but the new rack/bin dimension columns don't exist in your database yet, so those sizes were NOT stored. Run supabase/schema_zone_dimensions.sql in the Supabase SQL editor, then Save Layout again.", "warning", 14000);
+        else showToast("Layout saved.", "success");
         renderZoneDrawGrid();
         renderZoneInspector();
         renderZoneManualRows();
@@ -8585,6 +8772,12 @@ th { background: #eee; }
         select.innerHTML = zones.map(z => `<option value="${escapeHtml(z)}" ${z === binMapSelectedZone ? 'selected' : ''}>Zone ${escapeHtml(z)}</option>`).join('');
 
         const bounds = getZoneBounds(binMapSelectedZone);
+        const isoOn = isoBinViewEnabled && typeof window.buildIsoRackSVG === 'function';
+        document.getElementById('bin-iso-canvas').classList.toggle('hidden', !isoOn);
+        document.getElementById('bin-iso-scope-toggle').classList.toggle('hidden', !isoOn || !globalWarehouseZones.some(isZonePlaced));
+        document.getElementById('bin-map-title').textContent = isoOn ? 'Bin Location (3D view)' : 'Bin Location Map (Rack Depth × Level)';
+        map.classList.toggle('hidden', isoOn);
+        if (isoOn) { renderBinLocationIso(item, itemPos, bounds, caption); return; }
         map.innerHTML = '';
         if (!bounds) {
             map.style.gridTemplateColumns = '';
@@ -8614,6 +8807,58 @@ th { background: #eee; }
         else if (!itemPos) caption.textContent = `"${item.LocationCode}" isn't a valid bin location code.`;
         else if (itemPos.zone !== binMapSelectedZone) caption.textContent = `This item is in Zone ${itemPos.zone}, not shown here.`;
         else caption.textContent = describeLocationCode(item.LocationCode) + ' — tap the highlighted cell above for the detailed shelf view.';
+    }
+
+    // ── Isometric bin view (Settings → 🧊 Isometric bin locator, off by default) ─────────────────
+    // Same information as the flat Depth × Level grid, drawn as a 3D rack (modules/iso-rack.js):
+    // the rack is semi-transparent, the bin being looked for is one solid blue box labelled with its
+    // coordinates. 🏭 Floor zooms out to every rack area on the warehouse floor, the box still
+    // sitting at its real spot inside its own rack area.
+    function isZonePlaced(z) { return Number.isFinite(z.grid_col) && Number.isFinite(z.grid_row); }
+
+    function setIsoBinScope(scope) {
+        isoBinScope = scope;
+        const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+        if (item) renderBinLocationMap(item);
+    }
+
+    function renderBinLocationIso(item, itemPos, bounds, caption) {
+        const canvas = document.getElementById('bin-iso-canvas');
+        const zone = binMapSelectedZone;
+        const zoneRow = globalWarehouseZones.find(z => z.zone === zone) || null;
+        const here = !!(itemPos && itemPos.zone === zone);
+        const wantFloor = isoBinScope === 'floor' && globalWarehouseZones.some(isZonePlaced);
+        document.getElementById('btn-iso-scope-rack').classList.toggle('active', !wantFloor);
+        document.getElementById('btn-iso-scope-floor').classList.toggle('active', wantFloor);
+        const hl = here ? { depth: itemPos.depth, level: itemPos.level, bin: itemPos.bin, row: itemPos.binRow } : null;
+        const placed = !!(zoneRow && isZonePlaced(zoneRow));
+
+        if (wantFloor) {
+            canvas.innerHTML = window.buildIsoFloorSVG(globalWarehouseZones, {
+                selectedZone: zone, interactive: true, highlight: hl && placed ? { zone, ...hl } : null,
+                ariaLabel: `Warehouse floor with rack area ${zone} selected`,
+            });
+        } else if (bounds) {
+            const geom = window.resolveRackGeometry(zoneRow ? { ...zoneRow } : { zone }, bounds, { minBin: hl ? hl.bin : 0, minRows: hl ? hl.row : 1 });
+            canvas.innerHTML = window.buildIsoRackSVG(geom, { highlight: hl, ariaLabel: `Isometric view of rack area ${zone}${hl ? `, bin ${item.LocationCode}` : ''}` });
+        } else {
+            canvas.innerHTML = '';
+        }
+
+        if (!bounds && !wantFloor) caption.textContent = `No sized layout for Zone ${zone} yet.`;
+        else if (!item.LocationCode || item.LocationCode === 'None') caption.textContent = "No bin location set — add one via ✏️ Edit or double-click to quick-edit.";
+        else if (!itemPos) caption.textContent = `"${item.LocationCode}" isn't a valid bin location code.`;
+        else if (!here) caption.textContent = `This item is in Zone ${itemPos.zone}, not shown here.`;
+        else if (wantFloor && !placed) caption.textContent = `${describeLocationCode(item.LocationCode)} — Zone ${zone} isn't placed on the warehouse floor yet (draw it in the Layout Designer on the Warehouse page).`;
+        else caption.textContent = `${describeLocationCode(item.LocationCode)} — the solid blue box is the bin; tap it for the detailed shelf view${wantFloor ? ', or tap another rack area to look at it' : ''}.`;
+    }
+
+    function onBinIsoClick(e) {
+        const item = globalInventory.find(i => i.BTKnumber === currentItemBTK);
+        if (!item) return;
+        if (e.target.closest('.iso-hl')) { if (parseLocationCode(item.LocationCode)) openBinDetailModal(item); return; }
+        const zoneEl = e.target.closest('[data-zone]');
+        if (zoneEl) { binMapSelectedZone = zoneEl.dataset.zone; renderBinLocationMap(item); }
     }
 
     // "Detailed graphical representation" drill-down from the coarse Depth×Level grid: the grid
@@ -8745,10 +8990,38 @@ th { background: #eee; }
         });
     }
 
+    // Isometric flavour of the same screen (Settings → 🧊 Isometric bin locator): the whole rack area
+    // as a see-through 3D rack, bins holding items tinted blue, the picked shelf outlined. Tapping
+    // any bin or shelf picks that shelf, exactly like tapping a Depth × Level cell does.
+    function renderBinLocatorIso(bounds, caption, canvas) {
+        const zone = binLocatorZone;
+        if (!bounds) { canvas.innerHTML = ''; caption.textContent = `No sized layout for Zone ${zone} yet.`; return; }
+        const here = globalInventory.map(i => parseLocationCode(i.LocationCode)).filter(p => p && p.zone === zone);
+        const geom = window.resolveRackGeometry({ ...(globalWarehouseZones.find(z => z.zone === zone) || { zone }) }, bounds, {
+            minBin: Math.max(0, ...here.map(p => p.bin)), minRows: Math.max(1, ...here.map(p => p.binRow)),
+        });
+        canvas.innerHTML = window.buildIsoRackSVG(geom, {
+            interactive: true,
+            occupied: here.map(p => ({ depth: p.depth, level: p.level, bin: p.bin, row: p.binRow })),
+            selected: binLocatorSelectedDepth ? { depth: binLocatorSelectedDepth, level: binLocatorSelectedLevel } : null,
+            ariaLabel: `Isometric view of rack area ${zone}, bins holding items tinted blue`,
+        });
+        caption.textContent = `Zone ${zone} — bins holding items are tinted blue; tap any shelf, or a bin on it, to see what's stored there.`;
+    }
+    function onBinLocatorIsoClick(e) {
+        const el = e.target.closest('[data-depth][data-level]');
+        if (el) selectBinLocatorCell(parseInt(el.dataset.depth, 10), parseInt(el.dataset.level, 10));
+    }
+
     function renderBinLocatorGrid() {
         const grid = document.getElementById('bin-locator-grid');
         const caption = document.getElementById('bin-locator-grid-caption');
         const bounds = getZoneBounds(binLocatorZone);
+        const isoOn = isoBinViewEnabled && typeof window.buildIsoRackSVG === 'function';
+        const isoCanvas = document.getElementById('bin-locator-iso');
+        isoCanvas.classList.toggle('hidden', !isoOn);
+        grid.classList.toggle('hidden', isoOn);
+        if (isoOn) { renderBinLocatorIso(bounds, caption, isoCanvas); return; }
         grid.innerHTML = '';
         if (!bounds) {
             grid.style.gridTemplateColumns = '';
@@ -10415,6 +10688,9 @@ ${css}
         document.getElementById('dashboard-enabled').checked = dashboardEnabled;
         document.getElementById('btn-dashboard').classList.toggle('hidden', !dashboardEnabled);
 
+        isoBinViewEnabled = localStorage.getItem('iso-bin-view') === '1';
+        document.getElementById('iso-bin-view-enabled').checked = isoBinViewEnabled;
+
         // The actual corsFetch() behavior is already applied at page load (see the module bridge
         // script, which reads this same key) — this just syncs the checkbox to match.
         document.getElementById('cors-public-fallback-enabled').checked = localStorage.getItem('cors-allow-public-fallback') === '1';
@@ -10429,6 +10705,17 @@ ${css}
         localStorage.setItem('dashboard-enabled', dashboardEnabled ? '1' : '0');
         document.getElementById('btn-dashboard').classList.toggle('hidden', !dashboardEnabled);
         if (!dashboardEnabled && activeView === 'dashboard-view') switchView(previousView || 'list-view');
+    }
+    // Applied immediately, same as the Dashboard toggle — a bin map already on screen (or a Bin
+    // Locator behind the Settings page) is redrawn the next time it's shown either way.
+    function onIsoBinViewSettingChange() {
+        isoBinViewEnabled = document.getElementById('iso-bin-view-enabled').checked;
+        localStorage.setItem('iso-bin-view', isoBinViewEnabled ? '1' : '0');
+        // Settings sits on top of whatever was open, and going back doesn't re-render it — so
+        // redraw the item page's map / the Bin Locator now, while they're hidden underneath.
+        const openItemNow = currentItemBTK && globalInventory.find(i => i.BTKnumber === currentItemBTK);
+        if (openItemNow && getAvailableZones().length) renderBinLocationMap(openItemNow);
+        if (binLocatorZone && getAvailableZones().includes(binLocatorZone)) renderBinLocatorGrid();
     }
     function onCorsPublicFallbackChange() {
         const enabled = document.getElementById('cors-public-fallback-enabled').checked;
@@ -11839,6 +12126,10 @@ Respond with ONLY the JSON object, nothing else.`;
     import { createEmailClient, buildMailtoLink, buildPackOrderEmailTemplate } from './modules/email-sender.js';
     import { parseDeliveryNoteImage, resolveDeliveryNoteItems } from './modules/delivery-note-parser.js';
     import { buildVismaImportDraft, parsePlatsLocation, lookupEnhetUnitType } from './modules/visma-import.js';
+    import { resolveRackGeometry, buildIsoRackSVG, buildIsoFloorSVG } from './modules/iso-rack.js';
+    window.resolveRackGeometry = resolveRackGeometry;
+    window.buildIsoRackSVG = buildIsoRackSVG;
+    window.buildIsoFloorSVG = buildIsoFloorSVG;
     window.parseVCardFile = parseVCardFile;
     window.generateVCard = generateVCard;
     window.parseOrderRequest = parseOrderRequest;

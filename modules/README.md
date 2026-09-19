@@ -3,15 +3,16 @@
 Standalone JS building blocks for functionality discussed for the app. Most of these aren't
 imported by `index.html` yet — nothing changes until a module is deliberately wired in — except
 **`perspective-warp.js`**, **`groq-client.js`**, **`cors-proxy.js`**, **`web-search.js`**,
-**`order-parser.js`**, **`contacts.js`**, **`email-sender.js`**, **`delivery-note-parser.js`**, and
-**`visma-import.js`**, which are (via the
+**`order-parser.js`**, **`contacts.js`**, **`email-sender.js`**, **`delivery-note-parser.js`**,
+**`visma-import.js`**, and **`iso-rack.js`**, which are (via the
 `<script type="module">` bridge near the end of `index.html`, since the rest of the app is one
 classic script) — the first four back the 🤖 AI Assistant chat bubble, `order-parser.js` backs its
 natural-language Pack Order action, `contacts.js` backs the Saved Recipients picker,
 `email-sender.js` backs the "📧 Email Recipient" Compose Email modal — both on the Pack Order
 screen — `delivery-note-parser.js` backs the "🧾 Delivery Note" scanner capture, and
-`visma-import.js` backs the header's "📥 Import from Visma" button (see the README's Features/Data
-Import Workflow sections for all of these). `img-square.js` remains unwired. Each
+`visma-import.js` backs the header's "📥 Import from Visma" button, and `iso-rack.js` draws the
+isometric bin locator and the Warehouse page's dimensions preview (see the README's Features/Data
+Import Workflow/Warehouse Page sections for all of these). `img-square.js` remains unwired. Each
 file has a `STATUS:` header comment saying which. Run all tests with:
 
 ```bash
@@ -196,6 +197,35 @@ node --test modules/tests/*.test.js
   Every write from the whole run (Best's deletions and every warehouse's new items) shares one
   `activity_log` batch, reverting as a single `undoImportBatch()` call, unchanged from how a CSV
   import already uses it.
+- **`iso-rack.js`** — **wired in**, as the Settings-gated "🧊 Isometric bin locator" (off by
+  default) and the Warehouse page's "📏 Dimensions & 3D View" panel. Isometric drawings as plain SVG
+  strings — no DOM, no Supabase, same as the other modules; index.html decides where the markup goes
+  and handles the clicks (`data-depth`/`data-level`/`data-bin` on bins, `data-zone` on floor blocks).
+  Three exports beyond the constants:
+  - `resolveRackGeometry(zone, bounds, extra)` — turns a `warehouse_zones` row (all sizes optional,
+    in cm: rack width per bay/depth/height, shelf width/depth/clear-height, bin width/depth/height)
+    plus the zone's Depth/Level/Bin counts into one geometry object. Anything not recorded falls back
+    to a schematic default so the picture still reads, and the result's `recorded` field says which
+    values were real — that's what lets the callouts show a dashed "≈" for a guess and a solid value
+    for a measurement. Junk (negative, zero, `NaN`, text) counts as not recorded. A bin/Row beyond
+    the configured size (`extra.minBin`/`minRows`) widens the picture instead of falling off it.
+  - `buildIsoRackSVG(geom, opts)` — one rack area. The rack (boards, end faces, bin outlines) is
+    semi-transparent through CSS-variable classes so it follows the app's light/dark theme; the
+    located bin (`opts.highlight`) is one **solid blue** box with a coordinates pill, painted at its
+    true depth in painter's order plus an opaque-ish overlay copy so a rack standing in front can't
+    wash it out. `opts.occupied` tints bins that hold items (the Bin Locator), `opts.selected`
+    outlines a shelf, `opts.interactive` adds the `data-*` hooks, `opts.showDimensions` /
+    `opts.sampleBin` add the measurement callouts and a sample bin for the dimensions panel. Empty-bin
+    outlines are dropped past ~2500 bins so a huge rack stays cheap; occupied/selected bins never are.
+  - `buildIsoFloorSVG(zones, opts)` — the whole floor: each *placed* zone (`grid_col`/`grid_row`) as a
+    translucent block at its real footprint, the located bin marked inside its own zone, `''` when no
+    zone is placed at all (so the caller can say why instead of showing an empty canvas).
+  - `formatLocationCode()` builds the same `ZoneDepth-Level-Bin(-Row)` text the app's own codes use
+    (Bin zero-padded to 2, Row omitted when 1), so the on-picture label always matches the field.
+
+  Tested in `tests/iso-rack.test.js` (geometry fallbacks/derivations, opacity of rack vs. bin, label
+  escaping, occupied/selected/interactive markup, dimension callouts, and "every renderer stays finite
+  over odd inputs"). SQL for the sizes it reads is `supabase/schema_zone_dimensions.sql`.
 - **`img-square.js`** — pads an image to a square, filling the new space with a solid color or a
   color sampled from the image's own edges. Ported from `github.com/nomsams/imgsquare`. Intended
   to slot into the existing item-photo/manufacturer-logo canvas editor as an extra step.
