@@ -2033,8 +2033,19 @@
     const logs = [];
     const maxLogs = 500;
     
+    // An Error has no enumerable fields (JSON.stringify gave "{}", hiding what actually went wrong),
+    // and a circular object makes JSON.stringify throw — from inside console.error itself, which would
+    // break whatever error handler was trying to report.
+    function logArgText(a) {
+        if (a instanceof Error) return `${a.name}: ${a.message}`;
+        if (a === null) return 'null';
+        if (typeof a === 'object') {
+            try { return JSON.stringify(a); } catch { return String(a); }
+        }
+        return a;
+    }
     function appLog(type, ...args) {
-        const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
+        const msg = args.map(logArgText).join(' ');
         const timestamp = new Date().toLocaleTimeString();
         const entry = `[${timestamp}] [${type.toUpperCase()}] ${msg}`;
         logs.push(entry);
@@ -2054,6 +2065,15 @@
     // Escapes text for safe interpolation into both HTML content and quoted attribute values.
     function escapeHtml(s) {
         return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    // Runs `fn` unless one with the same key is already in flight, so a second press of a button that
+    // starts a slow, non-repeatable write (a double-tap on a phone) does nothing instead of repeating it.
+    const exclusiveInFlight = new Set();
+    async function runExclusive(key, fn) {
+        if (exclusiveInFlight.has(key)) return;
+        exclusiveInFlight.add(key);
+        try { return await fn(); } finally { exclusiveInFlight.delete(key); }
     }
 
     // Whether the current session can edit item fields/images: static-mode warehouses have no role
@@ -2473,7 +2493,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         el.style.color = isError ? 'var(--danger)' : '';
     }
 
+    // Bumped by every start and every stop, so a startup still waiting on the permission prompt (or
+    // the camera itself) when the scanner is closed knows it has been superseded — it then releases
+    // the stream it was handed instead of leaving the camera running behind a closed modal.
+    var scannerStartToken = 0;
     function stopScannerCamera() {
+        scannerStartToken++;
         if (scannerRafId) { cancelAnimationFrame(scannerRafId); scannerRafId = null; }
         if (scannerStream) { scannerStream.getTracks().forEach(t => t.stop()); scannerStream = null; }
         scannerDetector = null;
@@ -2483,16 +2508,23 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     async function startScannerCamera() {
+        const myToken = ++scannerStartToken;
+        const superseded = () => myToken !== scannerStartToken;
+        let stream;
         try {
-            scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
         } catch (e) {
+            if (superseded()) return;
             scannerShowStatus("Couldn't access the camera — check permissions and try again.", true);
             console.error("Scanner camera error:", e);
             return;
         }
+        if (superseded()) { stream.getTracks().forEach(t => t.stop()); return; }
+        scannerStream = stream;
         const video = document.getElementById('scanner-video');
         video.srcObject = scannerStream;
-        await video.play();
+        try { await video.play(); } catch (e) { if (superseded()) return; throw e; }
+        if (superseded()) return; // stopScannerCamera() already released the stream
 
         if (window.BarcodeDetector) {
             try {
@@ -2500,6 +2532,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 const formats = SCANNER_BARCODE_FORMATS.filter(f => supported.includes(f));
                 scannerDetector = new BarcodeDetector({ formats: formats.length ? formats : undefined });
             } catch (e) { scannerDetector = null; }
+            if (superseded()) return;
         }
         if (!scannerDetector && typeof jsQR !== 'function') {
             scannerShowStatus("This browser can't scan in-page — use your phone's own camera app on a printed label instead.", true);
@@ -3102,10 +3135,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const order = packOrderHistoryCache.find(o => o.order_number === orderNumber);
         if (!order) return;
         const doReload = () => {
-            packOrder = (order.items || []).map(l => ({ btk: l.btk, qty: l.qty, packed: !!l.packed }));
+            // backorder is carried over too — it used to be dropped here, so a reloaded order lost the
+            // "⚠ n backordered" note (and its column on the printed sheet).
+            packOrder = (order.items || []).map(l => ({ btk: l.btk, qty: l.qty, packed: !!l.packed, ...(l.backorder > 0 ? { backorder: l.backorder } : {}) }));
             packOrderRecipient = { name: order.recipient_name || '', address: order.recipient_address || '', email: '', orgNumber: '' };
             packOrderBox = { preset: '', length: order.box_length || '', width: order.box_width || '', height: order.box_height || '', weight: order.box_weight || '' };
             packOrderSavedNumber = order.order_number;
+            packOrderFulfilled = order.status === 'fulfilled';
             closePackOrderHistoryModal();
             updatePackOrderBadge();
             openPackOrderView();
@@ -3322,6 +3358,18 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         await supabaseLoadItemPhotos(wid);
         globalKits = await supabaseLoadKits(wid);
         await supabaseLoadManufacturers();
+        syncItemManufacturerNames();
+    }
+
+    // items.manufacturer is a denormalized copy of the manufacturer's name and nothing in the database
+    // keeps it in step, so renaming a manufacturer left every item showing (and filtering by) the old
+    // name — and the next save of any of them would look the old name up, miss, and create it again as
+    // a brand-new manufacturer. manufacturer_id is the real link, so the in-memory name follows it.
+    function syncItemManufacturerNames() {
+        const nameById = new Map(globalManufacturers.map(m => [m.id, m.name]));
+        globalInventory.forEach(item => {
+            if (item.manufacturerId && nameById.has(item.manufacturerId)) item.Manufacturer = nameById.get(item.manufacturerId);
+        });
     }
 
     // Up to MAX_ITEM_PHOTOS photos per item (item_images, schema_item_images.sql) — one row per
@@ -3368,8 +3416,6 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ════════════════════════════════════════════════════════════════════════
     //  IMAGES — client-side resize (Canvas API), single + batch upload
     // ════════════════════════════════════════════════════════════════════════
-    const BTK_RE = /BTK0*([0-9]{1,6})/i;
-
     // Random per-upload token appended to Storage object paths — the item-images/rack-images
     // buckets are public (getPublicUrl() ignores RLS, see README), so a purely deterministic path
     // (just the BTK, or warehouse/zone/aisle/rack) let anyone walk the predictable sequence and
@@ -3499,7 +3545,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // is unique in this upload, are unaffected — reviewed solo exactly as before.
     var batchImageQueue = [];
     var batchImageIndex = 0;
-    var batchImageResults = { assigned: 0, unassigned: 0 };
+    var batchImageResults = { assigned: 0, unassigned: 0, failed: 0 };
     var batchImageUnassignedFiles = [];  // files that ran out of candidates (or had none)
     var batchImageStaticZipEntries = []; // static/draft mode only — no server-side storage, so confirmed images are zipped at the end like the old flow did
     var batchImagePreviewUrls = [];      // object URLs for the current review step's preview image(s), revoked on every re-render
@@ -3553,7 +3599,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         });
 
         batchImageIndex = 0;
-        batchImageResults = { assigned: 0, unassigned: 0 };
+        batchImageResults = { assigned: 0, unassigned: 0, failed: 0 };
         batchImageUnassignedFiles = [];
         batchImageStaticZipEntries = [];
         switchView('batch-image-review-view');
@@ -3638,19 +3684,23 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('batch-image-manual-results').innerHTML = '';
     }
 
-    async function confirmBatchImageMatch() {
+    // Assign / set-aside / manual-pick all share one lock: each awaits uploads and then advances the
+    // queue, so a second press landing mid-upload (a double tap) uploaded the same photos twice and
+    // stepped the queue past the next image without it ever being reviewed.
+    function confirmBatchImageMatch() { return runExclusive('batch-image-step', doConfirmBatchImageMatch); }
+    async function doConfirmBatchImageMatch() {
         const entry = batchImageQueue[batchImageIndex];
         const btk = entry.pairedItem ? entry.pairedItem.BTKnumber : (entry.candidates[entry.candidateIndex] || {}).item?.BTKnumber;
         if (!btk) return;
         for (const file of entry.files) {
-            await assignBatchImageToItem(file, btk);
-            batchImageResults.assigned++;
+            if (await assignBatchImageToItem(file, btk)) batchImageResults.assigned++; else batchImageResults.failed++;
         }
         batchImageIndex++;
         renderBatchImageReview();
     }
 
-    async function skipBatchImageMatch() {
+    function skipBatchImageMatch() { return runExclusive('batch-image-step', doSkipBatchImageMatch); }
+    async function doSkipBatchImageMatch() {
         const entry = batchImageQueue[batchImageIndex];
         if (!entry.pairedItem && entry.candidateIndex + 1 < entry.candidates.length) {
             entry.candidateIndex++;
@@ -3678,16 +3728,19 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             <div class="ai-list-item-meta">${escapeHtml(item.BTKnumber)}</div>
         </div>`).join('') || '<p style="color:var(--text-muted); font-size:0.85rem;">No matches.</p>';
     }
-    async function pickBatchImageManualMatch(btk) {
+    function pickBatchImageManualMatch(btk) { return runExclusive('batch-image-step', () => doPickBatchImageManualMatch(btk)); }
+    async function doPickBatchImageManualMatch(btk) {
         const entry = batchImageQueue[batchImageIndex];
         for (const file of entry.files) {
-            await assignBatchImageToItem(file, btk);
-            batchImageResults.assigned++;
+            if (await assignBatchImageToItem(file, btk)) batchImageResults.assigned++; else batchImageResults.failed++;
         }
         batchImageIndex++;
         renderBatchImageReview();
     }
 
+    // Resolves true only when the photo was actually attached, so the batch summary counts what
+    // happened rather than what was attempted (a full item, an exceeded budget or an upload error
+    // used to be tallied as "assigned" all the same).
     async function assignBatchImageToItem(file, btk) {
         const { full, thumb, filename, thumbName } = await resizeImage(file, btk);
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
@@ -3700,15 +3753,17 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                         : `Storage budget exceeded — skipped photo for ${btk}.`;
                     showToast(msg, "warning", 6000);
                 }
+                return !!result.ok;
             } catch (e) {
                 console.error(`Upload failed for ${btk}:`, e);
                 showToast(`Could not upload photo for ${btk}: ${e.message || e}`, "error");
+                return false;
             }
-        } else {
-            const item = globalInventory.find(i => i.BTKnumber === btk);
-            if (item) item.images = appendImageFilename(item.images, filename);
-            batchImageStaticZipEntries.push({ btk, filename, thumbName, full, thumb });
         }
+        const item = globalInventory.find(i => i.BTKnumber === btk);
+        if (item) item.images = appendImageFilename(item.images, filename);
+        batchImageStaticZipEntries.push({ btk, filename, thumbName, full, thumb });
+        return true;
     }
 
     async function finishBatchImageReview() {
@@ -3725,7 +3780,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             ? (isSupa ? ` ${batchImageResults.unassigned} set aside — see Settings → 🗄️ Unassigned Images.`
                       : ` ${batchImageResults.unassigned} unmatched (static mode has nowhere to store them — re-run once renamed or matched by hand).`)
             : '';
-        showToast(`Batch image import: ${batchImageResults.assigned} assigned, ${batchImageResults.unassigned} unassigned.${unassignedNote}`, "success", 9000);
+        const failedNote = batchImageResults.failed ? ` ${batchImageResults.failed} could not be attached (item full, storage budget or an upload error — see the messages above).` : '';
+        showToast(`Batch image import: ${batchImageResults.assigned} assigned, ${batchImageResults.unassigned} unassigned.${failedNote}${unassignedNote}`, batchImageResults.failed ? "warning" : "success", 9000);
         batchImageQueue = []; batchImageStaticZipEntries = []; batchImageUnassignedFiles = [];
     }
 
@@ -4386,11 +4442,16 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             });
     }
 
+    // `key` is a property name, or a function giving each entry's identity.
     function mergeByKey(base, overrides, key) {
-        const map = new Map(base.map(i => [i[key], i]));
-        overrides.forEach(o => map.set(o[key], o));
+        const keyOf = typeof key === 'function' ? key : (i => i[key]);
+        const map = new Map(base.map(i => [keyOf(i), i]));
+        overrides.forEach(o => map.set(keyOf(o), o));
         return Array.from(map.values());
     }
+    // A kit's kitnumber alone isn't an identity — many kits legitimately share 'None' (the demo data
+    // has two) — so merging a saved draft on it collapsed all of them into one. Number plus name.
+    const kitIdentity = k => JSON.stringify([k.kitnumber, k.name]);
 
     // ════════════════════════════════════════════════════════════════════════
     //  THEME
@@ -4529,7 +4590,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const draft = loadDraft(wid);
         if (draft) {
             if (draft.items) globalInventory = mergeByKey(globalInventory, draft.items, 'BTKnumber');
-            if (draft.kits)  globalKits = mergeByKey(globalKits, draft.kits, 'kitnumber');
+            if (draft.kits)  globalKits = mergeByKey(globalKits, draft.kits, kitIdentity);
             showToast("Restored your unsaved local draft.", "info");
         }
     }
@@ -5528,6 +5589,24 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('seg-manufacturers').classList.toggle('hidden', !isSupa);
     }
 
+    // The selection, the pack-order pick list and a running stocktake belong to the warehouse they
+    // were made in: their BTKs aren't in another warehouse, and a saved order is filed under whichever
+    // warehouse is open when it's saved — so switching used to leave an order that saved (or failed to
+    // finalize) against the wrong one. A stocktake's saved copy is keyed per warehouse and comes back
+    // when you switch back; only the in-memory session is dropped here (not saved, which would erase
+    // the copy stored under the warehouse now open).
+    function resetPerWarehouseState() {
+        clearSelection();
+        if (packOrder.length) showToast("Pack order cleared — an order belongs to the one warehouse it was picked in.", "info", 6000);
+        packOrder = [];
+        packOrderBox = { preset: '', length: '', width: '', height: '', weight: '' };
+        packOrderRecipient = { name: '', address: '', email: '', orgNumber: '' };
+        packOrderSavedNumber = null;
+        packOrderFulfilled = false;
+        inventeringItems = [];
+        updatePackOrderBadge();
+    }
+
     async function switchWarehouse(wid) {
         if (!requireAuth()) return;
         if (wid === currentWarehouseId) return;
@@ -5542,6 +5621,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             }
             try {
                 await loadSupabaseSession(wid);
+                resetPerWarehouseState();
                 await supabaseLoadList(wid);
                 showToast(`Switched to warehouse ${wid}.`, "success");
             } catch (e) {
@@ -5557,6 +5637,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         try {
             const data = await decryptEnvelope(vault[wid], currentActiveKey);
             currentWarehouseId = wid;
+            resetPerWarehouseState();
             applyDecrypted(data, wid);
             renderWarehouseMeta();
             if (listMode === 'items') { filterList(true); }
@@ -5591,16 +5672,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const query = forceAll ? "" : document.getElementById('search-box').value.toLowerCase().trim();
         let matching = globalInventory;
         if (manufacturerFilter) matching = matching.filter(item => item.Manufacturer === manufacturerFilter);
-        if (query !== "") {
-            matching = matching.filter(item => {
-                const fields = [
-                    item['itemname(english)'], item['itemname(swedish)'], item.BTKnumber,
-                    item.itemnumber, item.itemnumber2, item.itemnumber3,
-                    item.Manufacturer, item.Inventorylocation, item.Comments, item.Numberofitems
-                ];
-                return fields.some(f => f && f.toString().toLowerCase().includes(query));
-            });
-        }
+        // The one shared matcher, so this box and the Manufacturers/manual-match searches can't drift
+        // apart again — this list's own copy of the field set had quietly stopped matching the Bin
+        // Location Code (typing "A3-2" found nothing) after the shared one gained it.
+        if (query !== "") matching = matching.filter(item => itemMatchesQuery(item, query));
         // Counted among what the current search/manufacturer filter already matches, so the note
         // always describes what's actually missing from *this* view, not the whole warehouse.
         const isNegative = item => (parseFloat(item.Numberofitems) || 0) < 0;
@@ -5696,8 +5771,6 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         });
         container.appendChild(frag);
     }
-
-    function handleViewDetails(e, id, ctx) { e.stopPropagation(); openItem(id, { type: ctx || 'global' }); }
 
     // ── KITS ──
     function debounceKitSearch() {
@@ -5949,9 +6022,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!manufacturers.length) {
             container.appendChild(frag);
             if (!matchingItems.length) {
-                container.innerHTML += query
+                // Appended as a node: `container.innerHTML += ...` re-parses everything already in the
+                // container, which threw away the "➕ Add Manufacturer" row's onclick (set as a property)
+                // — so on a fresh database that row did nothing when clicked.
+                const emptyHtml = query
                     ? `<div class="empty-state"><p>Nothing matches "${escapeHtml(document.getElementById('manufacturer-search-box').value)}".</p></div>`
                     : (!canEditItems() ? `<div class="empty-state"><h3>No manufacturers yet</h3></div>` : '');
+                if (emptyHtml) container.insertAdjacentHTML('beforeend', emptyHtml);
             }
             return;
         }
@@ -6070,9 +6147,15 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (result.error) { showToast("Save blocked: " + result.error.message, "error"); return; }
 
         const idx = globalManufacturers.findIndex(m => m.id === result.data.id);
+        const renamed = idx >= 0 && globalManufacturers[idx].name !== result.data.name;
         if (idx >= 0) globalManufacturers[idx] = result.data; else globalManufacturers.push(result.data);
         globalManufacturers.sort((a, b) => a.name.localeCompare(b.name));
         populateManufacturerDatalist();
+        // Loaded items follow the new name at once (see syncItemManufacturerNames). The stored text
+        // on each item row is left alone on purpose: writing it would fire the updated_at/updated_by
+        // trigger on every one of the manufacturer's items and make them all read "last updated by"
+        // whoever did the rename; it refreshes the next time each item is saved anyway.
+        if (renamed) syncItemManufacturerNames();
         currentManufacturerId = result.data.id;
         closeManufacturerEditModal();
         showToast("Manufacturer saved.", "success");
@@ -7207,6 +7290,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         packOrderBox = { preset: '', length: '', width: '', height: '', weight: '' };
         packOrderRecipient = { name: '', address: '', email: '', orgNumber: '' };
         packOrderSavedNumber = null;
+        packOrderFulfilled = false;
         updatePackOrderBadge();
         renderPackOrderItems();
         syncPackOrderBoxInputs();
@@ -7462,7 +7546,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         window.open(window.buildMailtoLink({ to, subject, body }));
     }
 
-    async function sendComposedEmail() {
+    // A second press while the first send is still in flight sent the same email twice.
+    function sendComposedEmail() { return runExclusive('send-email', doSendComposedEmail); }
+    async function doSendComposedEmail() {
         const to = document.getElementById('compose-email-to').value.trim();
         if (!to) { showToast("Enter a recipient email first.", "warning"); return; }
         const subject = document.getElementById('compose-email-subject').value;
@@ -7496,7 +7582,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             box_width: packOrderBox.width || null,
             box_height: packOrderBox.height || null,
             box_weight: packOrderBox.weight || null,
-            items: packOrder
+            items: packOrder.map(({ deducted, ...line }) => line) // `deducted` is session bookkeeping, not part of the order
         };
         const { data, error } = await sb.from('orders').insert(row).select().single();
         if (error) { showToast("Could not save order: " + error.message, "error"); return; }
@@ -7508,12 +7594,18 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ── Finalize — deducts every line's quantity from stock and (if the order was saved) marks it
     // fulfilled. Requires every line packed first, so this can't run ahead of the actual physical
     // pack. Each deduction is its own activity_log entry (Supabase mode), individually revertible.
+    // Set once a saved order that was already 'fulfilled' is reloaded, or once this session finalizes
+    // one — finalizing again would take the same stock out a second time, so it's warned about.
+    var packOrderFulfilled = false;
     function confirmFinalizePackOrder() {
         if (!packOrder.length) return;
         if (!packOrder.every(o => o.packed)) { showToast("Mark every item as packed before finalizing.", "warning"); return; }
+        const remaining = packOrder.filter(o => !o.deducted).length;
+        if (!remaining) { showToast("Already finalized — every line of this order has been deducted from stock.", "info"); return; }
         showConfirmModal({
-            title: 'Finalize this order?',
-            body: `This deducts ${packOrder.length} item(s)' quantities from stock` +
+            title: packOrderFulfilled ? 'Finalize this order AGAIN?' : 'Finalize this order?',
+            body: (packOrderFulfilled ? `⚠️ This order is already marked fulfilled — finalizing it again takes the same stock out a second time.\n\n` : '') +
+                `This deducts ${remaining} item(s)' quantities from stock` +
                 (packOrderSavedNumber ? ` and marks ${packOrderSavedNumber} as fulfilled.` : '.') +
                 ' Each deduction is logged individually and can be reverted from the Activity Log if needed.',
             confirmLabel: '✅ Finalize',
@@ -7521,31 +7613,43 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         });
     }
     async function finalizePackOrder() {
-        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
-        let failures = 0;
-        for (const line of packOrder) {
-            const item = globalInventory.find(i => i.BTKnumber === line.btk);
-            if (!item) { failures++; continue; }
-            if (isSupa) {
-                const beforeRow = await itemToSupabaseRow(item);
-                const { data: next, error } = await sb.rpc('adjust_item_stock', { p_btk: line.btk, p_delta: -line.qty });
-                if (error) { failures++; console.error(`Could not deduct stock for ${line.btk}:`, error); continue; }
-                item.Numberofitems = String(next);
-                const afterRow = { ...beforeRow, numberofitems: next };
-                logActivity('update', line.btk, beforeRow, afterRow, `Pack order fulfilled: ${summarizeItemChange('update', line.btk, beforeRow, afterRow)}`);
-            } else {
-                const current = parseInt(item.Numberofitems, 10) || 0;
-                item.Numberofitems = String(Math.max(0, current - line.qty));
+        return runExclusive('finalize-pack-order', async () => {
+            const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+            let failures = 0, deductedNow = 0;
+            for (const line of packOrder) {
+                // A line already deducted (a retry after a partial failure, or a second press) is never
+                // taken out of stock twice.
+                if (line.deducted) continue;
+                const item = globalInventory.find(i => i.BTKnumber === line.btk);
+                if (!item) { failures++; continue; }
+                if (isSupa) {
+                    const beforeRow = await itemToSupabaseRow(item);
+                    const { data: next, error } = await sb.rpc('adjust_item_stock', { p_btk: line.btk, p_delta: -line.qty });
+                    if (error) { failures++; console.error(`Could not deduct stock for ${line.btk}:`, error); continue; }
+                    item.Numberofitems = String(next);
+                    const afterRow = { ...beforeRow, numberofitems: next };
+                    logActivity('update', line.btk, beforeRow, afterRow, `Pack order fulfilled: ${summarizeItemChange('update', line.btk, beforeRow, afterRow)}`);
+                } else {
+                    const current = parseInt(item.Numberofitems, 10) || 0;
+                    item.Numberofitems = String(Math.max(0, current - line.qty));
+                }
+                line.deducted = true;
+                deductedNow++;
             }
-        }
-        if (!isSupa) saveDraft(currentWarehouseId);
-        if (isSupa && packOrderSavedNumber) {
-            const { error } = await sb.from('orders').update({ status: 'fulfilled' }).eq('order_number', packOrderSavedNumber);
-            if (error) console.error("Could not mark order fulfilled:", error);
-        }
-        showToast(`Order finalized.${failures ? ` ${failures} item(s) failed — see console.` : ''}`, failures ? 'warning' : 'success', 7000);
-        renderPackOrderItems();
-        if (isSupa) await supabaseLoadList(currentWarehouseId);
+            if (!isSupa) saveDraft(currentWarehouseId);
+            // Only a fully deducted order is marked fulfilled — with lines still failing it isn't, and
+            // pressing Finalize again picks up just those lines.
+            if (isSupa && packOrderSavedNumber && failures === 0) {
+                const { error } = await sb.from('orders').update({ status: 'fulfilled' }).eq('order_number', packOrderSavedNumber);
+                if (error) console.error("Could not mark order fulfilled:", error);
+            }
+            if (failures === 0) packOrderFulfilled = true;
+            showToast(failures
+                ? `${deductedNow} item(s) deducted, ${failures} failed — see console. The order is NOT marked fulfilled; press Finalize again to retry just the failed ones.`
+                : 'Order finalized.', failures ? 'warning' : 'success', failures ? 9000 : 7000);
+            renderPackOrderItems();
+            if (isSupa) await supabaseLoadList(currentWarehouseId);
+        });
     }
 
     function togglePacked(btk) {
@@ -7901,12 +8005,20 @@ th { background: #eee; }
         const item = globalInventory.find(i => i.BTKnumber === btk);
         if (!item) return;
         const current = parseInt(item.Numberofitems, 10) || 0;
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        // Snapshot BEFORE the in-memory value changes: it's the log entry's "before" (and what an
+        // Undo puts back). This is a real stock change, so like the +/- stepper and Pack Order it goes
+        // in the activity log — it used to bypass it, leaving a stocktake correction unattributed and
+        // impossible to revert.
+        const beforeRow = isSupa ? await itemToSupabaseRow(item) : null;
         item.Numberofitems = String(next);
         renderInventeringList();
 
-        if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+        if (isSupa) {
             const { error } = await sb.from('items').update({ numberofitems: next }).eq('btk', btk);
             if (error) { item.Numberofitems = String(current); renderInventeringList(); showToast("Could not update stock: " + error.message, "error"); return; }
+            const afterRow = { ...beforeRow, numberofitems: next };
+            logActivity('update', btk, beforeRow, afterRow, `Stocktake: ${summarizeItemChange('update', btk, beforeRow, afterRow)}`);
         } else {
             saveDraft(currentWarehouseId);
         }
@@ -7962,12 +8074,18 @@ th { background: #eee; }
     // ════════════════════════════════════════════════════════════════════════
     //  ITEM DETAIL (with kit tags + sequential Next)
     // ════════════════════════════════════════════════════════════════════════
+    // renderItemFields() fills in "updated by", "inventoried by" and the other-warehouses total from
+    // async lookups that patch elements by id. Opening a different item before one finished let it land
+    // on the NEW item's page — another item's cross-warehouse stock total under this one's name — so
+    // each render remembers the token it started under and drops results that arrive after it changed.
+    var openItemToken = 0;
     function openItem(id, context) {
         const item = globalInventory.find(i => i.BTKnumber === id);
         if (!item) return showToast("Item not found", "error");
 
         navigationContext = context || { type: 'global' };
         currentItemBTK = id;
+        openItemToken++; // invalidates the slow lookups a previously opened item may still have in flight
         quickEditMode = false;
         quickEditOriginal = null;
         document.getElementById('quick-edit-bar').classList.remove('visible');
@@ -8156,10 +8274,11 @@ th { background: #eee; }
     async function loadCrossWarehousePresence(item) {
         if (!item.itemnumber || item.itemnumber === 'None') return null;
         try {
-            const { data, error } = await sb.from('items')
-                .select('warehouse_id, numberofitems')
-                .eq('itemnumber', item.itemnumber)
-                .eq('manufacturer', item.Manufacturer);
+            // Matched on the manufacturer's id (global, and unchanged by a rename) rather than the
+            // denormalized name text on each row, which goes stale when a manufacturer is renamed.
+            let query = sb.from('items').select('warehouse_id, numberofitems').eq('itemnumber', item.itemnumber);
+            query = item.manufacturerId ? query.eq('manufacturer_id', item.manufacturerId) : query.eq('manufacturer', item.Manufacturer);
+            const { data, error } = await query;
             if (error) throw error;
             if (!data || !data.length) return null;
             const byWarehouse = {};
@@ -8253,20 +8372,24 @@ th { background: #eee; }
 
         // Names resolve async (a small RPC call each) so they don't block the rest of the field
         // render — patched into the placeholder spans above once they land.
+        const renderToken = openItemToken; // see openItemToken
         if (item.updatedAt && item.updatedBy) {
             resolveDisplayName(item.updatedBy).then(name => {
+                if (renderToken !== openItemToken) return;
                 const el = document.getElementById('last-updated-by');
                 if (el && name) el.textContent = ` by ${name}`;
             });
         }
         if (item.lastInventoriedAt && item.lastInventoriedBy) {
             resolveDisplayName(item.lastInventoriedBy).then(name => {
+                if (renderToken !== openItemToken) return;
                 const el = document.getElementById('last-inventoried-by');
                 if (el && name) el.textContent = ` by ${name}`;
             });
         }
         if (currentUserRole === 'admin' && getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
             loadCrossWarehousePresence(item).then(presence => {
+                if (renderToken !== openItemToken) return;
                 if (!presence || presence.length <= 1) return; // only found in this one warehouse — nothing extra to show
                 const total = presence.reduce((sum, p) => sum + p.quantity, 0);
                 const totalEl = document.getElementById('cross-warehouse-total');
@@ -8447,7 +8570,20 @@ th { background: #eee; }
         if (confirm("Changes have been made to this item. Are you sure you want to discard them?")) exitQuickEditUI();
     }
 
-    async function saveQuickEdit() {
+    // A bin code typed by hand is only kept if it is a real one (webware's own Zone+Depth-Level-Bin, or
+    // the paper "A 3-2 2-1" form, which is converted). Anything else can't go into the database's
+    // location_code column — it used to be moved to Inventory Location without a word while the item
+    // page kept showing the typed text as if it had been saved, and it vanished on the next reload.
+    // Returns null when fine, otherwise the message to show.
+    function binCodeProblem(typed) {
+        const t = String(typed || '').trim();
+        if (!t || t === 'None') return null;
+        return normalizeBinCode(t) ? null : `"${t}" isn't a valid bin location code. Use Zone+Depth-Level-Bin, e.g. A1-4-07 (add -2 for a bin one further back), or clear the field.`;
+    }
+
+    // Both save entry points ignore a second press while one save is still running (double-tap on a phone).
+    function saveQuickEdit() { return runExclusive('save-item', doSaveQuickEdit); }
+    async function doSaveQuickEdit() {
         const fields = readQuickEditFields();
         if (!fields['itemname(english)']) { showToast("English name is required.", "error"); return; }
         const btk = currentItemBTK;
@@ -8480,22 +8616,17 @@ th { background: #eee; }
         };
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            const problem = binCodeProblem(fields.LocationCode);
+            if (problem) { showToast(problem, "error", 8000); return; }
             const beforeRow = await itemToSupabaseRow(globalInventory.find(i => i.BTKnumber === btk) || {});
-            const mfr = await resolveManufacturer(updated.Manufacturer);
-            updated.Manufacturer = mfr.name;
-            updated.manufacturerId = mfr.id;
-            const row = {
-                manufacturer: mfr.name, manufacturer_id: mfr.id, itemnumber: updated.itemnumber,
-                itemname_en: updated['itemname(english)'], itemname_sv: updated['itemname(swedish)'],
-                itemnumber2: updated.itemnumber2, itemnumber3: updated.itemnumber3,
-                numberofitems: parseInt(updated.Numberofitems) || 0,
-                unit_type: updated.UnitType,
-                reorder_threshold: updated.ReorderThreshold === '' ? null : parseInt(updated.ReorderThreshold, 10),
-                map_position: updated.MapPosition === 'None' ? null : updated.MapPosition,
-                ...sanitizeLocationCodeForRow(updated.LocationCode, updated.Inventorylocation),
-                comments: updated.Comments,
-                link: updated.Link === 'None' ? null : updated.Link
-            };
+            // The one place that turns an item into a row (resolves the manufacturer, and stores a blank
+            // comment as null rather than the text "None" this form's own copy of it used to write).
+            const row = await itemToSupabaseRow(updated);
+            // What's shown afterwards has to be what was actually stored.
+            updated.Manufacturer = row.manufacturer;
+            updated.manufacturerId = row.manufacturer_id;
+            updated.LocationCode = row.location_code || 'None';
+            updated.Inventorylocation = row.inventorylocation || 'None';
             const { error } = await sb.from('items').update(row).eq('btk', btk);
             if (error) return showToast("Save blocked: " + error.message, "error");
             const idx = globalInventory.findIndex(i => i.BTKnumber === btk);
@@ -10427,7 +10558,8 @@ th { background: #eee; }
             canUndo ? { label: '↩️ Undo', onClick: () => undoImportBatch(batchId) } : null);
     }
 
-    async function submitItemForm() {
+    function submitItemForm() { return runExclusive('save-item', doSubmitItemForm); }
+    async function doSubmitItemForm() {
         const btk = document.getElementById('ai-btknumber').value.trim();
         const nameEn = document.getElementById('ai-name-en').value.trim();
         if (!btk || !nameEn) { showToast("BTK Number and English Name are required.", "error"); return; }
@@ -10460,19 +10592,11 @@ th { background: #eee; }
         };
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
-            const mfr = await resolveManufacturer(newItem.Manufacturer);
-            const row = {
-                manufacturer: mfr.name, manufacturer_id: mfr.id, itemnumber: newItem.itemnumber,
-                itemname_en: newItem['itemname(english)'], itemname_sv: newItem['itemname(swedish)'],
-                itemnumber2: newItem.itemnumber2, itemnumber3: newItem.itemnumber3,
-                numberofitems: parseInt(newItem.Numberofitems) || 0,
-                unit_type: newItem.UnitType,
-                reorder_threshold: newItem.ReorderThreshold === '' ? null : parseInt(newItem.ReorderThreshold, 10),
-                map_position: newItem.MapPosition === 'None' ? null : newItem.MapPosition,
-                ...sanitizeLocationCodeForRow(newItem.LocationCode, newItem.Inventorylocation),
-                comments: newItem.Comments,
-                link: newItem.Link === 'None' ? null : newItem.Link
-            };
+            const problem = binCodeProblem(newItem.LocationCode);
+            if (problem) { showToast(problem, "error", 8000); return; }
+            // The one place that turns an item into a row — this form kept its own copy of it, which
+            // wrote the text "None" into Comments where every other path stores null.
+            const row = await itemToSupabaseRow(newItem);
             const wasEdit = modalMode === 'edit';
             // Snapshot the pre-edit row for the activity log BEFORE issuing the write — globalInventory
             // still holds the old state at this point (submitItemForm builds `row` from form inputs,
@@ -10488,18 +10612,19 @@ th { background: #eee; }
             // `editTargetBTK` are always the same value on this path regardless — using
             // editTargetBTK (the row actually written) rather than the disconnected form value.
             const entityId = wasEdit ? editTargetBTK : btk;
-            req.then(async ({ error }) => {
-                if (error) return showToast("Save blocked: " + error.message, "error");
-                closeAddItemModal();
-                showToast("Saved to Supabase.", "success");
-                logActivity(wasEdit ? 'update' : 'create', entityId, beforeRow, row, summarizeItemChange(wasEdit ? 'update' : 'create', entityId, beforeRow, row));
-                // Reload data without the full-list view switch supabaseLoadList() would force —
-                // editing used to always dump you back on the item list even if you opened Edit
-                // from the item's own page. Adding a new item still lands on the list (there's no
-                // item page to return to yet); editing returns to that same item, refreshed.
-                try { await supabaseFetchData(currentWarehouseId); } catch (e) { return; }
-                if (wasEdit) openItem(entityId, navigationContext); else showListView('items');
-            });
+            // Awaited (it used to be a dangling .then) so the double-press guard around this function
+            // covers the whole save, not just the moment the request was fired.
+            const { error } = await req;
+            if (error) return showToast("Save blocked: " + error.message, "error");
+            closeAddItemModal();
+            showToast("Saved to Supabase.", "success");
+            logActivity(wasEdit ? 'update' : 'create', entityId, beforeRow, row, summarizeItemChange(wasEdit ? 'update' : 'create', entityId, beforeRow, row));
+            // Reload data without the full-list view switch supabaseLoadList() would force —
+            // editing used to always dump you back on the item list even if you opened Edit
+            // from the item's own page. Adding a new item still lands on the list (there's no
+            // item page to return to yet); editing returns to that same item, refreshed.
+            try { await supabaseFetchData(currentWarehouseId); } catch (e) { return; }
+            if (wasEdit) openItem(entityId, navigationContext); else showListView('items');
             return;
         }
 
@@ -10893,7 +11018,6 @@ ${css}
         if (activeView === 'settings-view') { switchView(previousView); }
         else { previousView = activeView; switchView('settings-view'); syncSettingsVisibility(); }
     }
-    function showSettings() { if (!requireAuth()) return; previousView = activeView; switchView('settings-view'); syncSettingsVisibility(); }
 
     async function saveSettings() {
         const eccVal = document.getElementById('qr-ecc').value;
