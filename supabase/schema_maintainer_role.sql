@@ -21,7 +21,9 @@
 -- grants should reach them too. (Done: see schema_grant_aware_policies.sql, which adds the matching
 -- additive policies for all of those plus the rack-images/manufacturer-logos Storage buckets.)
 --
--- Run once in the Supabase SQL Editor, after schema_admin_cross_warehouse_items.sql.
+-- Run in the Supabase SQL Editor, after schema_admin_cross_warehouse_items.sql. Safe to run more than
+-- once (create-if-not-exists / drop-policy-if-exists / create-or-replace throughout) — an earlier version
+-- stopped at "relation warehouse_permissions already exists" if it was run a second time.
 
 -- Allow 'maintainer' wherever the role CHECK constraint on profiles lives — its name isn't known
 -- here (it predates this migration history), so find it dynamically rather than guessing.
@@ -38,7 +40,7 @@ begin
 end $$;
 alter table public.profiles add constraint profiles_role_check check (role in ('viewer', 'editor', 'maintainer', 'admin'));
 
-create table public.warehouse_permissions (
+create table if not exists public.warehouse_permissions (
   id bigint generated always as identity primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
   warehouse_id text not null references public.warehouses(l),
@@ -49,9 +51,11 @@ create table public.warehouse_permissions (
 
 alter table public.warehouse_permissions enable row level security;
 
+drop policy if exists p_warehouse_permissions_select on public.warehouse_permissions;
 create policy p_warehouse_permissions_select on public.warehouse_permissions for select to authenticated using (
   user_id = auth.uid() or (select role from public.profiles where id = auth.uid()) = 'admin'
 );
+drop policy if exists p_warehouse_permissions_write on public.warehouse_permissions;
 create policy p_warehouse_permissions_write on public.warehouse_permissions for all to authenticated using (
   (select role from public.profiles where id = auth.uid()) = 'admin'
 ) with check (
@@ -63,12 +67,14 @@ grant select, insert, update, delete on public.warehouse_permissions to authenti
 -- policies together) — a user with no warehouse_permissions row keeps working exactly as before.
 -- 'maintainer' and 'editor' grants behave the same on items (full read/write in that warehouse);
 -- 'viewer' grants read-only; 'admin' grants full access.
+drop policy if exists p_items_warehouse_permission_select on public.items;
 create policy p_items_warehouse_permission_select on public.items for select to authenticated using (
   exists (
     select 1 from public.warehouse_permissions wp
     where wp.user_id = auth.uid() and wp.warehouse_id = items.warehouse_id
   )
 );
+drop policy if exists p_items_warehouse_permission_write on public.items;
 create policy p_items_warehouse_permission_write on public.items for all to authenticated using (
   exists (
     select 1 from public.warehouse_permissions wp
