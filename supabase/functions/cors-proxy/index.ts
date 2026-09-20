@@ -25,16 +25,53 @@ const CORS_HEADERS = {
 };
 
 // Defense in depth against SSRF: an authenticated app user could otherwise point this at
-// internal-network or cloud-metadata addresses. This only catches literal IPs in the URL, not
-// DNS rebinding to a private address — a stronger guard would resolve the hostname and check the
-// resulting IP, which Deno's fetch doesn't expose a hook for here.
-const BLOCKED_HOSTNAMES = new Set(["localhost", "0.0.0.0", "169.254.169.254"]);
-function isBlockedHost(hostname: string): boolean {
+// internal-network or cloud-metadata addresses. This only catches literal IPs and well-known
+// internal names in the URL, not DNS rebinding to a private address — a stronger guard would resolve
+// the hostname and check the resulting IP, which Deno's fetch doesn't expose a hook for here.
+const BLOCKED_HOSTNAMES = new Set(["localhost", "0.0.0.0", "169.254.169.254", "metadata.google.internal"]);
+function isBlockedHost(rawHostname: string): boolean {
+  // "localhost." (a trailing dot) is the same host and used to slip past an exact-name check.
+  const hostname = rawHostname.toLowerCase().replace(/\.$/, "");
   if (BLOCKED_HOSTNAMES.has(hostname)) return true;
+  if (hostname.endsWith(".localhost") || hostname.endsWith(".internal") || hostname.endsWith(".local")) return true;
+  // IPv6 literals ([::1], [::ffff:7f00:1], [fd00::…]) can't be vetted with a pattern and a web page
+  // is never fetched by one, so they are refused outright.
+  if (hostname.startsWith("[")) return true;
   const m = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!m) return false;
   const [a, b] = [Number(m[1]), Number(m[2])];
-  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  return a === 0 || a === 127 || a === 10                 // "this" network, loopback, private 10/8
+    || (a === 172 && b >= 16 && b <= 31)                  // private 172.16/12
+    || (a === 192 && b === 168)                           // private 192.168/16
+    || (a === 169 && b === 254)                           // link-local, incl. every cloud metadata address
+    || (a === 100 && b >= 64 && b <= 127);                // carrier-grade NAT 100.64/10
+}
+
+// Follows redirects by hand so EVERY hop is checked. The guard above only sees the URL the caller
+// sent, and fetch() follows redirects on its own — so a public page that answers 302 →
+// http://169.254.169.254/… walked straight past it.
+const MAX_REDIRECTS = 5;
+class BlockedTarget extends Error {}
+async function fetchChecked(start: URL): Promise<Response> {
+  let current = start;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const res = await fetch(current.toString(), {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; webware-cors-proxy/1.0)" },
+      redirect: "manual",
+    });
+    const location = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      await res.body?.cancel();
+      const next = new URL(location, current); // relative Location headers resolve against the current URL
+      if ((next.protocol !== "http:" && next.protocol !== "https:") || isBlockedHost(next.hostname)) {
+        throw new BlockedTarget("redirected to a host that is not allowed");
+      }
+      current = next;
+      continue;
+    }
+    return res;
+  }
+  throw new Error("too many redirects");
 }
 
 Deno.serve(async (req) => {
@@ -75,9 +112,13 @@ Deno.serve(async (req) => {
       return json({ error: "that host is not allowed" }, 400);
     }
 
-    const upstream = await fetch(parsed.toString(), {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; webware-cors-proxy/1.0)" },
-    });
+    let upstream: Response;
+    try {
+      upstream = await fetchChecked(parsed);
+    } catch (err) {
+      if (err instanceof BlockedTarget) return json({ error: err.message }, 400);
+      throw err;
+    }
 
     return new Response(upstream.body, {
       status: upstream.status,
