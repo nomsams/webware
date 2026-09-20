@@ -2682,21 +2682,48 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ── Storage usage / budget (Free plan quota, kept at 90%) ──
     // Sums both buckets — the 1GB free-tier quota is account-wide, not per-bucket, and
     // manufacturer logos share it with item photos even though they're small individually.
-    async function getStorageUsageBytes() {
-        let total = 0, anyOk = false;
-        for (const bucket of [SUPABASE_STORAGE_BUCKET, SUPABASE_LOGO_BUCKET]) {
-            const { data, error } = await sb.storage.from(bucket).list('', { limit: 1000 });
-            if (error) { console.error(`Storage list failed for ${bucket}:`, error); continue; }
-            anyOk = true;
-            total += (data || []).reduce((sum, f) => sum + (f.metadata?.size || 0), 0);
+    // Storage's list() returns one folder level at a time, at most `limit` entries per call, with
+    // folders showing up as entries that carry no metadata. Item photos sit at the bucket root but the
+    // set-aside "unassigned/" images and every rack photo (<warehouse>/…) are inside folders, and a
+    // warehouse with a few hundred photos passes 1000 objects — a single root list() of the first
+    // 1000 therefore under-counted, which made the 90% budget guard too lenient.
+    async function sumBucketBytes(bucket, prefix = '') {
+        const PAGE = 1000;
+        let total = 0;
+        for (let offset = 0; ; offset += PAGE) {
+            const { data, error } = await sb.storage.from(bucket).list(prefix, { limit: PAGE, offset });
+            if (error) throw error;
+            if (!data || !data.length) break;
+            for (const f of data) {
+                if (f.metadata) total += f.metadata.size || 0;
+                else if (f.name) total += await sumBucketBytes(bucket, prefix ? `${prefix}/${f.name}` : f.name); // a folder
+            }
+            if (data.length < PAGE) break;
         }
+        return total;
+    }
+
+    // All three buckets count: the 1GB free-tier quota is account-wide, not per bucket. The measured
+    // total is kept for a minute — every upload asks for it, and a 100-photo batch would otherwise
+    // re-list every bucket 100 times over — with each upload the budget check approves added to it.
+    var storageUsageCache = null; // { bytes, at }
+    async function getStorageUsageBytes(forceFresh = false) {
+        if (!forceFresh && storageUsageCache && Date.now() - storageUsageCache.at < 60000) return storageUsageCache.bytes;
+        let total = 0, anyOk = false;
+        for (const bucket of [SUPABASE_STORAGE_BUCKET, SUPABASE_LOGO_BUCKET, 'rack-images']) {
+            try { total += await sumBucketBytes(bucket); anyOk = true; }
+            catch (error) { console.error(`Storage list failed for ${bucket}:`, error); }
+        }
+        storageUsageCache = anyOk ? { bytes: total, at: Date.now() } : null;
         return anyOk ? total : null;
     }
 
     async function checkStorageBudget(additionalBytes) {
         const used = await getStorageUsageBytes();
         if (used === null) return true; // fail open — don't block uploads just because the usage check failed
-        return (used + additionalBytes) <= SUPABASE_STORAGE_BUDGET_BYTES;
+        if ((used + additionalBytes) > SUPABASE_STORAGE_BUDGET_BYTES) return false;
+        if (storageUsageCache) storageUsageCache.bytes += additionalBytes; // this upload counts from now on
+        return true;
     }
 
     async function refreshStorageUsage() {
@@ -2704,7 +2731,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const barEl = document.getElementById('storage-usage-bar');
         if (!textEl) return;
         textEl.textContent = 'Checking…';
-        const used = await getStorageUsageBytes();
+        const used = await getStorageUsageBytes(true);
         if (used === null) {
             textEl.textContent = "Couldn't check storage usage right now.";
             barEl.style.width = '0%';
@@ -3202,15 +3229,44 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         globalWarehouseZones = data || [];
     }
 
+    // PostgREST caps every response at the project's max-rows setting (Supabase's default is 1000)
+    // WITHOUT an error, so a plain .select() on a table that has grown past that quietly returns
+    // just the first slice: items, photos or kit rows missing from every list, search and
+    // duplicate check, and a BTK that looks "vacant" in memory but is really taken. This walks the
+    // table in pages until the server's reported total is reached (a stable order is required for
+    // that to be safe, so `refine` must .order()). `refine(query)` adds each page's filters/order;
+    // the result has the same { data, error } shape as a plain select.
+    async function supabaseSelectAll(table, columns, refine) {
+        const PAGE = 1000;
+        const rows = [];
+        let total = null;
+        while (total === null || rows.length < total) {
+            let q = sb.from(table).select(columns, { count: 'exact' });
+            if (refine) q = refine(q);
+            const { data, error, count } = await q.range(rows.length, rows.length + PAGE - 1);
+            if (error) return { data: null, error };
+            if (count !== null && count !== undefined) total = count;
+            if (!data || !data.length) break;
+            rows.push(...data);
+            if (total === null && data.length < PAGE) break; // no total reported — a short page is the end
+        }
+        return { data: rows, error: null };
+    }
+
     // Kits are a normalized edge-list in Supabase (kits + kit_items), unlike static mode's
     // wide CSV-A matrix — reshape into the same {name, kitnumber, items:{btk:qty}} globalKits
     // expects, so the existing kit UI (renderKitsList, showKitDetail, kit tags/nav) needs no changes.
     async function supabaseLoadKits(wid) {
-        const { data: kits, error: kErr } = await sb.from('kits').select('id, kitnumber, name').eq('warehouse_id', wid);
+        const { data: kits, error: kErr } = await supabaseSelectAll('kits', 'id, kitnumber, name', q => q.eq('warehouse_id', wid).order('id'));
         if (kErr) { console.error("Kit load failed:", kErr); return []; }
         if (!kits.length) return [];
-        const { data: kitItems, error: iErr } = await sb.from('kit_items').select('kit_id, btk, quantity').in('kit_id', kits.map(k => k.id));
-        if (iErr) { console.error("Kit items load failed:", iErr); return []; }
+        // The kit ids go in the URL's query string, so they're sent in modest groups rather than all at once.
+        const kitItems = [];
+        for (const idGroup of chunkArray(kits.map(k => k.id), 100)) {
+            const { data, error: iErr } = await supabaseSelectAll('kit_items', 'kit_id, btk, quantity', q => q.in('kit_id', idGroup).order('kit_id').order('btk'));
+            if (iErr) { console.error("Kit items load failed:", iErr); return []; }
+            kitItems.push(...data);
+        }
         return kits.map(k => ({
             name: k.name,
             kitnumber: k.kitnumber || 'None',
@@ -3260,7 +3316,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     async function supabaseFetchData(wid) {
-        const { data, error } = await sb.from('items').select('*').eq('warehouse_id', wid);
+        const { data, error } = await supabaseSelectAll('items', '*', q => q.eq('warehouse_id', wid).order('btk'));
         if (error) { showToast("Could not load items: " + error.message, "error"); throw error; }
         globalInventory = (data || []).map(supabaseRowToItem);
         await supabaseLoadItemPhotos(wid);
@@ -3273,7 +3329,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // sort_order). imageFullUrl/imageThumbUrl are kept as derived convenience fields pointing at
     // the main photo, so any code that only ever cared about "the" photo keeps working unchanged.
     async function supabaseLoadItemPhotos(wid) {
-        const { data, error } = await sb.from('item_images').select('*').eq('warehouse_id', wid).order('sort_order');
+        const { data, error } = await supabaseSelectAll('item_images', '*', q => q.eq('warehouse_id', wid).order('id'));
         if (error) { console.error("Item photos load failed:", error); return; }
         const byBtk = new Map();
         (data || []).forEach(row => {
@@ -9301,22 +9357,31 @@ th { background: #eee; }
             // from if this gets undone later.
             const beforeItems = ids.map(id => globalInventory.find(i => i.BTKnumber === id)).filter(Boolean);
             const beforeRows = await Promise.all(beforeItems.map(itemToSupabaseRow));
-            const { error } = await sb.from('items').delete().in('btk', ids);
-            if (error) return showToast("Could not delete: " + error.message, "error");
+            // The BTKs go in the request URL's query string — "Select all" on a big warehouse is
+            // thousands of them, past what the API gateway accepts in one URL — so delete in groups.
+            // Whatever a failing group leaves undeleted is simply not logged/cleaned up below.
+            const deletedIds = new Set();
+            let deleteError = null;
+            for (const group of chunkArray(ids, BULK_WRITE_CHUNK_SIZE)) {
+                const { error } = await sb.from('items').delete().in('btk', group);
+                if (error) { deleteError = error; break; }
+                group.forEach(id => deletedIds.add(id));
+            }
             const { data: { user } } = await sb.auth.getUser();
             const userId = user ? user.id : null;
             const logEntries = beforeItems.map((item, idx) => ({
                 action: 'delete', btk: item.BTKnumber, beforeRow: beforeRows[idx], afterRow: null,
                 summary: summarizeItemChange('delete', item.BTKnumber, beforeRows[idx], null)
-            }));
+            })).filter(e => deletedIds.has(e.btk));
             await logActivityBulk(logEntries, null, { userId });
             // kit_items.btk has an ON DELETE CASCADE FK to items.btk, so the DB already dropped any
             // kit reference to these BTKs the instant the row above was deleted — this just keeps
             // the in-memory globalKits (which isn't reloaded by supabaseLoadList) in sync with that.
-            removeKitItemsInMemory(ids);
-            clearSelection();
+            removeKitItemsInMemory([...deletedIds]);
+            if (deletedIds.size) clearSelection();
             await supabaseLoadList(currentWarehouseId);
-            showToast(`Deleted ${ids.length} item(s).`, "success");
+            if (deleteError) showToast(`Deleted ${deletedIds.size} of ${ids.length} item(s) — then it stopped: ${deleteError.message}`, "error", 9000);
+            else showToast(`Deleted ${ids.length} item(s).`, "success");
         } else {
             globalInventory = globalInventory.filter(i => !ids.includes(i.BTKnumber));
             removeKitItemsInMemory(ids); // no FK/cascade in draft mode — do it ourselves
@@ -9833,26 +9898,38 @@ th { background: #eee; }
         }
     }
 
-    // Saves already-built { btk, row } entries as chunked bulk upserts (INSERT ... ON CONFLICT (btk)
-    // DO UPDATE), where every row must carry the same full set of keys — a bulk upsert needs a
-    // uniform shape, and its INSERT half needs the NOT NULL columns present even for a row that
-    // will turn out to be an update. A chunk that fails as a whole (one bad row somewhere in it) is
-    // retried one row at a time, so it costs only that row instead of the ~200 around it.
-    // Returns { succeeded: Set<btk>, failed: count }.
+    // Saves already-built { btk, row } entries in chunks: an entry flagged isNew is INSERTed, anything
+    // else is upserted (INSERT ... ON CONFLICT (btk) DO UPDATE) — used for rows that already exist
+    // here, where the "insert" half is only a formality. That difference matters: btk is the primary
+    // key across EVERY warehouse, and a row this session considers new can still collide with an
+    // item the session doesn't have loaded (another warehouse's, or one past a page limit). An
+    // insert refuses it; an upsert would silently overwrite that item and move it into this warehouse.
+    // Every row in a call must carry the same full set of keys (a bulk statement needs a uniform
+    // shape, and its insert half needs the NOT NULL columns even for a row that turns out to be an
+    // update). A chunk that fails as a whole is retried one row at a time, so one bad row costs only
+    // itself instead of the ~200 around it.
+    // Returns { succeeded: Set<btk>, failed: count, collided: btk[] } — `collided` being the new rows
+    // refused because that BTK already exists, which callers may want to explain separately.
     async function bulkUpsertItemRows(entries) {
         const succeeded = new Set();
+        const collided = [];
         let failed = 0;
-        for (const chunk of chunkArray(entries, BULK_WRITE_CHUNK_SIZE)) {
-            const { error } = await sb.from('items').upsert(chunk.map(e => e.row), { onConflict: 'btk' });
-            if (!error) { chunk.forEach(e => succeeded.add(e.btk)); continue; }
+        const writeGroup = async (chunk, isNew) => {
+            const write = rows => isNew ? sb.from('items').insert(rows) : sb.from('items').upsert(rows, { onConflict: 'btk' });
+            const { error } = await write(chunk.map(e => e.row));
+            if (!error) { chunk.forEach(e => succeeded.add(e.btk)); return; }
             console.error(`Bulk save failed for a batch of ${chunk.length} item(s), retrying individually:`, error);
             for (const e of chunk) {
-                const { error: rowError } = await sb.from('items').upsert(e.row, { onConflict: 'btk' });
-                if (rowError) { failed++; console.error(`Could not save ${e.btk}:`, rowError); }
-                else succeeded.add(e.btk);
+                const { error: rowError } = await write([e.row]);
+                if (!rowError) { succeeded.add(e.btk); continue; }
+                failed++;
+                if (isNew && rowError.code === '23505') collided.push(e.btk); // unique_violation on the btk key
+                console.error(`Could not save ${e.btk}:`, rowError);
             }
-        }
-        return { succeeded, failed };
+        };
+        for (const chunk of chunkArray(entries.filter(e => e.isNew), BULK_WRITE_CHUNK_SIZE)) await writeGroup(chunk, true);
+        for (const chunk of chunkArray(entries.filter(e => !e.isNew), BULK_WRITE_CHUNK_SIZE)) await writeGroup(chunk, false);
+        return { succeeded, failed, collided };
     }
 
     // Reverts every not-yet-reverted activity_log entry sharing one batch_id — the counterpart to a
@@ -9861,15 +9938,27 @@ th { background: #eee; }
     // RPC, since each revert is already its own small, safe, independently-logged operation.
     async function undoImportBatch(batchId) {
         if (!batchId) return;
-        const { data, error } = await sb.from('activity_log').select('id')
-            .eq('batch_id', batchId).is('reverted_at', null).order('id', { ascending: false });
-        if (error) { showToast("Could not look up that import: " + error.message, "error"); return; }
-        if (!data || !data.length) { showToast("Nothing left to undo from that import.", "warning"); return; }
-        let ok = 0, fail = 0;
-        for (const row of data) {
-            const { error: revErr } = await sb.rpc('revert_activity_log_entry', { p_log_id: row.id });
-            if (revErr) { console.error('Revert failed for log entry', row.id, revErr); fail++; } else ok++;
+        // A response is capped (Supabase's default is 1000 rows) and a big import writes more log rows
+        // than that, so this keeps fetching until none are left — each successful revert stamps
+        // reverted_at, so the next fetch starts where the last stopped. (The revert RPC's own log
+        // entries carry no batch_id, so they never show up here.) `tried` stops an entry whose revert
+        // keeps failing from being retried forever.
+        const tried = new Set();
+        let ok = 0, fail = 0, sawAny = false;
+        for (;;) {
+            const { data, error } = await sb.from('activity_log').select('id')
+                .eq('batch_id', batchId).is('reverted_at', null).order('id', { ascending: false }).limit(1000);
+            if (error) { showToast("Could not look up that import: " + error.message, "error"); return; }
+            const todo = (data || []).filter(r => !tried.has(r.id));
+            if (!todo.length) break;
+            sawAny = true;
+            for (const row of todo) {
+                tried.add(row.id);
+                const { error: revErr } = await sb.rpc('revert_activity_log_entry', { p_log_id: row.id });
+                if (revErr) { console.error('Revert failed for log entry', row.id, revErr); fail++; } else ok++;
+            }
         }
+        if (!sawAny) { showToast("Nothing left to undo from that import.", "warning"); return; }
         showToast(`Undid ${ok} change(s) from that import.${fail ? ` ${fail} could not be undone — see console.` : ''}`, fail ? 'warning' : 'success', 6000);
         await supabaseLoadList(currentWarehouseId);
     }
@@ -9935,6 +10024,8 @@ th { background: #eee; }
         // undone in one action later (see undoImportBatch()) instead of one row at a time.
         const batchId = (isSupa && window.crypto?.randomUUID) ? window.crypto.randomUUID() : null;
         let writeErrors = 0;
+        let collidedBtks = []; // new rows refused because their BTK is already taken (see bulkUpsertItemRows)
+        let savedBtks = null;  // Supabase mode: the BTKs that actually saved, so the summary counts those, not the attempts
 
         if (isSupa) {
             // Resolved once up front — every logActivity call below reuses it instead of each
@@ -9961,8 +10052,10 @@ th { background: #eee; }
                 entries.push({ btk: item.BTKnumber, row: { ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: '' }, beforeRow: null, isNew: true, item });
             }
 
-            const { succeeded: succeededBTKs, failed: saveFailures } = await bulkUpsertItemRows(entries);
+            const { succeeded: succeededBTKs, failed: saveFailures, collided } = await bulkUpsertItemRows(entries);
             writeErrors += saveFailures;
+            collidedBtks = collided;
+            savedBtks = succeededBTKs;
 
             const logEntries = entries.filter(e => succeededBTKs.has(e.btk)).map(e => ({
                 action: e.isNew ? 'create' : 'update', btk: e.btk, beforeRow: e.beforeRow, afterRow: e.row,
@@ -9970,15 +10063,18 @@ th { background: #eee; }
             }));
             await logActivityBulk(logEntries, batchId, { userId });
 
-            // Images are a distinct fetch+upload per item, not batchable into the row upsert above.
-            for (const e of entries) {
-                if (succeededBTKs.has(e.btk) && e.item.images) await attachCsvImageIfUrl(e.btk, e.item.images);
-            }
-
             clearSelection();
             document.getElementById('search-box').value = '';
             if (activeView === 'merge-view') showListView('items');
             await supabaseLoadList(currentWarehouseId);
+
+            // Images are a distinct fetch+upload per item, not batchable into the row writes above —
+            // and only after the reload: addPhotoToItem() looks the item up in globalInventory, which
+            // doesn't hold a brand-new row until supabaseLoadList() has run (attached earlier, every
+            // image on a new item was skipped as "not_found").
+            for (const e of entries) {
+                if (succeededBTKs.has(e.btk) && e.item.images) await attachCsvImageIfUrl(e.btk, e.item.images);
+            }
         } else {
             csvImportResolvedItems.forEach(item => {
                 const idx = globalInventory.findIndex(i => i.BTKnumber === item.BTKnumber);
@@ -9995,8 +10091,9 @@ th { background: #eee; }
             filterList(true);
         }
 
-        const conflictCount = csvImportResolvedItems.length;
-        const newCount = csvImportPendingNew.length;
+        const savedCount = list => savedBtks ? list.filter(i => savedBtks.has(i.BTKnumber)).length : list.length;
+        const conflictCount = savedCount(csvImportResolvedItems);
+        const newCount = savedCount(csvImportPendingNew);
         const dupes = csvImportDupesReport;
         const autoAssigned = csvImportAutoAssignedCount;
         const matchedByPart = csvImportMatchedByPartNumberCount;
@@ -10007,9 +10104,13 @@ th { background: #eee; }
             const preview = dupes.slice(0, 5).join(', ') + (dupes.length > 5 ? '…' : '');
             msg += ` ${dupes.length} duplicate BTK(s) within the file collapsed to their last row: ${preview}.`;
         }
-        if (writeErrors) msg += ` ${writeErrors} row(s) failed to save — see console for details.`;
+        if (collidedBtks.length) {
+            const preview = collidedBtks.slice(0, 5).join(', ') + (collidedBtks.length > 5 ? '…' : '');
+            msg += ` ${collidedBtks.length} row(s) were NOT imported because their BTK is already used by an item elsewhere (another warehouse, most likely): ${preview}. Give those rows a blank BTK to have a new one assigned.`;
+        }
+        if (writeErrors > collidedBtks.length) msg += ` ${writeErrors - collidedBtks.length} row(s) failed to save — see console for details.`;
         if (!isSupa) msg += ' (draft autosaved).';
-        const canUndo = isSupa && batchId && (conflictCount + newCount > writeErrors);
+        const canUndo = isSupa && batchId && (conflictCount + newCount > 0);
         showToast(msg, (conflictCount || dupes.length || writeErrors) ? 'warning' : 'success', canUndo ? 15000 : 9000,
             canUndo ? { label: '↩️ Undo Import', onClick: () => undoImportBatch(batchId) } : null);
         resetCsvImportState();
@@ -10064,7 +10165,9 @@ th { background: #eee; }
         // warehouse currently open in the app when an admin runs this.
         vismaImportBestExistingItems = [];
         if (draft.groups.some(g => g.isBest)) {
-            const { data, error } = await sb.from('items').select('*').eq('warehouse_id', '1');
+            // Every row, not just the first page — the wipe below deletes ALL of Best's rows, so
+            // anything this read missed would be deleted with no photo cleanup, no log entry, no Undo.
+            const { data, error } = await supabaseSelectAll('items', '*', q => q.eq('warehouse_id', '1').order('btk'));
             if (error) console.error("Could not load Best's current items:", error);
             else vismaImportBestExistingItems = data || [];
         }
@@ -10188,7 +10291,7 @@ th { background: #eee; }
         // the item row itself per schema_item_images.sql, but the actual Storage files don't).
         const bestGroup = draft.groups.find(g => g.isBest);
         if (bestGroup && vismaImportBestExistingItems.length) {
-            const { data: photoRows } = await sb.from('item_images').select('full_url, thumb_url').eq('warehouse_id', '1');
+            const { data: photoRows } = await supabaseSelectAll('item_images', 'full_url, thumb_url', q => q.eq('warehouse_id', '1').order('id'));
             const storagePaths = [];
             (photoRows || []).forEach(p => {
                 const fp = storagePathFromPublicUrl(p.full_url, SUPABASE_STORAGE_BUCKET);
@@ -10253,7 +10356,7 @@ th { background: #eee; }
             // so generateUniqueBTK() must scan its real current items, not assume none exist.
             let existingItemsForBtk = [];
             if (group.reusedExisting) {
-                const { data, error } = await sb.from('items').select('btk').eq('warehouse_id', warehouseId);
+                const { data, error } = await supabaseSelectAll('items', 'btk', q => q.eq('warehouse_id', warehouseId).order('btk'));
                 if (error) console.error(`Could not read existing items in "${group.warehouseName}" for BTK numbering:`, error);
                 else existingItemsForBtk = data || [];
             }
