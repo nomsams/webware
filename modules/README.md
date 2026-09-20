@@ -45,7 +45,12 @@ node --test modules/tests/*.test.js
   chikibriki-gated proxy (`KNOWN_EXTERNAL_PROXY_URL` — always tried, no opt-in needed, so web
   search works even before webware's own function is deployed), then — only if the user has opted
   into it in Settings — fully-public proxies, then finally a direct fetch. See the `chikibriki`
-  note below.
+  note below. The Edge Function requires a signed-in user and refuses internal targets (loopback,
+  private/link-local/CGNAT ranges, cloud-metadata names, IPv6 literals, `localhost.`-style
+  trailing-dot names) — and follows redirects by hand, re-checking **every hop**, since a public page
+  that answers `302 → http://169.254.169.254/…` would otherwise walk straight past a check that only
+  looked at the first URL. DNS rebinding to a private address isn't covered (Deno's `fetch` exposes
+  no resolve hook).
 - **`web-search.js`** — DuckDuckGo search + page-text extraction, ported from
   `github.com/nomsams/timeline` (the search) with a cleanup approach mirroring
   `github.com/nomsams/crawly` (the text extraction). Depends on `cors-proxy.js`. Backs the AI
