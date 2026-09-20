@@ -2085,6 +2085,19 @@
         return !isSupa || currentUserRole !== 'viewer';
     }
 
+    // Creating and deleting items is stricter than editing them. The items INSERT and DELETE policies are
+    // admin-only for a profile role — a global editor may only UPDATE — and open to an editor/maintainer/
+    // admin GRANT for that warehouse (p_items_warehouse_permission_write covers every command).
+    // canEditItems() can't tell those two kinds of "editor" apart, so Add / Duplicate / Remove / Merge
+    // showed for every non-viewer: an add was then refused, and a remove quietly did nothing (RLS turns a
+    // forbidden DELETE into zero rows with no error) while the app reported it done.
+    function canAddOrRemoveItems() {
+        if (!canEditItems()) return false;
+        if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') return true; // static/draft: local, no server rules
+        if (currentUserRole === 'admin') return true; // a global admin, or an admin grant here
+        return myWarehousePermissions.some(p => p.warehouse_id === currentWarehouseId && ['editor', 'maintainer', 'admin'].includes(p.role));
+    }
+
     function toggleConsole() { document.getElementById('console-overlay').classList.toggle('open'); }
     function handleConsoleOverlayClick(e) { if (e.target === document.getElementById('console-overlay')) toggleConsole(); }
 
@@ -5566,7 +5579,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('seg-items').classList.toggle('active', mode === 'items');
         document.getElementById('seg-kits').classList.toggle('active', mode === 'kits');
         document.getElementById('seg-manufacturers').classList.toggle('active', mode === 'manufacturers');
-        document.getElementById('btn-add-item').classList.toggle('hidden', mode !== 'items');
+        document.getElementById('btn-add-item').classList.toggle('hidden', mode !== 'items' || !canAddOrRemoveItems());
         document.getElementById('items-only-controls').classList.toggle('hidden', mode !== 'items');
         document.getElementById('kits-only-controls').classList.toggle('hidden', mode !== 'kits');
         document.getElementById('manufacturers-only-controls').classList.toggle('hidden', mode !== 'manufacturers');
@@ -7276,11 +7289,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('selected-count').innerText = selectedItems.size;
         document.getElementById('selected-count-pack').innerText = selectedItems.size;
         fab.classList.toggle('visible', selectedItems.size > 0);
-        // Remove/Merge are destructive, unlike Labels/Pack — gated on canEditItems() so a viewer
-        // never sees them, regardless of how many items they've selected.
-        const canEdit = canEditItems();
-        document.getElementById('btn-fab-remove').classList.toggle('hidden', !canEdit || selectedItems.size === 0);
-        document.getElementById('btn-fab-merge').classList.toggle('hidden', !canEdit || selectedItems.size < 2);
+        // Remove/Merge are destructive, unlike Labels/Pack — and both DELETE items, so they need the
+        // stricter canAddOrRemoveItems() (a global editor can't delete), which also hides them from a
+        // viewer no matter how many items are selected.
+        const canDelete = canAddOrRemoveItems();
+        document.getElementById('btn-fab-remove').classList.toggle('hidden', !canDelete || selectedItems.size === 0);
+        document.getElementById('btn-fab-merge').classList.toggle('hidden', !canDelete || selectedItems.size < 2);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -8159,7 +8173,7 @@ th { background: #eee; }
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
         const isViewer = isSupa && currentUserRole === 'viewer';
         document.getElementById('btn-edit-item').classList.toggle('hidden', isViewer);
-        document.getElementById('btn-duplicate-item').classList.toggle('hidden', isViewer);
+        document.getElementById('btn-duplicate-item').classList.toggle('hidden', isViewer || !canAddOrRemoveItems());
 
         const filenames = renderItemGallery(item);
         renderImageAddControls(filenames.length);
@@ -9360,6 +9374,7 @@ th { background: #eee; }
     // ════════════════════════════════════════════════════════════════════════
     function openAddItemModal() {
         if (!requireAuth()) return;
+        if (!canAddOrRemoveItems()) { showToast("Adding items needs an admin (or an editor grant for this warehouse) — editors can update existing items.", "warning", 6000); return; }
         modalMode = 'add';
         editTargetBTK = null;
         document.getElementById('modal-title').innerText = '➕ Add New Item';
@@ -9484,7 +9499,7 @@ th { background: #eee; }
         return 'BTK' + String(n).padStart(6, '0') + suffix;
     }
     async function duplicateItem() {
-        if (!canEditItems() || !currentItemBTK) return;
+        if (!canAddOrRemoveItems() || !currentItemBTK) return;
         const original = globalInventory.find(i => i.BTKnumber === currentItemBTK);
         if (!original) return;
         const newBTK = generateUniqueBTK();
@@ -9509,7 +9524,7 @@ th { background: #eee; }
 
     // ── REMOVE ITEMS (multi-select, from the item list) ───────────────────────
     function confirmRemoveSelectedItems() {
-        if (!canEditItems() || selectedItems.size === 0) return;
+        if (!canAddOrRemoveItems() || selectedItems.size === 0) return;
         const ids = Array.from(selectedItems);
         const items = ids.map(id => globalInventory.find(i => i.BTKnumber === id)).filter(Boolean);
         const names = items.map(i => `• ${i['itemname(english)'] || i['itemname(swedish)'] || 'Unnamed'} (${i.BTKnumber})`).join('\n');
@@ -9533,9 +9548,13 @@ th { background: #eee; }
             const deletedIds = new Set();
             let deleteError = null;
             for (const group of chunkArray(ids, BULK_WRITE_CHUNK_SIZE)) {
-                const { error } = await sb.from('items').delete().in('btk', group);
+                // .select() hands back the rows that were REALLY deleted. A delete the caller isn't
+                // permitted (only admins, or an editor grant, may delete items) is filtered by RLS to
+                // zero rows with NO error — which used to be counted as success ("Deleted N item(s)"),
+                // logged as deletions, and then the items were back after the reload.
+                const { data, error } = await sb.from('items').delete().in('btk', group).select('btk');
                 if (error) { deleteError = error; break; }
-                group.forEach(id => deletedIds.add(id));
+                (data || []).forEach(r => deletedIds.add(r.btk));
             }
             const userId = await currentAuthUserId();
             const logEntries = beforeItems.map((item, idx) => ({
@@ -9550,6 +9569,7 @@ th { background: #eee; }
             if (deletedIds.size) clearSelection();
             await supabaseLoadList(currentWarehouseId);
             if (deleteError) showToast(`Deleted ${deletedIds.size} of ${ids.length} item(s) — then it stopped: ${deleteError.message}`, "error", 9000);
+            else if (deletedIds.size < ids.length) showToast(`Deleted ${deletedIds.size} of ${ids.length} item(s) — the other ${ids.length - deletedIds.size} weren't removed: deleting items needs an admin (or an editor grant for this warehouse).`, "warning", 9000);
             else showToast(`Deleted ${ids.length} item(s).`, "success");
         } else {
             globalInventory = globalInventory.filter(i => !ids.includes(i.BTKnumber));
@@ -9669,7 +9689,7 @@ th { background: #eee; }
     }
 
     function openMergeView() {
-        if (!canEditItems() || selectedItems.size < 2) return;
+        if (!canAddOrRemoveItems() || selectedItems.size < 2) return;
         mergeCandidates = Array.from(selectedItems).map(id => globalInventory.find(i => i.BTKnumber === id)).filter(Boolean);
         if (mergeCandidates.length < 2) { showToast("Need at least 2 valid items to merge.", "warning"); return; }
         mergeMode = 'manual';
@@ -9845,15 +9865,22 @@ th { background: #eee; }
             // once the loser rows are gone, any kit reference to them is gone with no way back.
             const kitsTouched = await remapKitItemsSupabase(loserBTKs, survivorBTK);
             remapKitItemsInMemory(loserBTKs, survivorBTK);
-            const { error: deleteError } = await sb.from('items').delete().in('btk', loserBTKs);
+            // .select() returns the rows really deleted — RLS turns a delete the caller isn't allowed into
+            // zero rows with no error, which must not be logged (or reported) as a deletion.
+            const { data: deletedRows, error: deleteError } = await sb.from('items').delete().in('btk', loserBTKs).select('btk');
             if (deleteError) return showToast("Survivor saved, but couldn't delete the rest: " + deleteError.message, "error");
+            const deletedSet = new Set((deletedRows || []).map(r => r.btk));
             logActivity('update', survivorBTK, survivorBeforeRow, row, `Merged ${losers.length} item(s) into ${summarizeItemChange('update', survivorBTK, survivorBeforeRow, row)}`);
             losers.forEach((loser, idx) => {
+                if (!deletedSet.has(loser.BTKnumber)) return;
                 logActivity('delete', loser.BTKnumber, loserBeforeRows[idx], null, `Merged away (into ${survivorBTK}): ${loser['itemname(english)'] || loser.BTKnumber}`);
             });
             clearSelection();
             await supabaseLoadList(currentWarehouseId);
-            showToast(`Merged into ${survivorBTK}.` + (kitsTouched ? ` Updated ${kitsTouched} kit(s) that referenced the merged item(s).` : ''), "success");
+            const notDeleted = loserBTKs.length - deletedSet.size;
+            showToast(`Merged into ${survivorBTK}.` + (kitsTouched ? ` Updated ${kitsTouched} kit(s) that referenced the merged item(s).` : '') +
+                (notDeleted ? ` But ${notDeleted} of the merged-away item(s) were NOT deleted — deleting items needs an admin (or an editor grant for this warehouse); their data is now on ${survivorBTK}, so remove them from the list.` : ''),
+                notDeleted ? "warning" : "success", notDeleted ? 10000 : 3500);
             openItem(survivorBTK, { type: 'global' });
             return;
         }
