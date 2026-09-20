@@ -41,11 +41,15 @@ node --test modules/tests/*.test.js
   Backs the 🤖 AI Assistant chat bubble's classification/reply calls and voice transcription either way.
 - **`cors-proxy.js`** + **`../supabase/functions/cors-proxy/index.ts`** — CORS-proxy fetch client,
   used by `web-search.js`. Configured once from the module bridge in `index.html`, so it calls
-  webware's own `cors-proxy` Edge Function first (once deployed), then the known external
-  chikibriki-gated proxy (`KNOWN_EXTERNAL_PROXY_URL` — always tried, no opt-in needed, so web
-  search works even before webware's own function is deployed), then — only if the user has opted
-  into it in Settings — fully-public proxies, then finally a direct fetch. See the `chikibriki`
-  note below. The Edge Function requires a signed-in user and refuses internal targets (loopback,
+  webware's own `cors-proxy` Edge Function first (once deployed), then — **only if the user has
+  opted in** via Settings → "Allow public CORS proxy fallback for web search" — the known external
+  chikibriki-gated proxy (`KNOWN_EXTERNAL_PROXY_URL`, on the author's other Supabase project) and
+  the fully-public proxies, then finally a direct fetch. With that switch off (the default) a
+  failing own proxy goes straight to the direct fetch, so a search query never reaches another
+  server unasked — the shared proxy used to be tried unconditionally, which contradicted what
+  Settings promised. See the `chikibriki` note below.
+
+  The Edge Function requires a signed-in user and refuses internal targets (loopback,
   private/link-local/CGNAT ranges, cloud-metadata names, IPv6 literals, `localhost.`-style
   trailing-dot names) — and follows redirects by hand, re-checking **every hop**, since a public page
   that answers `302 → http://169.254.169.254/…` would otherwise walk straight past a check that only
@@ -313,10 +317,12 @@ projects) doesn't require a signed-in user of *that* project. `modules/cors-prox
 Function (that function's real protection is requiring a signed-in Supabase user, same as
 `groq-proxy` — `CORS_PROXY_KEY` is an optional extra secret-side check on top, but auth is what
 actually gates it), and to `KNOWN_EXTERNAL_PROXY_URL` — the *other* project's cors-proxy, called
-directly, no webware credentials involved. That second one is a genuinely useful fallback for
-"webware's own function isn't deployed yet," at the cost of that other project's own logs seeing
-the URL/query in the clear whenever it's actually used — pass `useKnownExternalProxy: false` to
-`corsFetch()` (or wherever that's threaded through) if that trade-off isn't wanted for a given call.
+directly, no webware credentials involved. That second one is a useful fallback for "webware's own
+function isn't deployed / is down," at the cost of that other project's own logs seeing the
+URL/query in the clear whenever it's actually used — so it is **opt-in**, on the same switch as the
+public proxies (`allowPublicFallback`, Settings → "Allow public CORS proxy fallback for web
+search"), and off by default. `useKnownExternalProxy` on a `corsFetch()` call overrides just this
+one either way.
 
 ## Not ported as a separate module
 

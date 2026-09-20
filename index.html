@@ -1850,7 +1850,7 @@
                 <input type="checkbox" id="cors-public-fallback-enabled" onchange="onCorsPublicFallbackChange()" style="width:auto; min-height:unset; margin:0;">
                 Allow public CORS proxy fallback for web search
             </label>
-            <p class="setting-desc">Off by default. When webware's own CORS-proxy function isn't deployed or has an outage, the AI Assistant's web search normally just fails, rather than silently sending your search query to a public third-party proxy (corsproxy.io / allorigins.win) that could see it in the clear. Turn this on only if you'd rather have search keep working than avoid that exposure — this is a per-device setting.</p>
+            <p class="setting-desc">Off by default. When webware's own CORS-proxy function isn't deployed or has an outage, the AI Assistant's web search normally just fails, rather than silently sending your search query to someone else's server — either the shared proxy on the app author's other Supabase project, or a public third-party one (corsproxy.io / allorigins.win) — that could see it in the clear. Turn this on only if you'd rather have search keep working than avoid that exposure — this is a per-device setting.</p>
         </div>
 
         <button class="full-width" onclick="saveSettings()">Save Configuration</button>

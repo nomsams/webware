@@ -6,11 +6,21 @@ import { corsFetch, configureCorsProxy, setAllowPublicFallback, _resetCorsProxy,
 
 test.beforeEach(() => _resetCorsProxy());
 
-test('unconfigured corsFetch tries the known external chikibriki proxy by default (not the fully-public fallbacks)', async () => {
+test('by default nothing but the own proxy and a direct fetch is ever tried — neither the known external proxy nor the public ones', async () => {
+  const calledUrls = [];
+  const fetchImpl = async (url) => { calledUrls.push(url); return { ok: false, status: 502 }; };
+
+  await assert.rejects(corsFetch('https://example.com/page', {}, { fetchImpl }), /HTTP 502/);
+
+  // Only the direct fetch: a search query is never handed to another server unless opted in.
+  assert.deepEqual(calledUrls, ['https://example.com/page']);
+});
+
+test('the known external chikibriki proxy is used once opted in (allowPublicFallback), ahead of the fully-public ones', async () => {
   const calls = [];
   const fetchImpl = async (url, options) => { calls.push({ url, headers: options?.headers }); return { ok: true, status: 200 }; };
 
-  const res = await corsFetch('https://example.com/page', {}, { fetchImpl });
+  const res = await corsFetch('https://example.com/page', {}, { fetchImpl, allowPublicFallback: true });
 
   assert.equal(res.ok, true);
   assert.equal(calls.length, 1);
@@ -19,14 +29,24 @@ test('unconfigured corsFetch tries the known external chikibriki proxy by defaul
   assert.equal(DEFAULT_PROXY_KEY, 'chikibriki');
 });
 
-test('useKnownExternalProxy: false skips it, going straight to a direct fetch (still no public fallback by default)', async () => {
+test('useKnownExternalProxy: true opts a single call in even with the running default off', async () => {
   const calledUrls = [];
   const fetchImpl = async (url) => { calledUrls.push(url); return { ok: true, status: 200 }; };
 
-  const res = await corsFetch('https://example.com/page', {}, { fetchImpl, useKnownExternalProxy: false });
+  await corsFetch('https://example.com/page', {}, { fetchImpl, useKnownExternalProxy: true });
+
+  assert.deepEqual(calledUrls, [`${KNOWN_EXTERNAL_PROXY_URL}?url=${encodeURIComponent('https://example.com/page')}`]);
+});
+
+test('useKnownExternalProxy: false skips it even when allowPublicFallback is on', async () => {
+  const calledUrls = [];
+  const fetchImpl = async (url) => { calledUrls.push(url); return { ok: true, status: 200 }; };
+
+  const res = await corsFetch('https://example.com/page', {}, { fetchImpl, allowPublicFallback: true, useKnownExternalProxy: false });
 
   assert.equal(res.ok, true);
-  assert.deepEqual(calledUrls, ['https://example.com/page']);
+  assert.match(calledUrls[0], /^https:\/\/corsproxy\.io\//);
+  assert.ok(!calledUrls.some((u) => u.startsWith(KNOWN_EXTERNAL_PROXY_URL)));
 });
 
 test('with allowPublicFallback: true and the known external proxy skipped, falls through public proxies in order', async () => {
@@ -81,7 +101,30 @@ test('configureCorsProxy accepts a custom proxyKey override (own proxy only — 
   assert.equal(calls[0]['x-proxy-key'], 'my-custom-key');
 });
 
-test('own-proxy failure falls through to the known external proxy next, before a direct fetch', async () => {
+test('own-proxy failure goes straight to a direct fetch by default — the query is not sent to the known external proxy', async () => {
+  configureCorsProxy({
+    supabaseUrl: 'https://myproject.supabase.co',
+    supabaseAnonKey: 'anon-key',
+    getAccessToken: async () => 'user-token',
+  });
+  const calledUrls = [];
+  const fetchImpl = async (url) => {
+    calledUrls.push(url);
+    if (url.startsWith('https://myproject.supabase.co/')) return { ok: false, status: 500 };
+    if (url === 'https://example.com/page') return { ok: true, status: 200 };
+    return { ok: false, status: 502 };
+  };
+
+  const res = await corsFetch('https://example.com/page', {}, { fetchImpl });
+
+  assert.equal(res.ok, true);
+  assert.equal(calledUrls.length, 2);
+  assert.match(calledUrls[0], /^https:\/\/myproject\.supabase\.co\//);
+  assert.equal(calledUrls[1], 'https://example.com/page');
+  assert.ok(!calledUrls.some((u) => u.startsWith(KNOWN_EXTERNAL_PROXY_URL)));
+});
+
+test('own-proxy failure falls through to the known external proxy next once opted in, before a direct fetch', async () => {
   configureCorsProxy({
     supabaseUrl: 'https://myproject.supabase.co',
     supabaseAnonKey: 'anon-key',
@@ -95,7 +138,7 @@ test('own-proxy failure falls through to the known external proxy next, before a
     return { ok: false, status: 502 };
   };
 
-  const res = await corsFetch('https://example.com/page', {}, { fetchImpl });
+  const res = await corsFetch('https://example.com/page', {}, { fetchImpl, allowPublicFallback: true });
 
   assert.equal(res.ok, true);
   assert.equal(calledUrls.length, 2);
@@ -146,7 +189,7 @@ test('corsFetch throws when every attempt fails', async () => {
   await assert.rejects(corsFetch('https://example.com/page', {}, { fetchImpl }), /network down/);
 });
 
-test('configureCorsProxy() with no args clears the own proxy (known external proxy still tried)', async () => {
+test('configureCorsProxy() with no args clears the own proxy (only a direct fetch is left by default)', async () => {
   configureCorsProxy({
     supabaseUrl: 'https://myproject.supabase.co',
     supabaseAnonKey: 'anon-key',
@@ -158,7 +201,7 @@ test('configureCorsProxy() with no args clears the own proxy (known external pro
 
   await corsFetch('https://example.com/page', {}, { fetchImpl });
 
-  assert.deepEqual(calledUrls, [`${KNOWN_EXTERNAL_PROXY_URL}?url=${encodeURIComponent('https://example.com/page')}`]);
+  assert.deepEqual(calledUrls, ['https://example.com/page']);
 });
 
 test('configureCorsProxy requires anonKey and getAccessToken alongside supabaseUrl', () => {
