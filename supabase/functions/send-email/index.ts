@@ -108,12 +108,25 @@ Deno.serve(async (req) => {
     // Signed in isn't the same as authorized — sending mail through the org's own SMTP identity to
     // an arbitrary recipient with arbitrary content is sensitive enough to need the same "can write"
     // bar the rest of the app uses (editor/maintainer/admin), not just any signed-in viewer.
+    const WRITE_ROLES = ["editor", "maintainer", "admin"];
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", user.id)
       .single();
-    if (profileError || !profile || !["editor", "maintainer", "admin"].includes(profile.role)) {
+    let allowed = !profileError && !!profile && WRITE_ROLES.includes(profile.role);
+    if (!allowed) {
+      // A per-warehouse grant counts as well. The app's own gate (canEditItems()) lets someone who is
+      // an editor/maintainer/admin in a warehouse by grant use its Send button, and checking only the
+      // global role here answered that with a 403. The message isn't tied to one warehouse, so any
+      // such grant qualifies. RLS lets a user read their own grants, so the caller's own client works.
+      const { data: grants } = await supabase
+        .from("warehouse_permissions")
+        .select("role")
+        .eq("user_id", user.id);
+      allowed = !!grants && grants.some((g: { role: string }) => WRITE_ROLES.includes(g.role));
+    }
+    if (!allowed) {
       return json({ error: "not authorized to send email" }, 403);
     }
 

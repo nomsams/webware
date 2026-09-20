@@ -28,6 +28,16 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const ALLOWED_MODELS = new Set(["openai/gpt-oss-120b", "qwen/qwen3.8-27b"]);
 const ALLOWED_TRANSCRIBE_MODELS = new Set(["whisper-large-v3-turbo", "whisper-large-v3"]);
 
+// The model allow-list above stops a client pointing the shared key at a costlier model, but the
+// reply length was left to the caller: any signed-in user could ask for the model's maximum on every
+// call. The app itself only ever requests the default, so this ceiling costs it nothing.
+const DEFAULT_COMPLETION_TOKENS = 2048;
+const MAX_COMPLETION_TOKENS = 8192;
+function clampCompletionTokens(requested: unknown): number {
+  const n = Number(requested);
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), MAX_COMPLETION_TOKENS) : DEFAULT_COMPLETION_TOKENS;
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -116,7 +126,7 @@ async function handleChat(req: Request, keys: string[]): Promise<Response> {
     model,
     messages,
     temperature: temperature ?? 1,
-    max_completion_tokens: max_completion_tokens ?? 2048,
+    max_completion_tokens: clampCompletionTokens(max_completion_tokens),
     top_p: top_p ?? 1,
     reasoning_effort: reasoning_effort ?? "medium",
     stream: !!stream,
