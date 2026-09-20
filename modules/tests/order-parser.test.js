@@ -48,6 +48,16 @@ test('parseJsonReply extracts JSON even when wrapped in prose or code fences', (
   assert.deepEqual(parseJsonReply(wrapped), { items: [{ reference: '1', quantity: 2 }] });
 });
 
+test('parseJsonReply still parses when the reply has a brace AFTER the JSON (the old greedy regex rejected it)', () => {
+  const reply = '{"items":[{"reference":"1","quantity":2}],"recipientName":"Acme"}\n\nLet me know if you want {changes}.';
+  assert.deepEqual(parseJsonReply(reply), { items: [{ reference: '1', quantity: 2 }], recipientName: 'Acme' });
+});
+
+test('parseJsonReply takes the final answer when a draft object comes first', () => {
+  const reply = 'Draft: {"items":[{"reference":"old","quantity":1}]}\nFinal: {"items":[{"reference":"new","quantity":4}]}';
+  assert.deepEqual(parseJsonReply(reply), { items: [{ reference: 'new', quantity: 4 }] });
+});
+
 test('parseJsonReply throws when there is no JSON at all', () => {
   assert.throws(() => parseJsonReply('sorry, I cannot help with that'), /did not contain JSON/);
 });

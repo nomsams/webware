@@ -61,6 +61,7 @@
 //   // }
 
 import { GROQ_MODELS } from './groq-client.js';
+import { extractJsonObjects, lastJsonObject } from './json-extract.js';
 
 const EXTRACTION_SYSTEM_PROMPT = `You extract structured pack-order data from free-form text, which may be in English, Swedish, or Finnish (e.g. "plocka" = pick/pack). Respond with ONLY a JSON object, no prose, matching:
 {
@@ -150,10 +151,12 @@ async function resolveItem(entry, knownItems, searchItemCandidates, searchOtherW
 // Exported standalone so the "model replied with prose/code-fences around the JSON anyway" path
 // is testable without a real LLM call.
 export function parseJsonReply(reply) {
-  const match = reply.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('order-parser: model reply did not contain JSON');
-  const parsed = JSON.parse(match[0]);
-  if (!Array.isArray(parsed.items)) throw new Error('order-parser: model reply missing items array');
+  // Not a greedy first-"{"-to-last-"}" span: any brace after the JSON made that invalid (see
+  // json-extract.js). The last object that has an items array is the answer.
+  const objects = extractJsonObjects(reply);
+  if (!objects.length) throw new Error('order-parser: model reply did not contain JSON');
+  const parsed = lastJsonObject(reply, (o) => Array.isArray(o.items));
+  if (!parsed) throw new Error('order-parser: model reply missing items array');
   return parsed;
 }
 

@@ -4,7 +4,7 @@ Standalone JS building blocks for functionality discussed for the app. Most of t
 imported by `index.html` yet — nothing changes until a module is deliberately wired in — except
 **`perspective-warp.js`**, **`groq-client.js`**, **`cors-proxy.js`**, **`web-search.js`**,
 **`order-parser.js`**, **`contacts.js`**, **`email-sender.js`**, **`delivery-note-parser.js`**,
-**`visma-import.js`**, and **`iso-rack.js`**, which are (via the
+**`visma-import.js`**, **`iso-rack.js`**, and **`json-extract.js`**, which are (via the
 `<script type="module">` bridge near the end of `index.html`, since the rest of the app is one
 classic script) — the first four back the 🤖 AI Assistant chat bubble, `order-parser.js` backs its
 natural-language Pack Order action, `contacts.js` backs the Saved Recipients picker,
@@ -235,6 +235,16 @@ node --test modules/tests/*.test.js
   Tested in `tests/iso-rack.test.js` (geometry fallbacks/derivations, opacity of rack vs. bin, label
   escaping, occupied/selected/interactive markup, dimension callouts, and "every renderer stays finite
   over odd inputs"). SQL for the sizes it reads is `supabase/schema_zone_dimensions.sql`.
+- **`json-extract.js`** — **wired in**: reads JSON objects out of free-form model output. Used by
+  `order-parser.js` and `delivery-note-parser.js` for their replies and, as
+  `window.extractJsonObjects`, by the AI assistant to read which action a reply asks for. Replaces
+  the greedy `/\{[\s\S]*\}/` those three each used, which ran from the first `{` to the LAST `}` in
+  the whole reply — so a brace anywhere after the JSON ("…{see note}"), or a stray one before it,
+  made the span invalid and the whole (perfectly good) reply was rejected. It scans instead: from
+  each `{` it finds the matching `}` (skipping braces inside strings, honouring `\"` escapes) and
+  keeps the piece only if it parses. `extractJsonObjects()` returns the top-level objects in order;
+  `lastJsonObject(text, accept)` picks the last one satisfying a predicate — the final answer, when a
+  model quotes a draft or thinks aloud first. Tested in `tests/json-extract.test.js`.
 - **`img-square.js`** — pads an image to a square, filling the new space with a solid color or a
   color sampled from the image's own edges. Ported from `github.com/nomsams/imgsquare`. Intended
   to slot into the existing item-photo/manufacturer-logo canvas editor as an extra step.

@@ -13,6 +13,13 @@ test('parseDeliveryNoteReply extracts JSON even when wrapped in prose or code fe
   });
 });
 
+test('parseDeliveryNoteReply still parses when the reply has a brace AFTER the JSON (the old greedy regex rejected it)', () => {
+  const reply = '{"manufacturer":"Acme AB","warehouseAddress":null,"items":[{"name":"Bolt","itemNumber":"B1","quantity":3}]}\n(quantities as printed {see note})';
+  assert.deepEqual(parseDeliveryNoteReply(reply), {
+    manufacturer: 'Acme AB', warehouseAddress: null, items: [{ name: 'Bolt', itemNumber: 'B1', quantity: 3 }],
+  });
+});
+
 test('parseDeliveryNoteReply throws when there is no JSON at all', () => {
   assert.throws(() => parseDeliveryNoteReply('sorry, I cannot read that image'), /did not contain JSON/);
 });
