@@ -2098,7 +2098,9 @@
         toast.className = `toast ${type}`;
         const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
         const dismiss = () => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); };
-        toast.innerHTML = `<span aria-hidden="true" style="flex-shrink:0">${icons[type] || 'ℹ️'}</span><span style="flex:1;">${message}</span>` +
+        // Escaped: messages routinely carry text the user or a CSV supplied (item names, BTKs, a
+        // database error that echoes the rejected value), and none of them are meant to be markup.
+        toast.innerHTML = `<span aria-hidden="true" style="flex-shrink:0">${icons[type] || 'ℹ️'}</span><span style="flex:1;">${escapeHtml(message)}</span>` +
             (action ? `<button type="button" class="toast-action">${escapeHtml(action.label)}</button>` : '');
         toast.onclick = dismiss;
         if (action) {
@@ -2750,7 +2752,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 const whName = (manageUsersWarehouses.find(w => w.l === g.warehouse_id) || {}).name || g.warehouse_id;
                 return `<div style="display:flex; align-items:center; gap:8px; font-size:0.8rem; padding:2px 0;">
                     <span style="flex:1;">${escapeHtml(whName)}: <strong style="text-transform:capitalize;">${escapeHtml(g.role)}</strong></span>
-                    <button class="secondary" onclick="revokeWarehousePermission('${u.id}','${escapeHtml(g.warehouse_id)}')" style="padding:2px 8px; min-height:auto; font-size:0.75rem; color:var(--danger);">✕</button>
+                    <button class="secondary" data-user-id="${escapeHtml(u.id)}" data-wh-id="${escapeHtml(g.warehouse_id)}" onclick="revokeWarehousePermission(this.dataset.userId, this.dataset.whId)" style="padding:2px 8px; min-height:auto; font-size:0.75rem; color:var(--danger);">✕</button>
                 </div>`;
             }).join('');
             const warehouseOptions = manageUsersWarehouses.map(w => `<option value="${escapeHtml(w.l)}">${escapeHtml(w.name)}</option>`).join('');
@@ -2834,9 +2836,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const supaWarehouses = WAREHOUSES.filter(w => w.mode === 'supabase');
         container.innerHTML = supaWarehouses.map(w => {
             const removed = w.active === false;
+            // The id/name ride in data-* attributes and are read back from `this.dataset` — putting a
+            // JSON.stringify()'d name straight into onclick="..." closed the attribute at its first
+            // double quote, so neither button ever ran (a SyntaxError on every click).
             const actionBtn = removed
-                ? `<button class="secondary" onclick="restoreWarehouse('${w.l}', ${JSON.stringify(w.name)})" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">↩️ Restore</button>`
-                : `<button class="secondary" onclick="confirmRemoveWarehouse('${w.l}', ${JSON.stringify(w.name)})" style="padding:4px 10px; min-height:auto; font-size:0.78rem; color:var(--danger);">🗑️ Remove</button>`;
+                ? `<button class="secondary" data-wh-id="${escapeHtml(w.l)}" data-wh-name="${escapeHtml(w.name)}" onclick="restoreWarehouse(this.dataset.whId, this.dataset.whName)" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">↩️ Restore</button>`
+                : `<button class="secondary" data-wh-id="${escapeHtml(w.l)}" data-wh-name="${escapeHtml(w.name)}" onclick="confirmRemoveWarehouse(this.dataset.whId, this.dataset.whName)" style="padding:4px 10px; min-height:auto; font-size:0.78rem; color:var(--danger);">🗑️ Remove</button>`;
             return `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); ${removed ? 'opacity:0.55;' : ''}">
                 <span><strong>${escapeHtml(w.name)}</strong> <span style="color:var(--text-muted); font-size:0.85rem;">— ID ${escapeHtml(w.l)}${w.address ? ' · ' + escapeHtml(w.address) : ''}${removed ? ' · Removed' : ''}</span></span>
                 ${actionBtn}
@@ -3612,7 +3617,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const results = document.getElementById('batch-image-manual-results');
         if (!q) { results.innerHTML = ''; return; }
         const matches = globalInventory.filter(item => itemMatchesQuery(item, q)).slice(0, 8);
-        results.innerHTML = matches.map(item => `<div class="ai-list-item" onclick="pickBatchImageManualMatch('${escapeHtml(item.BTKnumber)}')">
+        results.innerHTML = matches.map(item => `<div class="ai-list-item" data-btk="${escapeHtml(item.BTKnumber)}" onclick="pickBatchImageManualMatch(this.dataset.btk)">
             <div class="ai-list-item-name">${escapeHtml(item['itemname(english)'] || item.BTKnumber)}</div>
             <div class="ai-list-item-meta">${escapeHtml(item.BTKnumber)}</div>
         </div>`).join('') || '<p style="color:var(--text-muted); font-size:0.85rem;">No matches.</p>';
@@ -3725,8 +3730,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             return `<div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);">
                 <img src="${thumbUrl}" alt="" style="width:48px; height:48px; object-fit:cover; border-radius:6px; flex-shrink:0;">
                 <div style="flex:1; min-width:0; font-size:0.85rem; word-break:break-all;">${escapeHtml(originalName)}</div>
-                <button class="secondary" onclick="openAssignUnassignedImageModal('${escapeHtml(base)}')" style="padding:4px 8px; min-height:auto; font-size:0.78rem; flex-shrink:0;">🔗 Assign</button>
-                <button class="secondary" onclick="deleteUnassignedImage('${escapeHtml(base)}')" style="padding:4px 8px; min-height:auto; font-size:0.78rem; color:var(--danger); flex-shrink:0;">🗑️</button>
+                <button class="secondary" data-base="${escapeHtml(base)}" onclick="openAssignUnassignedImageModal(this.dataset.base)" style="padding:4px 8px; min-height:auto; font-size:0.78rem; flex-shrink:0;">🔗 Assign</button>
+                <button class="secondary" data-base="${escapeHtml(base)}" onclick="deleteUnassignedImage(this.dataset.base)" style="padding:4px 8px; min-height:auto; font-size:0.78rem; color:var(--danger); flex-shrink:0;">🗑️</button>
             </div>`;
         }).join('');
     }
@@ -3754,7 +3759,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const results = document.getElementById('assign-unassigned-results');
         if (!q) { results.innerHTML = ''; return; }
         const matches = globalInventory.filter(item => itemMatchesQuery(item, q)).slice(0, 8);
-        results.innerHTML = matches.map(item => `<div class="ai-list-item" onclick="confirmAssignUnassignedImage('${escapeHtml(item.BTKnumber)}')">
+        results.innerHTML = matches.map(item => `<div class="ai-list-item" data-btk="${escapeHtml(item.BTKnumber)}" onclick="confirmAssignUnassignedImage(this.dataset.btk)">
             <div class="ai-list-item-name">${escapeHtml(item['itemname(english)'] || item.BTKnumber)}</div>
             <div class="ai-list-item-meta">${escapeHtml(item.BTKnumber)}</div>
         </div>`).join('') || '<p style="color:var(--text-muted); font-size:0.85rem;">No matches.</p>';
@@ -4284,6 +4289,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const res = Papa.parse(csvText, { header: true, skipEmptyLines: true });
         return normalizeItems(res.data);
     }
+    // A BTK ends up in the URL fragment of every QR label (#<id>/<warehouse>), in Storage file names
+    // and in HTML attributes, so it has to be a plain token: an editor importing a CSV whose BTK
+    // column held quotes, slashes or markup would otherwise plant text that breaks label routing and
+    // is rendered on every other user's screen. The app's own numbers are BTK######(W##); this only
+    // rules out characters that break a route or markup, not unusual-but-harmless spellings.
+    const SAFE_BTK_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+    function isSafeBtk(btk) { return SAFE_BTK_RE.test(String(btk == null ? '' : btk)); }
     function normalizeItems(rows) {
         return rows
             .filter(r => r && (r.BTKnumber && r.BTKnumber.trim() !== '' && r.BTKnumber !== 'None'))
@@ -4845,8 +4857,17 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // another, since it IS the same row; a possible duplicate additionally offers "these aren't
     // actually the same item" as an escape hatch.
     function finalizeCsvImportRows(filledRows, presentColumns, autoAssignedCount, matchedByPartNumberCount) {
-        const items = normalizeItems(filledRows);
-        if (!items.length) { showToast("No valid rows found.", "error"); return; }
+        const parsedItems = normalizeItems(filledRows);
+        if (!parsedItems.length) { showToast("No valid rows found.", "error"); return; }
+        // Rows whose BTK isn't a plain token (see isSafeBtk) are left out rather than imported, and
+        // said so — silently dropping them would look like the file simply had fewer rows.
+        const items = parsedItems.filter(i => isSafeBtk(i.BTKnumber));
+        const unsafeCount = parsedItems.length - items.length;
+        if (unsafeCount) {
+            const examples = parsedItems.filter(i => !isSafeBtk(i.BTKnumber)).slice(0, 3).map(i => `"${String(i.BTKnumber).slice(0, 30)}"`).join(', ');
+            showToast(`${unsafeCount} row(s) skipped: a BTK number may only contain letters, digits, dot, dash and underscore (e.g. ${examples}).`, "warning", 9000);
+        }
+        if (!items.length) { showToast("No importable rows left in that file.", "error"); return; }
         const { deduped, dupes } = dedupeByBTK(items);
 
         const existingByBTK = new Map(globalInventory.map(i => [i.BTKnumber, i]));
@@ -5427,10 +5448,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const meta = getWarehouseMeta(currentWarehouseId);
         document.getElementById('wh-meta-container').innerHTML =
             `<div class="wh-meta" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                <span>🏬 <strong${meta.mode === 'supabase' ? ` role="button" tabindex="0" style="cursor:pointer; text-decoration:underline;" onclick="openWarehouseView()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openWarehouseView();}"` : ''}>${meta.name}</strong> &nbsp;·&nbsp; ID ${meta.l} &nbsp;·&nbsp; ${meta.address || '—'}${meta.phone ? ` &nbsp;·&nbsp; ${meta.phone}` : ''}${meta.contactEmail ? ` &nbsp;·&nbsp; ${meta.contactEmail}` : ''}</span>
+                <span>🏬 <strong${meta.mode === 'supabase' ? ` role="button" tabindex="0" style="cursor:pointer; text-decoration:underline;" onclick="openWarehouseView()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openWarehouseView();}"` : ''}>${escapeHtml(meta.name)}</strong> &nbsp;·&nbsp; ID ${escapeHtml(meta.l)} &nbsp;·&nbsp; ${escapeHtml(meta.address || '—')}${meta.phone ? ` &nbsp;·&nbsp; ${escapeHtml(meta.phone)}` : ''}${meta.contactEmail ? ` &nbsp;·&nbsp; ${escapeHtml(meta.contactEmail)}` : ''}</span>
                 ${meta.mode === 'supabase' && currentUserRole === 'admin' ? `<button class="secondary" onclick="openWarehouseEditModal()" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">✏️ Edit Warehouse</button>` : ''}
                 <label for="warehouse-switcher" style="margin:0; font-size:0.85rem; color:var(--text-muted);">Switch:</label>
-                <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" style="width:auto; min-width:160px; margin:0; padding:6px 10px; font-size:0.85rem;">${visibleWarehouses().map(w => `<option value="${w.l}" ${w.l === currentWarehouseId ? 'selected' : ''}>${w.name}</option>`).join('')}</select>
+                <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" style="width:auto; min-width:160px; margin:0; padding:6px 10px; font-size:0.85rem;">${visibleWarehouses().map(w => `<option value="${escapeHtml(w.l)}" ${w.l === currentWarehouseId ? 'selected' : ''}>${escapeHtml(w.name)}</option>`).join('')}</select>
                 ${meta.mode === 'supabase' ? `<span style="font-size:0.8rem; color:var(--text-muted);">🔐 Signed in as <strong>${currentUserRole || '?'}</strong></span>` : ''}
             </div>`;
 
@@ -5592,11 +5613,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 return `<div style="margin-left:auto; padding-left:10px; flex-shrink:0; text-align:right; font-size:1.1rem; ${qtyNum === 0 ? 'font-style:italic;color:var(--text-muted);' : 'font-weight:800;color:var(--text-main);'}" title="Stock quantity">${qtyNum}</div>`;
             })() : '';
             div.innerHTML = `
-                <div class="select-circle" role="checkbox" aria-checked="${isChecked}" data-id="${id}" aria-label="Select for label" tabindex="0"></div>
+                <div class="select-circle" role="checkbox" aria-checked="${isChecked}" data-id="${escapeHtml(id)}" aria-label="Select for label" tabindex="0"></div>
                 <div class="item-info">
                     <div class="item-title" style="font-size:1.05rem;font-weight:800;">${escapeHtml(item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed')} ${lowStockBadge}</div>
                     ${rNums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${escapeHtml(rNums)}</div>` : ''}
-                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${rMfr ? escapeHtml(rMfr) + ' ' : ''}${id}</div>
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${rMfr ? escapeHtml(rMfr) + ' ' : ''}${escapeHtml(id)}</div>
                 </div>
                 ${qtyHtml}`;
             div.onclick = () => openItem(id, { type: 'global' });
@@ -5669,8 +5690,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             div.setAttribute('role', 'button'); div.tabIndex = 0;
             div.innerHTML = `
                 <div class="kit-info">
-                    <div class="kit-name">${kit.name || 'Unnamed Kit'}</div>
-                    <div class="kit-sub">${kit.kitnumber && kit.kitnumber !== 'None' ? 'Kit #' + kit.kitnumber + ' · ' : ''}${count} item(s)</div>
+                    <div class="kit-name">${escapeHtml(kit.name || 'Unnamed Kit')}</div>
+                    <div class="kit-sub">${kit.kitnumber && kit.kitnumber !== 'None' ? 'Kit #' + escapeHtml(kit.kitnumber) + ' · ' : ''}${count} item(s)</div>
                 </div>
                 <span class="kit-qty-badge">${count}</span>`;
             div.onclick = () => showKitDetail(kit.kitnumber, kit.name);
@@ -5709,7 +5730,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('kit-detail-name').innerText = kit.name || 'Unnamed Kit';
         const count = Object.keys(kit.items || {}).length;
         document.getElementById('kit-detail-sub').innerHTML =
-            `🧰 Kit #<strong>${kit.kitnumber}</strong> &nbsp;·&nbsp; <span class="kit-detail-count">${count}</span> distinct item(s)`;
+            `🧰 Kit #<strong>${escapeHtml(kit.kitnumber)}</strong> &nbsp;·&nbsp; <span class="kit-detail-count">${count}</span> distinct item(s)`;
 
         const container = document.getElementById('kit-detail-items');
         container.innerHTML = '';
@@ -5753,12 +5774,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                     <button class="secondary" data-role="inc" aria-label="Increase pack quantity">+</button>
                 </div>` : '';
             div.innerHTML = `
-                <div class="select-circle" role="checkbox" aria-checked="${isSelected}" data-id="${btk}" aria-label="Select for pack order" tabindex="0"></div>
+                <div class="select-circle" role="checkbox" aria-checked="${isSelected}" data-id="${escapeHtml(btk)}" aria-label="Select for pack order" tabindex="0"></div>
                 ${stepperHtml}
                 <div class="kit-info">
                     <div class="item-title" style="font-size:1.05rem;font-weight:800;">${escapeHtml(kName)}</div>
                     ${kNums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${escapeHtml(kNums)}</div>` : ''}
-                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${kMfr ? escapeHtml(kMfr) + ' ' : ''}${btk}</div>
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${kMfr ? escapeHtml(kMfr) + ' ' : ''}${escapeHtml(btk)}</div>
                 </div>
                 <span class="kit-qty-badge">×${qty}</span>`;
             div.onclick = () => openItem(btk, { type: 'kit', kitnumber: kit.kitnumber, kitName: kit.name, items: btks });
@@ -5943,11 +5964,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             div.className = 'kit-row';
             div.setAttribute('role', 'button'); div.tabIndex = 0;
             div.innerHTML = `
-                <div class="select-circle" role="checkbox" aria-checked="${selectedItems.has(btk)}" data-id="${btk}" aria-label="Select for pack order" tabindex="0"></div>
+                <div class="select-circle" role="checkbox" aria-checked="${selectedItems.has(btk)}" data-id="${escapeHtml(btk)}" aria-label="Select for pack order" tabindex="0"></div>
                 <div class="kit-info">
                     <div class="item-title" style="font-size:1.05rem;font-weight:800;">${escapeHtml(item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed')}</div>
                     <div class="item-sub" style="font-weight:700;color:var(--text-main);">${escapeHtml(nums)}</div>
-                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${btk}</div>
+                    <div class="item-sub" style="font-size:0.8rem;color:var(--text-muted);">${escapeHtml(btk)}</div>
                 </div>`;
             div.onclick = () => openItem(btk, { type: 'global' });
             div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); div.click(); } };
@@ -6330,7 +6351,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 </div>
             </div>
             <div style="margin-top:0.75rem; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                <button class="secondary" onclick="focusDimPanel('${escapeHtml(z.zone)}')" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.82rem;">📏 Rack, shelf &amp; bin dimensions…</button>
+                <button class="secondary" data-zone="${escapeHtml(z.zone)}" onclick="focusDimPanel(this.dataset.zone)" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.82rem;">📏 Rack, shelf &amp; bin dimensions…</button>
                 <span style="color:var(--text-muted); font-size:0.8rem;">${escapeHtml(dimShortSummary(z))}</span>
             </div>`;
         renderDimPanel(true);
@@ -6371,7 +6392,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Depth <input type="number" data-field="max_rack" min="1" value="${z.max_rack || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_rack', this.value)"></label>
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Levels <input type="number" data-field="max_level" min="1" value="${z.max_level || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_level', this.value)"></label>
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Bins <input type="number" data-field="max_bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_bin', this.value)"></label>
-                <button class="secondary" onclick="focusDimPanel('${escapeHtml(z.zone)}')" title="Rack, shelf and bin dimensions${dimShortSummary(z) !== 'no dimensions recorded yet' ? ' — ' + escapeHtml(dimShortSummary(z)) : ''}" style="padding:0.35rem 0.6rem; min-height:auto;">📏</button>
+                <button class="secondary" data-zone="${escapeHtml(z.zone)}" onclick="focusDimPanel(this.dataset.zone)" title="Rack, shelf and bin dimensions${dimShortSummary(z) !== 'no dimensions recorded yet' ? ' — ' + escapeHtml(dimShortSummary(z)) : ''}" style="padding:0.35rem 0.6rem; min-height:auto;">📏</button>
                 ${readOnly ? '' : `<button class="secondary" onclick="removeManualZoneRow(${idx})" style="color:var(--danger); padding:0.35rem 0.6rem; min-height:auto;">✕</button>`}
             </div>`).join('') || `<p style="color:var(--text-muted); font-size:0.85rem;">No zones defined yet.</p>`;
         renderDimPanel(true);
@@ -6674,7 +6695,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!globalRackImages.length) { gallery.innerHTML = `<p style="color:var(--text-muted); font-size:0.85rem;">No photos uploaded yet.</p>`; return; }
         gallery.innerHTML = globalRackImages.map(img => `
             <div class="rack-image-card">
-                <img src="${img.image_url}" alt="Zone ${escapeHtml(img.zone)} Aisle ${img.aisle} Rack ${img.rack}" onclick="openLightbox('${img.image_url}')" style="cursor:pointer;">
+                <img src="${escapeHtml(img.image_url)}" alt="Zone ${escapeHtml(img.zone)} Aisle ${img.aisle} Rack ${img.rack}" onclick="openLightbox(this.src)" style="cursor:pointer;">
                 <div class="rack-image-label">Zone ${escapeHtml(img.zone)} · Aisle ${img.aisle} · Rack ${img.rack}${img.grid_overlay ? ' · <span title="Straightened">📐</span>' : ''}</div>
                 ${currentUserRole !== 'viewer' ? `
                 <button class="rack-image-straighten" onclick="openRackWarpEditor(${img.id})" title="Straighten photo" aria-label="Straighten photo">📐</button>
@@ -8138,7 +8159,7 @@ th { background: #eee; }
             return `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">${label}:</span><span><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" style="word-break:break-all;">🔗 ${escapeHtml(trimmed)}</a></span></div>`;
         };
         document.getElementById('detail-content').innerHTML = `
-            <div style="margin-bottom:14px;font-size:1rem;color:var(--text-muted);"><strong style="color:var(--text-main);">${dMfr ? escapeHtml(dMfr) + ' · ' : ''}</strong><span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${id}</span></div>
+            <div style="margin-bottom:14px;font-size:1rem;color:var(--text-muted);"><strong style="color:var(--text-main);">${dMfr ? escapeHtml(dMfr) + ' · ' : ''}</strong><span style="font-family:monospace;background:var(--border);padding:2px 6px;border-radius:6px;letter-spacing:0.5px;">${escapeHtml(id)}</span></div>
             ${field('Item Name (English)', item['itemname(english)'])}
             ${field('Item Name (Swedish)', item['itemname(swedish)'])}
             ${fieldLink('Item #1', 'itemnumber', item.itemnumber)}
@@ -10307,6 +10328,10 @@ th { background: #eee; }
         const btk = document.getElementById('ai-btknumber').value.trim();
         const nameEn = document.getElementById('ai-name-en').value.trim();
         if (!btk || !nameEn) { showToast("BTK Number and English Name are required.", "error"); return; }
+        // A rename keeps working for whatever an item already has; only a number being newly chosen is checked.
+        if (!(modalMode === 'edit' && btk === editTargetBTK) && !isSafeBtk(btk)) {
+            showToast("A BTK number may only contain letters, digits, dot, dash and underscore.", "error"); return;
+        }
 
         const existingImages = (modalMode === 'edit' && editTargetBTK)
             ? (globalInventory.find(i => i.BTKnumber === editTargetBTK) || {}).images || ''
@@ -10484,11 +10509,14 @@ th { background: #eee; }
             const name = item['itemname(english)'] || item['itemname(swedish)'] || 'Unknown';
             const mfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
 
+            // Escaped: this same markup is later written verbatim into the print window, and a part
+            // name like "Bolt <30mm" or "R&D" was otherwise parsed as HTML (dropped or garbled on the
+            // printed label, and a way to run script from a crafted name).
             textDiv.innerHTML = `
-                ${nums ? `<div class="l-nums">${nums}</div>` : ''}
-                <div class="l-name">${name}</div>
-                ${mfr ? `<div class="l-mfr">${mfr}</div>` : ''}
-                <div class="l-btk">${item.BTKnumber || id}</div>`;
+                ${nums ? `<div class="l-nums">${escapeHtml(nums)}</div>` : ''}
+                <div class="l-name">${escapeHtml(name)}</div>
+                ${mfr ? `<div class="l-mfr">${escapeHtml(mfr)}</div>` : ''}
+                <div class="l-btk">${escapeHtml(item.BTKnumber || id)}</div>`;
 
             labelEl.appendChild(qrDiv);
             labelEl.appendChild(textDiv);
@@ -10542,12 +10570,15 @@ th { background: #eee; }
             // Warehouse key setup URL: #<WAREHOUSE_ID>/KEY/<PASSPHRASE>
             const keys = getKeyVault();
             const pass = keys[w.l] || DEMO_PASSPHRASE;
-            const targetUrl = `${BASE_URL}#${w.l}/KEY/${pass}`.toLowerCase();
+            // Only the base/path/tag is lowercased (denser QR) — the passphrase is case-sensitive, so
+            // lowercasing it too made a label for any warehouse whose key has an uppercase letter
+            // unlock nothing.
+            const targetUrl = `${BASE_URL}#${w.l}/KEY/`.toLowerCase() + pass;
 
             textDiv.innerHTML = `
-                <div class="l-nums">${w.name}</div>
-                <div class="l-name">Warehouse ${w.l}</div>
-                <div class="l-btk">${w.address}</div>`;
+                <div class="l-nums">${escapeHtml(w.name)}</div>
+                <div class="l-name">Warehouse ${escapeHtml(w.l)}</div>
+                <div class="l-btk">${escapeHtml(w.address)}</div>`;
 
             labelEl.appendChild(qrDiv);
             labelEl.appendChild(textDiv);
@@ -11554,7 +11585,7 @@ Respond with ONLY the JSON object, nothing else.`;
     // Shared by all three "show several items" handlers above — entries: [{btk, name, meta}].
     function aiRenderItemListMessage(headerText, entries) {
         const shown = entries.slice(0, AI_LIST_ITEMS_LIMIT);
-        const rows = shown.map(e => `<div class="ai-list-item" onclick="aiOpenListedItem('${escapeHtml(e.btk)}')">
+        const rows = shown.map(e => `<div class="ai-list-item" data-btk="${escapeHtml(e.btk)}" onclick="aiOpenListedItem(this.dataset.btk)">
             <div class="ai-list-item-name">${escapeHtml(e.name)}</div>
             <div class="ai-list-item-meta">${escapeHtml(e.meta || '')}</div>
         </div>`).join('');
