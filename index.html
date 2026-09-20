@@ -2823,10 +2823,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                         <div style="font-weight:600; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(u.email || u.id)}</div>
                         <div style="font-size:0.8rem; color:var(--text-muted);">Home warehouse: ${escapeHtml(u.warehouse_id || '—')}</div>
                     </div>
-                    <select onchange="changeUserRole('${u.id}', this.value)" style="width:auto; margin:0;">
+                    <select onchange="changeUserRole('${u.id}', this.value)" style="width:auto; margin:0;" title="Global role. 'Maintainer' is granted per warehouse (below), not globally.">
                         <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>Viewer</option>
                         <option value="editor" ${u.role === 'editor' ? 'selected' : ''}>Editor</option>
-                        <option value="maintainer" ${u.role === 'maintainer' ? 'selected' : ''}>Maintainer</option>
+                        ${u.role === 'maintainer' ? '<option value="maintainer" selected>Maintainer (per-warehouse role — has no effect as a global role)</option>' : ''}
                         <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
                     </select>
                 </div>
@@ -3240,7 +3240,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         } catch (e) {
             console.error("Could not load warehouse permissions:", e);
         }
-        return profile.warehouse_id === wid ? profile.role : 'viewer';
+        // 'maintainer' exists only as a per-warehouse GRANT: no policy recognises it as a profile role
+        // (they list editor/admin), so as a global role it can do nothing in the home warehouse — yet it
+        // used to resolve here as-is, which showed edit controls whose saves the database then refused.
+        const homeRole = profile.role === 'maintainer' ? 'viewer' : profile.role;
+        return profile.warehouse_id === wid ? homeRole : 'viewer';
     }
 
     // Warehouse name/address/phone/contact email for Supabase-mode warehouses are DB-driven (the

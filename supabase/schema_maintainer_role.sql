@@ -18,7 +18,8 @@
 -- Scope: only items.* RLS is extended to honor warehouse_permissions here. Other tables (orders,
 -- kits, manufacturers, warehouse_zones, warehouse_rack_images) still use only the existing
 -- profiles.role/profiles.warehouse_id model — extend those the same way later if per-warehouse
--- grants should reach them too.
+-- grants should reach them too. (Done: see schema_grant_aware_policies.sql, which adds the matching
+-- additive policies for all of those plus the rack-images/manufacturer-logos Storage buckets.)
 --
 -- Run once in the Supabase SQL Editor, after schema_admin_cross_warehouse_items.sql.
 
