@@ -4,7 +4,7 @@ Standalone JS building blocks for functionality discussed for the app. Most of t
 imported by `index.html` yet — nothing changes until a module is deliberately wired in — except
 **`perspective-warp.js`**, **`groq-client.js`**, **`cors-proxy.js`**, **`web-search.js`**,
 **`order-parser.js`**, **`contacts.js`**, **`email-sender.js`**, **`delivery-note-parser.js`**,
-**`visma-import.js`**, **`iso-rack.js`**, and **`json-extract.js`**, which are (via the
+**`visma-import.js`**, **`iso-rack.js`**, **`json-extract.js`**, and **`label-fit.js`**, which are (via the
 `<script type="module">` bridge near the end of `index.html`, since the rest of the app is one
 classic script) — the first four back the 🤖 AI Assistant chat bubble, `order-parser.js` backs its
 natural-language Pack Order action, `contacts.js` backs the Saved Recipients picker,
@@ -245,6 +245,24 @@ node --test modules/tests/*.test.js
   keeps the piece only if it parses. `extractJsonObjects()` returns the top-level objects in order;
   `lastJsonObject(text, accept)` picks the last one satisfying a predicate — the final answer, when a
   model quotes a draft or thinks aloud first. Tested in `tests/json-extract.test.js`.
+- **`label-fit.js`** — **wired in**, as the text layout of the printed/exported QR labels (item and
+  warehouse). `fitLabelText(blocks, {width, height, measure, maxScale})` lays a label's fields
+  (`nums` / `name` / `mfr` / `btk`, each with a base size, a floor, a weight and letter-spacing that
+  mirror the `.l-*` label CSS) into the box beside the QR code and returns, per field, the size in pt
+  and the lines. Pure and dependency-injected — the caller supplies the box (px) and a
+  `measure(text, {px, weight, letterSpacing})` ruler (index.html uses a canvas set to the label's own
+  font), so it is tested with a fake one. Words wrap on spaces (`balancedWrap`: the narrowest width
+  that needs no more lines than a greedy fill, so lines come out even rather than a long line plus a
+  stub); item numbers wrap *between* the numbers via `parts` + `joiner`; the BTK line never wraps.
+  Sizes step down from `maxScale` (the user's Text-size slider — a ceiling, never exceeded) in 2%
+  steps and the largest that fits wins. Only when everything is at its floor is an over-wide token
+  broken (`breakToken`: after `- / _ . , : ;` if that leaves a reasonably full line, else between
+  characters, no hyphen inserted — these are identifiers), and only then are trailing name lines
+  dropped with `…` (`truncated: true`); nothing else is ever lost. It measures with 3% slack because
+  the canvas ruler and the browser/print layout can differ slightly. Tested in
+  `tests/label-fit.test.js` (wrapping on spaces, balance, the ceiling, monotonic shrink, separators,
+  truncation, and a 300-round randomized check that a non-truncated result always fits and keeps every
+  word in order).
 - **`img-square.js`** — pads an image to a square, filling the new space with a solid color or a
   color sampled from the image's own edges. Ported from `github.com/nomsams/imgsquare`. Intended
   to slot into the existing item-photo/manufacturer-logo canvas editor as an extra step.

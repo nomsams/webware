@@ -245,6 +245,13 @@ The Layout Designer edits `warehouse_zones` — admin-only to draw or save, visi
 3. In preview, click **🖨️ Print** to print directly, or **💾 HTML Export** to save
 4. Labels are formatted for Brother QL 29mm × 90mm — set printer margins to **None**
 
+**Text is fitted to the label, not the other way round.** The text sits to the right of the QR code, right-aligned. It used to be one unwrapped line per field, so a long name ran off the *left* edge, under the QR code, and the start of the name was lost. Now each label's text is laid out to fit the real space beside the QR code (`modules/label-fit.js`, measured with the same font the label uses):
+- A long **name wraps on spaces** — never in the middle of a word — into evenly filled lines, not one long line and a stub. The **item-number line** wraps between the numbers (`794.021C · 784501A` becomes two lines, never a dangling `·`), and the manufacturer wraps the same way.
+- If it still won't fit, **all the type shrinks together**, in small steps, until it does — so the largest size that fits is used. Each line has its own floor (item numbers 8 pt, name 6 pt, manufacturer 5.5 pt, BTK 5 pt) so it stays legible on a small label.
+- The **Text size** slider is the *maximum*: a short label uses the size you picked, only labels that need it shrink, and nothing ever exceeds it.
+- Only when a single word is wider than the whole box at the smallest size (an unbroken 50-character part code) is it split — after a `-`, `/`, `_` or `.` where possible, otherwise between characters — and no character is ever dropped. If there is still too much text for the label's height, the trailing lines of the name are cut with an ellipsis (`…`); the item numbers and the BTK are always kept.
+- It adapts to the paper format and the left/right margins (the wide 68 mm format leaves less room beside the QR code, so it wraps and shrinks sooner), and the same fitted text is what **Print** and **HTML Export** use. Warehouse labels get the same treatment (name, "Warehouse n", and a wrapping address).
+
 ## Features
 
 - **End-to-end encryption** — AES-256-GCM envelope encryption with PBKDF2-wrapped keys

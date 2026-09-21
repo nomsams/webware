@@ -326,7 +326,10 @@
         .label-qr { width: calc(var(--label-h) - 3mm); height: calc(var(--label-h) - 3mm); flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: white; align-self: center; margin-right: 4mm; }
         .label-qr img, .label-qr canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
         .label-text { flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-start; align-items: flex-end; overflow: hidden; height: 100%; text-align: right; min-width: 0; }
-        .label-text div { line-height: 1.2; font-family: Arial, Helvetica, sans-serif !important; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* max-width: a line can never be wider than the box (the text is right-aligned, so an over-wide line
+           used to spill LEFT under the QR code and lose the start of the name). label-fit.js sizes and wraps
+           the text so nothing reaches this limit; it is only the safety net if a font measures differently. */
+        .label-text div { line-height: 1.2; font-family: Arial, Helvetica, sans-serif !important; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
         .l-nums { font-size: calc(14pt * var(--fs)); font-weight: 900; color: #000; letter-spacing: -0.3px; margin-top: 0.5mm; }
         .l-name { font-size: calc(11pt * var(--fs)); font-weight: 700; color: #000; margin-top: 1.5mm; }
         .l-mfr  { font-size: calc(8pt * var(--fs)); color: #333; font-weight: 600; margin-top: 0.5mm; }
@@ -10755,8 +10758,8 @@ th { background: #eee; }
         const hint = document.getElementById('label-format-hint');
         if (hint) {
             hint.innerHTML = labelPaperType === 'wide68'
-                ? `ℹ️ Format: <strong>68mm × ${labelWide68Height}mm (custom)</strong>. Set printer margins to <strong>None</strong>. QR encodes an ID-only fragment link (no key). Adjust paper/margins/text size above — preview matches print exactly.`
-                : `ℹ️ Format: <strong>Brother QL 29mm × 90mm</strong>. Set printer margins to <strong>None</strong>. QR encodes an ID-only fragment link (no key). Adjust paper/margins/text size above — preview matches print exactly.`;
+                ? `ℹ️ Format: <strong>68mm × ${labelWide68Height}mm (custom)</strong>. Set printer margins to <strong>None</strong>. QR encodes an ID-only fragment link (no key). Adjust paper/margins/text size above — preview matches print exactly. Long names wrap on spaces and the text shrinks to fit beside the QR code; <em>Text size</em> sets the largest size it may use.`
+                : `ℹ️ Format: <strong>Brother QL 29mm × 90mm</strong>. Set printer margins to <strong>None</strong>. QR encodes an ID-only fragment link (no key). Adjust paper/margins/text size above — preview matches print exactly. Long names wrap on spaces and the text shrinks to fit beside the QR code; <em>Text size</em> sets the largest size it may use.`;
         }
     }
 
@@ -10768,6 +10771,42 @@ th { background: #eee; }
     function stepWide68Height(delta) {
         labelWide68Height = Math.max(10, Math.min(150, labelWide68Height + delta));
         applyLabelSettings();
+    }
+
+    // ── Label text fitting (modules/label-fit.js) ───────────────────────────────────────────────────
+    // Measures text the way the label CSS will draw it (Arial, the block's weight and letter-spacing), so
+    // the wrapping decided here holds in the print window and the HTML export too.
+    var labelMeasureCtx = null;
+    function labelMeasure(text, { px, weight, letterSpacing }) {
+        if (!labelMeasureCtx) labelMeasureCtx = document.createElement('canvas').getContext('2d');
+        labelMeasureCtx.font = `${weight} ${px}px Arial, Helvetica, sans-serif`;
+        return labelMeasureCtx.measureText(text).width + letterSpacing * text.length;
+    }
+    // The room beside the QR code, in CSS px: read from the laid-out .label-text when it is on screen (so it
+    // always agrees with the CSS), else worked out from the paper size and margins.
+    function labelTextBox(textDiv) {
+        const w = textDiv.clientWidth, h = textDiv.clientHeight;
+        if (w > 0 && h > 0) return { width: w, height: h };
+        const dims = getLabelDims(), mm = 96 / 25.4;
+        return { width: (dims.w - labelPadLeft - labelPadRight - (dims.h - 3) - 4) * mm, height: (dims.h - 3) * mm };
+    }
+    // blocks: [{ key: 'nums'|'name'|'mfr'|'btk', text | parts+joiner, wrap? }], top to bottom. Long text wraps on
+    // spaces and the type shrinks (never above the Text size slider) until it fits; see label-fit.js. The
+    // chosen size goes inline on each block, so the print window's copy of this markup keeps it.
+    // Escaped: this same markup is later written verbatim into the print window, and a part name like
+    // "Bolt <30mm" or "R&D" was otherwise parsed as HTML.
+    function renderLabelText(textDiv, blocks, box) {
+        const fitted = typeof window.fitLabelText === 'function'
+            ? window.fitLabelText(blocks, { ...box, measure: labelMeasure, maxScale: labelFontScale })
+            : null;
+        if (!fitted) { // module not loaded — the original one-line-per-field markup
+            textDiv.innerHTML = blocks
+                .filter(b => (b.parts ? b.parts.length : b.text))
+                .map(b => `<div class="l-${b.key}">${escapeHtml(b.parts ? b.parts.join(b.joiner || ' · ') : b.text)}</div>`).join('');
+            return;
+        }
+        textDiv.innerHTML = fitted.blocks
+            .map(b => `<div class="l-${b.key}" style="font-size:${b.pt}pt">${b.lines.map(l => escapeHtml(l)).join('<br>')}</div>`).join('');
     }
 
     function generateLabelsPreview(silent) {
@@ -10787,6 +10826,7 @@ th { background: #eee; }
         container.innerHTML = '';
         urlList.innerHTML = '';
         let errorCount = 0;
+        let labelBox = null; // every label on one sheet has the same room for text — measured once
 
         Array.from(selectedItems).forEach(id => {
             const item = globalInventory.find(i => i.BTKnumber === id);
@@ -10802,18 +10842,15 @@ th { background: #eee; }
 
             const num1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
             const num2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
-            const nums = [num1, num2].filter(Boolean).join(' · ');
             const name = item['itemname(english)'] || item['itemname(swedish)'] || 'Unknown';
             const mfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
-
-            // Escaped: this same markup is later written verbatim into the print window, and a part
-            // name like "Bolt <30mm" or "R&D" was otherwise parsed as HTML (dropped or garbled on the
-            // printed label, and a way to run script from a crafted name).
-            textDiv.innerHTML = `
-                ${nums ? `<div class="l-nums">${escapeHtml(nums)}</div>` : ''}
-                <div class="l-name">${escapeHtml(name)}</div>
-                ${mfr ? `<div class="l-mfr">${escapeHtml(mfr)}</div>` : ''}
-                <div class="l-btk">${escapeHtml(item.BTKnumber || id)}</div>`;
+            // The item numbers stay separate so a long pair wraps BETWEEN them; the name wraps on spaces.
+            const textBlocks = [
+                { key: 'nums', parts: [num1, num2].filter(Boolean), joiner: ' · ' },
+                { key: 'name', text: name },
+                { key: 'mfr', text: mfr },
+                { key: 'btk', text: item.BTKnumber || id },
+            ];
 
             labelEl.appendChild(qrDiv);
             labelEl.appendChild(textDiv);
@@ -10829,6 +10866,9 @@ th { background: #eee; }
             }
 
             container.appendChild(labelEl);
+            // Only now, in the page, is the real box beside the QR code known.
+            if (!labelBox) labelBox = labelTextBox(textDiv);
+            renderLabelText(textDiv, textBlocks, labelBox);
 
             // URL shown in a separate reference panel below the grid — never inside the printable
             // area, so it can never end up on a physical label regardless of paper format.
@@ -10854,6 +10894,7 @@ th { background: #eee; }
         container.innerHTML = '';
         urlList.innerHTML = '';
         let errorCount = 0;
+        let labelBox = null;
 
         visibleWarehouses().forEach(w => {
             const labelEl = document.createElement('div');
@@ -10872,10 +10913,12 @@ th { background: #eee; }
             // unlock nothing.
             const targetUrl = `${BASE_URL}#${w.l}/KEY/`.toLowerCase() + pass;
 
-            textDiv.innerHTML = `
-                <div class="l-nums">${escapeHtml(w.name)}</div>
-                <div class="l-name">Warehouse ${escapeHtml(w.l)}</div>
-                <div class="l-btk">${escapeHtml(w.address)}</div>`;
+            // The address rides on the small BTK style but is allowed to wrap, like the name.
+            const textBlocks = [
+                { key: 'nums', text: w.name || '' },
+                { key: 'name', text: `Warehouse ${w.l}` },
+                { key: 'btk', text: w.address || '', wrap: true },
+            ];
 
             labelEl.appendChild(qrDiv);
             labelEl.appendChild(textDiv);
@@ -10889,6 +10932,8 @@ th { background: #eee; }
             }
 
             container.appendChild(labelEl);
+            if (!labelBox) labelBox = labelTextBox(textDiv);
+            renderLabelText(textDiv, textBlocks, labelBox);
 
             const urlDiv = document.createElement('div');
             urlDiv.className = 'label-url';
@@ -10938,7 +10983,7 @@ th { background: #eee; }
 .label-qr{width:calc(var(--label-h) - 3mm);height:calc(var(--label-h) - 3mm);flex-shrink:0;display:flex;align-items:center;justify-content:center;align-self:center;margin-right:4mm}
 .label-qr img,.label-qr canvas{max-width:100%;max-height:100%;object-fit:contain;display:block!important}
 .label-text{flex-grow:1;display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-end;overflow:hidden;height:100%;text-align:right;min-width:0}
-.label-text div{line-height:1.2;font-family:Arial,Helvetica,sans-serif!important;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.label-text div{line-height:1.2;font-family:Arial,Helvetica,sans-serif!important;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .l-nums{font-size:calc(14pt * var(--fs));font-weight:900;color:#000;letter-spacing:-0.3px;margin-top:0.5mm}
 .l-name{font-size:calc(11pt * var(--fs));font-weight:700;color:#000;margin-top:1.5mm}
 .l-mfr{font-size:calc(8pt * var(--fs));color:#333;font-weight:600;margin-top:0.5mm}
@@ -12475,6 +12520,8 @@ Respond with ONLY the JSON object, nothing else.`;
     import { resolveRackGeometry, buildIsoRackSVG, buildIsoFloorSVG } from './modules/iso-rack.js';
     import { extractJsonObjects } from './modules/json-extract.js';
     window.extractJsonObjects = extractJsonObjects; // the AI assistant reads its reply's action with it
+    import { fitLabelText } from './modules/label-fit.js';
+    window.fitLabelText = fitLabelText; // label printing: wraps on spaces and shrinks text to fit beside the QR code
     window.resolveRackGeometry = resolveRackGeometry;
     window.buildIsoRackSVG = buildIsoRackSVG;
     window.buildIsoFloorSVG = buildIsoFloorSVG;
