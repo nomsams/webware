@@ -112,7 +112,7 @@ create policy p_items_warehouse_permission_delete on public.items for delete to 
 -- first — same shape (and same "p." table alias to avoid the RETURNS TABLE column-name collision
 -- that bit list_profiles_with_email() before) as update_user_role() in schema_user_management.sql.
 create or replace function public.set_warehouse_permission(p_user_id uuid, p_warehouse_id text, p_role text)
-returns void language plpgsql security definer as $$
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   if (select p.role from public.profiles p where p.id = auth.uid()) != 'admin' then
     raise exception 'not authorized';
@@ -127,7 +127,7 @@ end; $$;
 grant execute on function public.set_warehouse_permission to authenticated;
 
 create or replace function public.revoke_warehouse_permission(p_user_id uuid, p_warehouse_id text)
-returns void language plpgsql security definer as $$
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   if (select p.role from public.profiles p where p.id = auth.uid()) != 'admin' then
     raise exception 'not authorized';
@@ -141,15 +141,15 @@ grant execute on function public.revoke_warehouse_permission to authenticated;
 -- Without that split this would leak every user's email + every grant to every signed-in account.
 create or replace function public.list_warehouse_permissions()
 returns table(user_id uuid, email text, warehouse_id text, role text)
-language plpgsql security definer as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   if (select p.role from public.profiles p where p.id = auth.uid()) = 'admin' then
     return query
-      select wp.user_id, u.email, wp.warehouse_id, wp.role
+      select wp.user_id, u.email::text, wp.warehouse_id, wp.role
       from public.warehouse_permissions wp join auth.users u on u.id = wp.user_id;
   else
     return query
-      select wp.user_id, u.email, wp.warehouse_id, wp.role
+      select wp.user_id, u.email::text, wp.warehouse_id, wp.role
       from public.warehouse_permissions wp join auth.users u on u.id = wp.user_id
       where wp.user_id = auth.uid();
   end if;

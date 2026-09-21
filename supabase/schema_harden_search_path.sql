@@ -11,8 +11,14 @@
 -- adjust_item_stock() is NOT listed here on purpose — it's deliberately not SECURITY DEFINER (runs
 -- as the caller, so normal items RLS still applies), so it has nothing to pin.
 --
+-- CREATE OR REPLACE FUNCTION resets a function's settings, so a migration that recreates one of these
+-- has to pin it again itself (schema_maintainer_role.sql and schema_fix_email_type_mismatch.sql now do);
+-- re-running this file is always safe and puts every pin back. set_updated_meta() (the trigger that stamps
+-- updated_at/updated_by) was missing from the first version of this list.
+--
 -- Run once in the Supabase SQL Editor, after every migration that defines these functions.
 
+alter function public.set_updated_meta() set search_path = public, pg_temp;
 alter function public.has_llm_api_key() set search_path = public, pg_temp;
 alter function public.count_llm_api_keys() set search_path = public, pg_temp;
 alter function public.list_llm_api_keys() set search_path = public, pg_temp;

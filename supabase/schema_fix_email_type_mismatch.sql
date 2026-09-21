@@ -11,11 +11,15 @@
 -- column declared `text`; this just adds an explicit `u.email::text` cast at each site — same
 -- query, same result, now actually assignable to the declared return type.
 --
+-- Both functions are recreated here, and CREATE OR REPLACE resets any per-function setting, so they carry the
+-- `set search_path` pin from schema_harden_search_path.sql themselves (an earlier version of this file did
+-- not, and silently undid that pin for these two).
+--
 -- Run once in the Supabase SQL Editor, after schema_maintainer_role.sql.
 
 create or replace function public.list_profiles_with_email()
 returns table(id uuid, email text, role text, warehouse_id text)
-language plpgsql security definer as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   if (select p.role from public.profiles p where p.id = auth.uid()) != 'admin' then
     raise exception 'not authorized';
@@ -30,7 +34,7 @@ grant execute on function public.list_profiles_with_email to authenticated;
 
 create or replace function public.list_warehouse_permissions()
 returns table(user_id uuid, email text, warehouse_id text, role text)
-language plpgsql security definer as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   if (select p.role from public.profiles p where p.id = auth.uid()) = 'admin' then
     return query

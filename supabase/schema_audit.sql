@@ -8,15 +8,11 @@
 -- Run it, then apply whichever migration files show "MISSING" below, in order (oldest # first —
 -- a later one can depend on an earlier table/column existing).
 --
--- Three migrations aren't included below because they don't add a new checkable object (they alter
--- an existing constraint's definition instead): #12 schema_location_code_v2.sql (tightens
--- items_location_code_format), #16 schema_bin_row.sql (loosens the same constraint to accept
--- an optional -Row suffix) and #39 schema_bin_code_format.sql (replaces the notation with the
--- warehouse's own "A 3-3 1-1"). Check those separately, after everything else here says "applied":
---   select conname, pg_get_constraintdef(oid) from pg_constraint
---   where conrelid = 'public.items'::regclass and contype = 'c';
--- Should read: location_code IS NULL OR location_code ~ '^[A-Z]{1,2} [0-9]{1,2}-[0-9]{1,2} [0-9]{1,2}-[0-9]{1,2}$'
--- once all three have run (the two older ones each leave a different, older pattern behind).
+-- A few numbers are missing from the list on purpose, because they leave nothing separate to look for:
+-- #12 (schema_location_code_v2.sql) and #16 (schema_bin_row.sql) each rewrote the items_location_code_format
+-- constraint and #39 (schema_bin_code_format.sql) replaced it again, so #39's row answers for all three — if
+-- it says "applied", the constraint is the current "A 3-3 1-1" pattern. #26 is superseded by #29 (same policy
+-- rewritten) and #32 only changed function bodies.
 
 select
   t.n as "#",
@@ -80,5 +76,59 @@ from (
   union all
   select 22, 'schema_orders_status.sql', 'orders.status column',
     exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'orders' and column_name = 'status')
+  union all
+  select 23, 'schema_llm_assistant.sql', 'llm_api_keys table',
+    exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'llm_api_keys')
+  union all
+  select 24, 'schema_llm_assistant_key_list.sql', 'list_llm_api_keys() function',
+    exists (select 1 from information_schema.routines where routine_schema = 'public' and routine_name = 'list_llm_api_keys')
+  union all
+  select 25, 'schema_orders_update_scope_fix.sql', 'p_orders_update also checks the warehouse',
+    exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'orders' and policyname = 'p_orders_update' and qual ilike '%warehouse_id%')
+  union all
+  -- #26 (bootstrap fix) is superseded by #29, which rewrites the same policy, so #29 is what is checked.
+  select 27, 'schema_storage_object_btk_token.sql', 'storage_object_btk() reads tokenized file names',
+    exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public' and p.proname = 'storage_object_btk' and pg_get_functiondef(p.oid) ilike '%(full|thumb)%' and pg_get_functiondef(p.oid) ilike '%0-9a-f%')
+  union all
+  select 28, 'schema_harden_search_path.sql', 'every SECURITY DEFINER function pins search_path',
+    not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'public' and p.prosecdef
+                  and (p.proconfig is null or not exists (select 1 from unnest(p.proconfig) c where c like 'search_path=%')))
+  union all
+  select 29, 'schema_llm_assistant_grant_repair.sql', 'p_llm_api_keys_insert uses has_llm_api_key()',
+    exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'llm_api_keys' and policyname = 'p_llm_api_keys_insert' and with_check ilike '%has_llm_api_key%')
+  union all
+  select 30, 'schema_item_units.sql', 'items.unit_type column',
+    exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'items' and column_name = 'unit_type')
+  union all
+  select 31, 'schema_zone_shelf_dimensions.sql', 'warehouse_zones.shelf_width_cm column',
+    exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'warehouse_zones' and column_name = 'shelf_width_cm')
+  union all
+  -- #32 (email cast) changes a function body only; nothing separate to look for.
+  select 33, 'schema_activity_log_batch_id.sql', 'activity_log.batch_id column',
+    exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'activity_log' and column_name = 'batch_id')
+  union all
+  select 34, 'schema_item_images.sql', 'item_images table',
+    exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'item_images')
+  union all
+  select 35, 'schema_item_link.sql', 'items.link column',
+    exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'items' and column_name = 'link')
+  union all
+  select 36, 'schema_zone_dimensions.sql', 'warehouse_zones.rack_width_cm column',
+    exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'warehouse_zones' and column_name = 'rack_width_cm')
+  union all
+  select 37, 'schema_grant_aware_policies.sql', '24 per-warehouse-grant policies (orders, kits, zones, rack photos, manufacturers, storage)',
+    (select count(*) from pg_policies
+      where policyname ilike '%grant%' and (schemaname = 'public' or (schemaname = 'storage' and tablename = 'objects'))) >= 24
+  union all
+  select 38, 'schema_editor_add_items.sql', 'items: grant delete = admin only, no FOR ALL grant policy',
+    exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'items' and policyname = 'p_items_warehouse_permission_delete')
+    and not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'items' and policyname = 'p_items_warehouse_permission_write')
+  union all
+  -- #39 also stands in for #12 and #16: it replaces the same constraint, so the current definition is the answer.
+  select 39, 'schema_bin_code_format.sql', 'items_location_code_format is the "A 3-3 1-1" pattern',
+    exists (select 1 from pg_constraint where conrelid = 'public.items'::regclass and conname = 'items_location_code_format'
+            and pg_get_constraintdef(oid) like '%[A-Z]{1,2} [0-9]{1,2}-[0-9]{1,2} [0-9]{1,2}-[0-9]{1,2}$%')
 ) t
 order by t.n;
