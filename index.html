@@ -2088,18 +2088,23 @@
         return !isSupa || currentUserRole !== 'viewer';
     }
 
-    // Creating and deleting items is stricter than editing them. The items INSERT and DELETE policies are
-    // admin-only for a profile role — a global editor may only UPDATE — and open to an editor/maintainer/
-    // admin GRANT for that warehouse (p_items_warehouse_permission_write covers every command).
-    // canEditItems() can't tell those two kinds of "editor" apart, so Add / Duplicate / Remove / Merge
-    // showed for every non-viewer: an add was then refused, and a remove quietly did nothing (RLS turns a
-    // forbidden DELETE into zero rows with no error) while the app reported it done.
-    function canAddOrRemoveItems() {
+    // Who may do what to items (enforced by the items RLS policies — supabase/schema_editor_add_items.sql):
+    //   add / update   editor (in their warehouse), editor or maintainer grant, admin  -> canEditItems()
+    //   delete         admin only (a global admin, or an admin grant for this warehouse) -> canDeleteItems()
+    // Remove, Merge (which deletes the merged-away items) and Delete-all are the "delete" side. RLS turns a
+    // forbidden DELETE into zero rows with no error, so without this gate the buttons showed for every
+    // editor and a remove quietly did nothing while the app reported it done.
+    function canDeleteItems() {
         if (!canEditItems()) return false;
         if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') return true; // static/draft: local, no server rules
-        if (currentUserRole === 'admin') return true; // a global admin, or an admin grant here
-        return myWarehousePermissions.some(p => p.warehouse_id === currentWarehouseId && ['editor', 'maintainer', 'admin'].includes(p.role));
+        return currentUserRole === 'admin';
     }
+
+    // Undoing a batch (a CSV import, a delivery note, a quick update…) goes through revert_activity_log_entry(),
+    // which checks the profile role itself and is admin-only — undoing an add is a delete, undoing an update
+    // rewrites it. Kept apart from currentUserRole, which can be an admin GRANT that the RPC doesn't accept.
+    var currentProfileRole = null;
+    function canUndoBatches() { return currentProfileRole === 'admin'; }
 
     function toggleConsole() { document.getElementById('console-overlay').classList.toggle('open'); }
     function handleConsoleOverlayClick(e) { if (e.target === document.getElementById('console-overlay')) toggleConsole(); }
@@ -3212,6 +3217,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         currentWarehouseId = wid;
         currentActiveKey = 'supabase-session'; // sentinel so requireAuth() passes
         currentUserRole = await computeEffectiveRole(profile, wid);
+        currentProfileRole = profile.role;
         await supabaseLoadWarehouseMeta(wid);
         await supabaseLoadAllWarehouses(); // so the switcher offers every Supabase warehouse, not just this one
         await supabaseLoadWarehouseZones(wid);
@@ -5286,7 +5292,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             summary: `Quick update: ${summarizeItemChange('update', e.btk, e.beforeRow, e.row)}`
         })), batchId, { userId });
         await supabaseLoadList(currentWarehouseId);
-        const canUndo = batchId && succeeded.size > 0;
+        const canUndo = canUndoBatches() && batchId && succeeded.size > 0;
         showToast(`Updated ${succeeded.size} of ${pending.length} item(s).${failed ? ` ${failed} failed — see console.` : ''}`,
             failed ? 'warning' : 'success', canUndo ? 15000 : 6000,
             canUndo ? { label: '↩️ Undo', onClick: () => undoImportBatch(batchId) } : null);
@@ -5582,7 +5588,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('seg-items').classList.toggle('active', mode === 'items');
         document.getElementById('seg-kits').classList.toggle('active', mode === 'kits');
         document.getElementById('seg-manufacturers').classList.toggle('active', mode === 'manufacturers');
-        document.getElementById('btn-add-item').classList.toggle('hidden', mode !== 'items' || !canAddOrRemoveItems());
+        document.getElementById('btn-add-item').classList.toggle('hidden', mode !== 'items' || !canEditItems());
         document.getElementById('items-only-controls').classList.toggle('hidden', mode !== 'items');
         document.getElementById('kits-only-controls').classList.toggle('hidden', mode !== 'kits');
         document.getElementById('manufacturers-only-controls').classList.toggle('hidden', mode !== 'manufacturers');
@@ -7293,9 +7299,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('selected-count-pack').innerText = selectedItems.size;
         fab.classList.toggle('visible', selectedItems.size > 0);
         // Remove/Merge are destructive, unlike Labels/Pack — and both DELETE items, so they need the
-        // stricter canAddOrRemoveItems() (a global editor can't delete), which also hides them from a
-        // viewer no matter how many items are selected.
-        const canDelete = canAddOrRemoveItems();
+        // stricter canDeleteItems() (admin only), which also hides them from a viewer no matter how many
+        // items are selected.
+        const canDelete = canDeleteItems();
         document.getElementById('btn-fab-remove').classList.toggle('hidden', !canDelete || selectedItems.size === 0);
         document.getElementById('btn-fab-merge').classList.toggle('hidden', !canDelete || selectedItems.size < 2);
     }
@@ -8176,7 +8182,7 @@ th { background: #eee; }
         const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
         const isViewer = isSupa && currentUserRole === 'viewer';
         document.getElementById('btn-edit-item').classList.toggle('hidden', isViewer);
-        document.getElementById('btn-duplicate-item').classList.toggle('hidden', isViewer || !canAddOrRemoveItems());
+        document.getElementById('btn-duplicate-item').classList.toggle('hidden', isViewer);
 
         const filenames = renderItemGallery(item);
         renderImageAddControls(filenames.length);
@@ -9377,7 +9383,7 @@ th { background: #eee; }
     // ════════════════════════════════════════════════════════════════════════
     function openAddItemModal() {
         if (!requireAuth()) return;
-        if (!canAddOrRemoveItems()) { showToast("Adding items needs an admin (or an editor grant for this warehouse) — editors can update existing items.", "warning", 6000); return; }
+        if (!canEditItems()) { showToast("Editor or admin only.", "warning"); return; }
         modalMode = 'add';
         editTargetBTK = null;
         document.getElementById('modal-title').innerText = '➕ Add New Item';
@@ -9502,7 +9508,7 @@ th { background: #eee; }
         return 'BTK' + String(n).padStart(6, '0') + suffix;
     }
     async function duplicateItem() {
-        if (!canAddOrRemoveItems() || !currentItemBTK) return;
+        if (!canEditItems() || !currentItemBTK) return;
         const original = globalInventory.find(i => i.BTKnumber === currentItemBTK);
         if (!original) return;
         const newBTK = generateUniqueBTK();
@@ -9527,7 +9533,7 @@ th { background: #eee; }
 
     // ── REMOVE ITEMS (multi-select, from the item list) ───────────────────────
     function confirmRemoveSelectedItems() {
-        if (!canAddOrRemoveItems() || selectedItems.size === 0) return;
+        if (!canDeleteItems() || selectedItems.size === 0) return;
         const ids = Array.from(selectedItems);
         const items = ids.map(id => globalInventory.find(i => i.BTKnumber === id)).filter(Boolean);
         const names = items.map(i => `• ${i['itemname(english)'] || i['itemname(swedish)'] || 'Unnamed'} (${i.BTKnumber})`).join('\n');
@@ -9552,7 +9558,7 @@ th { background: #eee; }
             let deleteError = null;
             for (const group of chunkArray(ids, BULK_WRITE_CHUNK_SIZE)) {
                 // .select() hands back the rows that were REALLY deleted. A delete the caller isn't
-                // permitted (only admins, or an editor grant, may delete items) is filtered by RLS to
+                // permitted (only admins may delete items) is filtered by RLS to
                 // zero rows with NO error — which used to be counted as success ("Deleted N item(s)"),
                 // logged as deletions, and then the items were back after the reload.
                 const { data, error } = await sb.from('items').delete().in('btk', group).select('btk');
@@ -9572,7 +9578,7 @@ th { background: #eee; }
             if (deletedIds.size) clearSelection();
             await supabaseLoadList(currentWarehouseId);
             if (deleteError) showToast(`Deleted ${deletedIds.size} of ${ids.length} item(s) — then it stopped: ${deleteError.message}`, "error", 9000);
-            else if (deletedIds.size < ids.length) showToast(`Deleted ${deletedIds.size} of ${ids.length} item(s) — the other ${ids.length - deletedIds.size} weren't removed: deleting items needs an admin (or an editor grant for this warehouse).`, "warning", 9000);
+            else if (deletedIds.size < ids.length) showToast(`Deleted ${deletedIds.size} of ${ids.length} item(s) — the other ${ids.length - deletedIds.size} weren't removed: only an admin can delete items.`, "warning", 9000);
             else showToast(`Deleted ${ids.length} item(s).`, "success");
         } else {
             globalInventory = globalInventory.filter(i => !ids.includes(i.BTKnumber));
@@ -9692,8 +9698,8 @@ th { background: #eee; }
     }
 
     function openMergeView() {
-        if (!canAddOrRemoveItems() || selectedItems.size < 2) return;
-        mergeCandidates = Array.from(selectedItems).map(id => globalInventory.find(i => i.BTKnumber === id)).filter(Boolean);
+        if (!canDeleteItems() || selectedItems.size < 2) return;
+        mergeCandidates =Array.from(selectedItems).map(id => globalInventory.find(i => i.BTKnumber === id)).filter(Boolean);
         if (mergeCandidates.length < 2) { showToast("Need at least 2 valid items to merge.", "warning"); return; }
         mergeMode = 'manual';
         mergeSelections = {};
@@ -9882,7 +9888,7 @@ th { background: #eee; }
             await supabaseLoadList(currentWarehouseId);
             const notDeleted = loserBTKs.length - deletedSet.size;
             showToast(`Merged into ${survivorBTK}.` + (kitsTouched ? ` Updated ${kitsTouched} kit(s) that referenced the merged item(s).` : '') +
-                (notDeleted ? ` But ${notDeleted} of the merged-away item(s) were NOT deleted — deleting items needs an admin (or an editor grant for this warehouse); their data is now on ${survivorBTK}, so remove them from the list.` : ''),
+                (notDeleted ? ` But ${notDeleted} of the merged-away item(s) were NOT deleted — only an admin can delete items; their data is now on ${survivorBTK}, so remove them from the list.` : ''),
                 notDeleted ? "warning" : "success", notDeleted ? 10000 : 3500);
             openItem(survivorBTK, { type: 'global' });
             return;
@@ -10314,7 +10320,7 @@ th { background: #eee; }
         }
         if (writeErrors > collidedBtks.length) msg += ` ${writeErrors - collidedBtks.length} row(s) failed to save — see console for details.`;
         if (!isSupa) msg += ' (draft autosaved).';
-        const canUndo = isSupa && batchId && (conflictCount + newCount > 0);
+        const canUndo = isSupa && canUndoBatches() && batchId && (conflictCount + newCount > 0);
         showToast(msg, (conflictCount || dupes.length || writeErrors) ? 'warning' : 'success', canUndo ? 15000 : 9000,
             canUndo ? { label: '↩️ Undo Import', onClick: () => undoImportBatch(batchId) } : null);
         resetCsvImportState();
@@ -10625,7 +10631,7 @@ th { background: #eee; }
         if (createFailed) parts.push(`${createFailed} item${createFailed === 1 ? '' : 's'} failed`);
         if (bestWipeFailed) parts.push(`could not wipe Best — its items were left untouched and its rows were skipped entirely this run`);
         const msg = parts.length ? `Visma import complete — ${parts.join(', ')}.` : 'Nothing was imported.';
-        const canUndo = batchId && (deleted + created > 0);
+        const canUndo = canUndoBatches() && batchId && (deleted + created > 0);
         showToast(msg, (createFailed || bestWipeFailed) ? 'warning' : (parts.length ? 'success' : 'info'), canUndo ? 15000 : 8000,
             canUndo ? { label: '↩️ Undo', onClick: () => undoImportBatch(batchId) } : null);
     }
@@ -11161,6 +11167,7 @@ ${css}
         localStorage.removeItem(LS_VAULT);
         localStorage.removeItem(LS_DRAFT);
         currentUserRole = null;
+        currentProfileRole = null;
         if (sb) { try { await sb.auth.signOut(); } catch (e) { console.error("Supabase sign-out failed:", e); } }
         window.location.href = window.location.pathname;
     }
@@ -12355,7 +12362,7 @@ Respond with ONLY the JSON object, nothing else.`;
         if (updateFail) parts.push(`${updateFail} update${updateFail === 1 ? '' : 's'} failed`);
         if (failed) parts.push(`${failed} new item${failed === 1 ? '' : 's'} failed`);
         const msg = parts.length ? `Delivery note processed — ${parts.join(', ')}.` : "Delivery note processed — nothing was changed.";
-        const canUndo = batchId && (updateOk + created > 0);
+        const canUndo = canUndoBatches() && batchId && (updateOk + created > 0);
         showToast(msg, (updateFail || failed) ? 'warning' : (parts.length ? 'success' : 'info'), canUndo ? 15000 : 6000,
             canUndo ? { label: '↩️ Undo', onClick: () => undoImportBatch(batchId) } : null);
     }

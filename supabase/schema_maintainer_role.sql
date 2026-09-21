@@ -10,10 +10,11 @@
 -- Default maintainer capabilities in a warehouse they're granted 'maintainer' in: everywhere the
 -- app already gates on "not a viewer" (adjusting stock, adding items, editing item fields — see
 -- canEditItems() in index.html) now also passes for a maintainer grant on that warehouse, same as
--- it already does for editor. This migration does NOT restrict maintainer to *only* quantity
--- changes — that would need column-level grants (like profiles.display_name's self-update grant
--- elsewhere in this schema), a further step if you want that narrower behavior enforced
--- server-side rather than by what the UI happens to expose.
+-- it already does for editor — but NOT deleting items, which is admin-only for everyone (see
+-- canDeleteItems() and schema_editor_add_items.sql). This migration does NOT restrict maintainer to
+-- *only* quantity changes — that would need column-level grants (like profiles.display_name's
+-- self-update grant elsewhere in this schema), a further step if you want that narrower behavior
+-- enforced server-side rather than by what the UI happens to expose.
 --
 -- Scope: only items.* RLS is extended to honor warehouse_permissions here. Other tables (orders,
 -- kits, manufacturers, warehouse_zones, warehouse_rack_images) still use only the existing
@@ -23,7 +24,9 @@
 --
 -- Run in the Supabase SQL Editor, after schema_admin_cross_warehouse_items.sql. Safe to run more than
 -- once (create-if-not-exists / drop-policy-if-exists / create-or-replace throughout) — an earlier version
--- stopped at "relation warehouse_permissions already exists" if it was run a second time.
+-- stopped at "relation warehouse_permissions already exists" if it was run a second time. The rule for
+-- who may add/update/delete items also touches the profile-role policies; that half lives in
+-- schema_editor_add_items.sql, which is meant to be run after this file.
 
 -- Allow 'maintainer' wherever the role CHECK constraint on profiles lives — its name isn't known
 -- here (it predates this migration history), so find it dynamically rather than guessing.
@@ -65,8 +68,10 @@ grant select, insert, update, delete on public.warehouse_permissions to authenti
 
 -- Additive to whatever the original items policies already allow (Postgres ORs permissive
 -- policies together) — a user with no warehouse_permissions row keeps working exactly as before.
--- 'maintainer' and 'editor' grants behave the same on items (full read/write in that warehouse);
--- 'viewer' grants read-only; 'admin' grants full access.
+-- Any grant can read that warehouse's items; 'editor' and 'maintainer' grants can also add and update
+-- them (they behave the same on items); only an 'admin' grant can delete. An earlier version of this
+-- file gave editor/maintainer grants one FOR ALL policy, delete included — schema_editor_add_items.sql
+-- converts a database that still has it, and the rule table it documents is the one to go by.
 drop policy if exists p_items_warehouse_permission_select on public.items;
 create policy p_items_warehouse_permission_select on public.items for select to authenticated using (
   exists (
@@ -74,8 +79,16 @@ create policy p_items_warehouse_permission_select on public.items for select to 
     where wp.user_id = auth.uid() and wp.warehouse_id = items.warehouse_id
   )
 );
-drop policy if exists p_items_warehouse_permission_write on public.items;
-create policy p_items_warehouse_permission_write on public.items for all to authenticated using (
+drop policy if exists p_items_warehouse_permission_write on public.items;   -- the old single FOR ALL policy
+drop policy if exists p_items_warehouse_permission_insert on public.items;
+create policy p_items_warehouse_permission_insert on public.items for insert to authenticated with check (
+  exists (
+    select 1 from public.warehouse_permissions wp
+    where wp.user_id = auth.uid() and wp.warehouse_id = items.warehouse_id and wp.role in ('editor', 'maintainer', 'admin')
+  )
+);
+drop policy if exists p_items_warehouse_permission_update on public.items;
+create policy p_items_warehouse_permission_update on public.items for update to authenticated using (
   exists (
     select 1 from public.warehouse_permissions wp
     where wp.user_id = auth.uid() and wp.warehouse_id = items.warehouse_id and wp.role in ('editor', 'maintainer', 'admin')
@@ -84,6 +97,13 @@ create policy p_items_warehouse_permission_write on public.items for all to auth
   exists (
     select 1 from public.warehouse_permissions wp
     where wp.user_id = auth.uid() and wp.warehouse_id = items.warehouse_id and wp.role in ('editor', 'maintainer', 'admin')
+  )
+);
+drop policy if exists p_items_warehouse_permission_delete on public.items;
+create policy p_items_warehouse_permission_delete on public.items for delete to authenticated using (
+  exists (
+    select 1 from public.warehouse_permissions wp
+    where wp.user_id = auth.uid() and wp.warehouse_id = items.warehouse_id and wp.role = 'admin'
   )
 );
 
