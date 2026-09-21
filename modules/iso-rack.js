@@ -1,7 +1,7 @@
 // Isometric ("3D-ish") drawings of a rack area and of the warehouse floor, as plain SVG strings —
 // no DOM, no Supabase, same convention as the other modules: index.html decides where the markup
 // goes and wires the clicks. Purpose: show WHERE a bin is instead of making someone decode
-// "A3-2-02" against a flat Depth x Level grid — the rack is drawn semi-transparent, and the bin
+// "A 3-2 2-1" against a flat Depth x Level grid — the rack is drawn semi-transparent, and the bin
 // being looked for is one solid blue box with its coordinates on a label.
 //
 // Axes (all lengths in centimetres):
@@ -44,9 +44,10 @@ function esc(s) {
 }
 const P = (x, y, z) => [(x + y) * COS30, (x - y) * SIN30 - z];
 
-// Same shape index.html's own bin codes use: ZoneDepth-Level-Bin, Bin zero-padded to 2, Row omitted when 1.
+// Same shape index.html's own bin codes use: "Zone Depth-Level Bin-Row", e.g. "A 3-2 3-1" — the
+// warehouse's own paper notation, Row always written.
 export function formatLocationCode(zone, depth, level, bin, row = 1) {
-  return `${zone}${depth}-${level}-${String(bin).padStart(2, '0')}${row > 1 ? `-${row}` : ''}`;
+  return `${zone} ${depth}-${level} ${bin}-${row || 1}`;
 }
 
 // bounds: { maxDepth, maxLevel, maxBin } as index.html's getZoneBounds() returns; extra: { minBin, minRows }

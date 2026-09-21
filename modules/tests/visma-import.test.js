@@ -144,17 +144,30 @@ test('resolveQuantity treats an unparseable value as 0 with no comment', () => {
   assert.deepEqual(resolveQuantity('', null), { quantity: 0, comment: null });
 });
 
-test('parsePlatsLocation implements the confirmed Depth-Level/Bin-Row breakdown, omitting Row when 1', () => {
-  assert.deepEqual(parsePlatsLocation('A 3-3 1-1'), { locationCode: 'A3-3-01', zone: 'A', depth: 3, level: 3, bin: 1, row: 1 });
+test('parsePlatsLocation implements the confirmed Depth-Level/Bin-Row breakdown; the code is the same notation', () => {
+  assert.deepEqual(parsePlatsLocation('A 3-3 1-1'), { locationCode: 'A 3-3 1-1', zone: 'A', depth: 3, level: 3, bin: 1, row: 1 });
 });
 
-test('parsePlatsLocation keeps Row in the code when greater than 1', () => {
-  assert.deepEqual(parsePlatsLocation('A 4-3 4-2'), { locationCode: 'A4-3-04-2', zone: 'A', depth: 4, level: 3, bin: 4, row: 2 });
+test('parsePlatsLocation keeps Row in the code, including when it is 1 or greater than 1', () => {
+  assert.deepEqual(parsePlatsLocation('A 4-3 4-2'), { locationCode: 'A 4-3 4-2', zone: 'A', depth: 4, level: 3, bin: 4, row: 2 });
+  assert.equal(parsePlatsLocation('A 3-2 3-2').locationCode, 'A 3-2 3-2');
+});
+
+test('parsePlatsLocation tidies the text: case, spacing, leading zeros', () => {
+  assert.equal(parsePlatsLocation('  a3-2   03-02 ').locationCode, 'A 3-2 3-2');
+  assert.equal(parsePlatsLocation('b 12-4 10-1').locationCode, 'B 12-4 10-1');
 });
 
 test('parsePlatsLocation returns null for anything not matching the expected shape', () => {
   assert.equal(parsePlatsLocation(''), null);
   assert.equal(parsePlatsLocation('somewhere on shelf 3'), null);
+  assert.equal(parsePlatsLocation('A 3-2'), null); // no bin/row
+  assert.equal(parsePlatsLocation('A3-2-03'), null); // the retired webware notation is not the paper notation
+});
+
+test('parsePlatsLocation only accepts ASCII zone letters, the only ones the database allows', () => {
+  assert.equal(parsePlatsLocation('Å 1-2 3-1'), null);
+  assert.equal(parsePlatsLocation('Ö 1-2 3-1'), null);
 });
 
 test('buildVismaImportDraft routes rows to the right destination and enriches matched ones from the inventering file', () => {
@@ -174,7 +187,8 @@ test('buildVismaImportDraft routes rows to the right destination and enriches ma
   assert.equal(best.isBest, true);
   assert.equal(best.needsNewWarehouse, false);
   assert.equal(best.items[0].quantity, 36); // from inventering Antal, not ant_i_lager
-  assert.equal(best.items[0].locationCode, 'A3-3-01');
+  assert.equal(best.items[0].locationCode, 'A 3-3 1-1');
+  assert.equal(best.items[0].inventoryLocation, null); // a coordinate is moved to the bin location, not repeated
   assert.equal(best.items[0].itemnumber3, '1103236MB');
   assert.equal(best.items[0].manufacturer, 'HÄNY');
 
@@ -221,9 +235,22 @@ test('buildVismaImportDraft uses the v3 export\'s own manufacturers/location col
   assert.equal(item.itemnumber2, 'H-5075');
   assert.equal(item.itemnumber3, '1733621MB');
   assert.equal(item.unitType, 'st');
-  assert.equal(item.locationCode, 'A2-3-01-2');
+  assert.equal(item.locationCode, 'A 2-3 1-2');
   assert.equal(item.quantity, 11); // no inventering match, ant_i_lager is non-negative
   assert.equal(draft.noLocationCount, 0);
+});
+
+test('buildVismaImportDraft keeps a location that is not a bin coordinate as text instead of dropping it', () => {
+  const draft = buildVismaImportDraft([
+    { artikelnr: '1733621MB', artikelnamn: '793.539 HÄNY LUFTFILTER HPU6 H-5075', enhet: 'Styck', ant_i_lager: '3', location: 'by the door' },
+    { artikelnr: '1733622MB', artikelnamn: '793.540 HÄNY LUFTFILTER HPU7 H-5076', enhet: 'Styck', ant_i_lager: '3', location: 'Å 1-2 3-1' },
+  ], []);
+  const [note, aring] = draft.groups[0].items;
+  assert.equal(note.locationCode, null);
+  assert.equal(note.inventoryLocation, 'by the door');
+  assert.equal(aring.locationCode, null); // "Å" is not a zone letter the database accepts
+  assert.equal(aring.inventoryLocation, 'Å 1-2 3-1');
+  assert.equal(draft.noLocationCount, 2);
 });
 
 test('buildVismaImportDraft prefers the inventory-count file\'s Plats/Antal/Artikelnummer over the v3 row\'s own columns when both are present', () => {
@@ -235,7 +262,7 @@ test('buildVismaImportDraft prefers the inventory-count file\'s Plats/Antal/Arti
   assert.equal(item.manufacturer, 'Reed'); // Företag wins over the CSV's own manufacturers column
   assert.equal(item.itemnumber, '12070'); // manual Artikelnummer wins over regex extraction from the name
   assert.equal(item.quantity, 20); // inventering Antal wins over ant_i_lager
-  assert.equal(item.locationCode, 'A4-3-04-2'); // inventering Plats wins over the v3 row's own location
+  assert.equal(item.locationCode, 'A 4-3 4-2'); // inventering Plats wins over the v3 row's own location
   assert.equal(item.unitType, 'kg');
 });
 

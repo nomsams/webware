@@ -991,7 +991,7 @@
         <label class="modal-label" for="ai-mapposition">Map Position (locator grid, A1–F6)</label>
         <input type="text" id="ai-mapposition" placeholder="e.g. A3" maxlength="2" style="text-transform:uppercase;">
 
-        <label class="modal-label" for="ai-locationcode" style="display:flex; align-items:center; gap:6px;">Bin Location Code (Zone+Depth-Level-Bin)
+        <label class="modal-label" for="ai-locationcode" style="display:flex; align-items:center; gap:6px;">Bin Location Code (Zone Depth-Level Bin-Row)
             <button type="button" class="secondary" onclick="showLocationCodeInfo()" title="How this code works" aria-label="Explain bin location codes" style="min-height:22px; min-width:22px; width:22px; height:22px; padding:0; border-radius:50%; font-size:0.75rem;">ℹ️</button>
         </label>
         <p id="ai-loc-no-areas-hint" class="hidden" style="color:var(--text-muted); font-size:0.78rem; margin:-0.5rem 0 0.5rem;">No rack areas defined yet for this warehouse (set them up on the Warehouse page) — type a code by hand below.</p>
@@ -1004,7 +1004,7 @@
         </div>
         <p id="ai-loc-grid-caption" style="color:var(--text-muted); font-size:0.78rem; margin:0 0 4px;"></p>
         <div class="warehouse-map loc-picker-grid" id="ai-loc-grid"></div>
-        <input type="text" id="ai-locationcode" placeholder="…or type the code directly, e.g. A1-4-07" oninput="syncLocationPickerFromText('ai')" style="text-transform:uppercase;">
+        <input type="text" id="ai-locationcode" placeholder="…or type the code directly, e.g. A 3-3 1-1" oninput="syncLocationPickerFromText('ai')" style="text-transform:uppercase;">
 
         <label class="modal-label" for="ai-comments">Comments</label>
         <textarea id="ai-comments" placeholder="Optional notes..."></textarea>
@@ -1042,7 +1042,7 @@
              match on, plus any of a quantity, unit, and bin-location column, applied directly to what's
              already here — no conflict/merge review, since only those fields are ever touched. -->
         <div id="import-items-stock-update" class="hidden">
-            <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:0.5rem;">Upload or paste a CSV with a BTK or item-number column to match on, plus any of: a <strong>quantity</strong>, a <strong>unit</strong> (Styck, Kilo, Pall… or st, kg, pallet…), or a <strong>bin location</strong> (<code>A 3-2 2-1</code> or <code>A3-2-02</code>). Matched items get just those fields set — nothing else changes, nothing is added or removed. A Visma export works as-is (matched on its article number) to fix units and bin codes on items that are already imported.</p>
+            <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:0.5rem;">Upload or paste a CSV with a BTK or item-number column to match on, plus any of: a <strong>quantity</strong>, a <strong>unit</strong> (Styck, Kilo, Pall… or st, kg, pallet…), or a <strong>bin location</strong> (<code>A 3-2 2-1</code>: Zone, Depth-Level, Bin-Row). Matched items get just those fields set — nothing else changes, nothing is added or removed. A Visma export works as-is (matched on its article number) to fix units and bin codes on items that are already imported.</p>
             <button class="secondary full-width" onclick="document.getElementById('stock-update-file').click()" style="margin-bottom:0.5rem;">📁 Upload a CSV File</button>
             <input type="file" id="stock-update-file" accept=".csv,text/csv,text/plain" class="hidden" onchange="handleStockUpdateFileUpload(event)" aria-label="CSV file for Quick Update">
             <textarea id="stock-update-paste-textarea" rows="8" style="width:100%; font-family:monospace; font-size:0.8rem; min-height:160px;" placeholder="artikelnr,enhet,location&#10;TE726,Styck,A 3-2 2-1"></textarea>
@@ -5279,10 +5279,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const entries = [];
         for (const { item, changes } of pending) {
             // The "before" snapshot has to be what's actually stored — itemToSupabaseRow() would fill
-            // location_code in from a bin coordinate sitting in Inventorylocation, which the item
-            // doesn't really have yet, so an Undo would then "restore" a code that was never there.
+            // location_code in from a bin coordinate sitting in Inventorylocation (and take it out of
+            // Inventorylocation), which is not what the item has yet, so an Undo would then "restore" a
+            // code that was never there and lose the text that was.
             const beforeRow = await itemToSupabaseRow(item);
             beforeRow.location_code = (item.LocationCode && item.LocationCode !== 'None') ? item.LocationCode : null;
+            beforeRow.inventorylocation = (item.Inventorylocation && item.Inventorylocation !== 'None') ? item.Inventorylocation : null;
             const row = await itemToSupabaseRow(applyChanges(item, changes));
             entries.push({ btk: item.BTKnumber, beforeRow, row: { ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: item.images || '' } });
         }
@@ -5551,7 +5553,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const example = {
                 Manufacturer: 'Bosch', BTKnumber: '', itemnumber: 'ABC123', 'itemname(english)': 'Grease sticks',
                 'itemname(swedish)': 'Fettstavar', itemnumber2: '', itemnumber3: '', Numberofitems: '25',
-                UnitType: 'kg', Inventorylocation: 'Shelf A1', MapPosition: 'A', LocationCode: 'A-01-01', Comments: '', images: ''
+                UnitType: 'kg', Inventorylocation: 'Shelf A1', MapPosition: 'A', LocationCode: 'A 1-1 1-1', Comments: '', images: ''
             };
             downloadTextFile('items-template.csv', Papa.unparse([example], { columns: COLUMNS_B }), 'text/csv');
         } else if (type === 'kits') {
@@ -6003,7 +6005,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             item.itemnumber, item.itemnumber2, item.itemnumber3,
             item.Manufacturer, item.Inventorylocation, item.LocationCode, item.Comments, item.Numberofitems,
         ];
-        return fields.some(f => f && f.toString().toLowerCase().includes(query));
+        if (fields.some(f => f && f.toString().toLowerCase().includes(query))) return true;
+        // A bin code has spaces in it ("A 3-2 3-2"); typing it without them ("a3-2") should still find it.
+        const compact = query.replace(/\s+/g, '');
+        return !!compact && !!item.LocationCode && item.LocationCode.toString().toLowerCase().replace(/\s+/g, '').includes(compact);
     }
     function manufacturerMatchesQuery(m, query) {
         if ((m.name || '').toLowerCase().includes(query)) return true;
@@ -8557,7 +8562,7 @@ th { background: #eee; }
             <input type="text" id="qe-location" value="${escapeHtml(val(item.Inventorylocation))}">
             <label class="modal-label" for="qe-mapposition">Map Position (locator grid, A1–F6)</label>
             <input type="text" id="qe-mapposition" value="${escapeHtml(val(item.MapPosition))}" placeholder="e.g. A3" maxlength="2" style="text-transform:uppercase;">
-            <label class="modal-label" for="qe-locationcode" style="display:flex; align-items:center; gap:6px;">Bin Location Code (Zone+Depth-Level-Bin)
+            <label class="modal-label" for="qe-locationcode" style="display:flex; align-items:center; gap:6px;">Bin Location Code (Zone Depth-Level Bin-Row)
                 <button type="button" class="secondary" onclick="showLocationCodeInfo()" title="How this code works" aria-label="Explain bin location codes" style="min-height:22px; min-width:22px; width:22px; height:22px; padding:0; border-radius:50%; font-size:0.75rem;">ℹ️</button>
             </label>
             <p id="qe-loc-no-areas-hint" class="hidden" style="color:var(--text-muted); font-size:0.78rem; margin:-0.5rem 0 0.5rem;">No rack areas defined yet for this warehouse (set them up on the Warehouse page) — type a code by hand below.</p>
@@ -8570,7 +8575,7 @@ th { background: #eee; }
             </div>
             <p id="qe-loc-grid-caption" style="color:var(--text-muted); font-size:0.78rem; margin:0 0 4px;"></p>
             <div class="warehouse-map loc-picker-grid" id="qe-loc-grid"></div>
-            <input type="text" id="qe-locationcode" value="${escapeHtml(val(item.LocationCode))}" placeholder="…or type the code directly, e.g. A1-4-07" oninput="syncLocationPickerFromText('qe')" style="text-transform:uppercase;">
+            <input type="text" id="qe-locationcode" value="${escapeHtml(val(item.LocationCode))}" placeholder="…or type the code directly, e.g. A 3-3 1-1" oninput="syncLocationPickerFromText('qe')" style="text-transform:uppercase;">
             <label class="modal-label" for="qe-comments">Comments</label>
             <textarea id="qe-comments">${escapeHtml(val(item.Comments))}</textarea>
             <label class="modal-label" for="qe-link">Link (optional)</label>
@@ -8632,15 +8637,15 @@ th { background: #eee; }
         if (confirm("Changes have been made to this item. Are you sure you want to discard them?")) exitQuickEditUI();
     }
 
-    // A bin code typed by hand is only kept if it is a real one (webware's own Zone+Depth-Level-Bin, or
-    // the paper "A 3-2 2-1" form, which is converted). Anything else can't go into the database's
-    // location_code column — it used to be moved to Inventory Location without a word while the item
-    // page kept showing the typed text as if it had been saved, and it vanished on the next reload.
+    // A bin code typed by hand is only kept if it is a real one ("A 3-2 2-1", any case or spacing, which is
+    // tidied into the canonical form). Anything else can't go into the database's location_code column
+    // — it used to be moved to Inventory Location without a word while the item page kept showing the
+    // typed text as if it had been saved, and it vanished on the next reload.
     // Returns null when fine, otherwise the message to show.
     function binCodeProblem(typed) {
         const t = String(typed || '').trim();
         if (!t || t === 'None') return null;
-        return normalizeBinCode(t) ? null : `"${t}" isn't a valid bin location code. Use Zone+Depth-Level-Bin, e.g. A1-4-07 (add -2 for a bin one further back), or clear the field.`;
+        return normalizeBinCode(t) ? null : `"${t}" isn't a valid bin location code. Use Zone Depth-Level Bin-Row, e.g. A 3-3 1-1 (Row 2 is a bin one further back), or clear the field.`;
     }
 
     // Both save entry points ignore a second press while one save is still running (double-tap on a phone).
@@ -8781,23 +8786,41 @@ th { background: #eee; }
     function openLightbox(src) { document.getElementById('lightbox-img').src = src; document.getElementById('lightbox').classList.add('open'); }
     function closeLightbox(e) { if (!e || e.target !== document.getElementById('lightbox-img')) document.getElementById('lightbox').classList.remove('open'); }
 
-    // Bin location code: Zone+Depth-Level-Bin, e.g. "A1-4-07" — Zone A, Depth 1 (the front rack;
-    // 2 would be the back rack of a back-to-back pair — see the rack area's drawn depth in the
-    // Layout Designer), Level 4, Bin 7. See the "Bin Location Codes" section in README.md for the
-    // full numbering convention (Level 1 = floor level). Zone is 1-2 letters; Depth and Level are
-    // 1-2 digits, unpadded; Bin is always zero-padded to 2 digits. A rack area's *width* (how many
-    // bays long it is) is purely a Layout Designer drawing property — never part of an item's own
-    // code, since it was never really a property of one item. Returns null if the string doesn't
-    // match — callers should show it as invalid rather than silently drop it.
-    // Trailing -Row is optional and omitted from the code whenever it's 1 (the default, front-most
-    // bin) — so every code written before Bin Row existed still parses exactly as before, no
-    // migration needed. Row is a bin's own front-to-back position on a multi-deep shelf spot,
-    // distinct from rack Depth (which is about racks, not individual bins).
-    const LOCATION_CODE_RE = /^([A-Z]{1,2})(\d{1,2})-(\d{1,2})-(\d{2})(?:-(\d{1,2}))?$/;
+    // Bin location code: "Zone Depth-Level Bin-Row", e.g. "A 3-3 1-1" — the warehouse's own paper/Visma
+    // notation, written exactly the same way: Zone A, Depth 3 (which rack, counted from the walkway;
+    // 1 is the front rack, 2 the back rack of a back-to-back pair — see the rack area's drawn depth in
+    // the Layout Designer), Level 3 (shelf tier, 1 = closest to the floor), Bin 1 (position along the
+    // shelf, from the left), Row 1 (how far back on a shelf spot that is several bins deep, 1 = the
+    // front-most, closest to the walkway). See the "Bin Location Codes" section in README.md for the
+    // full numbering convention. Zone is 1-2 capital letters (A-Z only — that is all the database's CHECK
+    // on items.location_code accepts); the four numbers are 1-2 digits, unpadded, and Row is always
+    // written, also when it is 1. A rack area's *width* (how many bays long it is) is purely a Layout
+    // Designer drawing property — never part of an item's own code.
+    // Depth and Row are different things: Depth is about racks, Row about bins within one shelf spot.
+    const BIN_CODE_RE = /^([A-Z]{1,2}) (\d{1,2})-(\d{1,2}) (\d{1,2})-(\d{1,2})$/;
+    // What a person or a file may hand us, in any case/spacing, with Row optional ("A 3-2 3" = the
+    // front row) ...
+    const BIN_CODE_LOOSE_RE = /^([A-Za-z]{1,2})\s*(\d{1,2})\s*-\s*(\d{1,2})\s+(\d{1,2})(?:\s*-\s*(\d{1,2}))?$/;
+    // ... and the notation webware itself used before it adopted the paper one ("A3-2-03", "A3-2-03-2":
+    // Bin zero-padded to 2, Row left off when 1), still read so an old export or a habit doesn't fail.
+    const BIN_CODE_LEGACY_RE = /^([A-Za-z]{1,2})(\d{1,2})-(\d{1,2})-(\d{2})(?:-(\d{1,2}))?$/;
+    function formatBinCode(zone, depth, level, bin, row) {
+        return `${String(zone).toUpperCase()} ${Number(depth)}-${Number(level)} ${Number(bin)}-${Number(row) || 1}`;
+    }
+    // Any accepted spelling -> the one canonical code, or null. Numbers are rewritten without leading zeros.
+    function normalizeBinCode(text) {
+        const t = String(text || '').trim();
+        if (!t || t === 'None') return null;
+        const m = t.match(BIN_CODE_LOOSE_RE) || t.match(BIN_CODE_LEGACY_RE);
+        return m ? formatBinCode(m[1], m[2], m[3], m[4], m[5]) : null;
+    }
+    // Returns null if the string isn't a bin code in any accepted spelling — callers should show it as
+    // invalid rather than silently drop it. Accepts the same spellings as normalizeBinCode().
     function parseLocationCode(code) {
-        const m = String(code || '').trim().toUpperCase().match(LOCATION_CODE_RE);
+        const norm = normalizeBinCode(code);
+        const m = norm && norm.match(BIN_CODE_RE);
         if (!m) return null;
-        return { zone: m[1], depth: Number(m[2]), level: Number(m[3]), bin: Number(m[4]), binRow: m[5] ? Number(m[5]) : 1 };
+        return { zone: m[1], depth: Number(m[2]), level: Number(m[3]), bin: Number(m[4]), binRow: Number(m[5]) };
     }
     function describeLocationCode(code) {
         const p = parseLocationCode(code);
@@ -8807,35 +8830,24 @@ th { background: #eee; }
         return `Zone ${p.zone} · Rack ${p.depth}${depthLabel} · Level ${p.level} · Bin ${p.bin}${rowLabel}`;
     }
 
-    // items.location_code has a real Postgres CHECK constraint matching the same shape
-    // parseLocationCode() parses (and requires the letters be uppercase) — a value that doesn't
-    // fit it, hand-typed or arriving from a CSV/Visma column mapped onto LocationCode without
-    // actually containing real bin codes, would fail the insert/update outright. Rather than lose
-    // an import over that, an invalid value is sent as no bin code at all, with its raw text folded
-    // into Inventorylocation instead (only when that field doesn't already have something more
-    // specific) so it isn't silently thrown away, just moved to the free-text field it actually is.
-    // A bin coordinate arrives in two shapes in practice: webware's own code ("A3-2-02") and the
-    // warehouse's paper/Visma notation ("A 3-2 2-1" — Zone, Depth-Level, Bin-Row, see
-    // parsePlatsLocation() in modules/visma-import.js). Either becomes the real code; anything else
-    // is null. The converted code is re-checked against parseLocationCode() too, since Plats
-    // accepts zone letters (Å/Ä/Ö) the database's uppercase-ASCII CHECK constraint doesn't.
-    function normalizeBinCode(text) {
-        const t = String(text || '').trim();
-        if (!t || t === 'None') return null;
-        if (parseLocationCode(t)) return t.toUpperCase();
-        const plats = typeof window.parsePlatsLocation === 'function' ? window.parsePlatsLocation(t) : null;
-        return plats && parseLocationCode(plats.locationCode) ? plats.locationCode : null;
-    }
-
+    // items.location_code has a real Postgres CHECK constraint matching the canonical code — a value
+    // that doesn't fit it, hand-typed or arriving from a CSV/Visma column mapped onto LocationCode
+    // without actually containing real bin codes, would fail the insert/update outright. Rather than
+    // lose an import over that, an invalid value is sent as no bin code at all, with its raw text
+    // folded into Inventorylocation instead (only when that field doesn't already have something more
+    // specific) so it isn't silently thrown away, just kept in the free-text field it actually is.
+    //
+    // A bin coordinate can turn up in either column — a CSV's single "location" column maps to
+    // Inventorylocation by default (see CSV_COLUMN_ALIASES). One that does is MOVED: it becomes the
+    // item's bin code and comes out of the free-text Inventory Location, since the two are the same
+    // text and keeping both would show the coordinate twice. An Inventory Location that is anything
+    // else (a note, or a different coordinate) is kept as written.
     function sanitizeLocationCodeForRow(locationCode, inventoryLocation) {
         const rawCode = (locationCode && locationCode !== 'None') ? String(locationCode).trim() : '';
         const invLoc = (!inventoryLocation || inventoryLocation === 'None') ? null : inventoryLocation;
-        // The LocationCode field itself first; failing that, the free-text Inventorylocation — a CSV's
-        // single "location" column maps there by default (see CSV_COLUMN_ALIASES), so a real bin
-        // coordinate sitting in it is still a bin coordinate, and the item still belongs on the bin
-        // map. Inventorylocation keeps its original text either way.
-        const code = normalizeBinCode(rawCode) || normalizeBinCode(invLoc);
-        if (code) return { location_code: code, inventorylocation: invLoc };
+        const invCode = normalizeBinCode(invLoc);
+        const code = normalizeBinCode(rawCode) || invCode;
+        if (code) return { location_code: code, inventorylocation: invCode === code ? null : invLoc };
         // Not a bin coordinate in any shape: never sent as location_code (would fail the CHECK), but
         // not thrown away either — kept as the free-text location when nothing better is there.
         return { location_code: null, inventorylocation: invLoc || rawCode || null };
@@ -8942,9 +8954,8 @@ th { background: #eee; }
     }
 
     // Only writes into the text field once the four required pieces are present — a half-filled
-    // picker shouldn't overwrite a code someone's in the middle of typing by hand instead. Bin Row
-    // is optional and left off the code entirely when it's 1 (front) or blank, so a plain shelf
-    // (never more than one bin deep) never grows a trailing "-1" nobody asked for.
+    // picker shouldn't overwrite a code someone's in the middle of typing by hand instead. The Row
+    // box may be left blank, which means 1 (the front-most bin) — the code always carries it.
     function syncLocationCodeFromPicker(prefix) {
         const zone = document.getElementById(`${prefix}-loc-zone`).value;
         const depth = document.getElementById(`${prefix}-loc-depth`).value;
@@ -8952,8 +8963,7 @@ th { background: #eee; }
         const bin = document.getElementById(`${prefix}-loc-bin`).value;
         const binRow = parseInt(document.getElementById(`${prefix}-loc-binrow`).value, 10) || 1;
         if (!zone || !depth || !level || !bin) return;
-        const rowSuffix = binRow > 1 ? `-${binRow}` : '';
-        document.getElementById(`${prefix}-locationcode`).value = `${zone}${depth}-${level}-${String(bin).padStart(2, '0')}${rowSuffix}`;
+        document.getElementById(`${prefix}-locationcode`).value = formatBinCode(zone, depth, level, bin, binRow);
     }
 
     function syncLocationPickerFromText(prefix) {
@@ -8967,16 +8977,14 @@ th { background: #eee; }
 
     function showLocationCodeInfo() {
         alert(
-            "Bin Location Code format: ZoneDepth-Level-Bin(-Row)\n\n" +
-            "Example: A1-4-07\n" +
+            "Bin Location Code format: Zone Depth-Level Bin-Row\n\n" +
+            "Example: A 3-3 1-1\n" +
             "  • A = Zone (which rack area — see the Warehouse page's Layout Designer)\n" +
-            "  • 1 = Depth (which rack: 1 is the front row, 2 would be the back row of a back-to-back pair)\n" +
-            "  • 4 = Level (shelf tier — 1 is the one closest to the ground, counting up)\n" +
-            "  • 07 = Bin (the exact spot on that shelf)\n\n" +
-            "Example with Row: A1-4-07-2\n" +
-            "  • -2 = Bin Row — only needed on a shelf that's several bins deep front-to-back. " +
-            "1 (the default, and left off the code) is the front-most bin you'd see first; " +
-            "2 means it's one bin further back, hidden behind bin 07 until that one's moved.\n\n" +
+            "  • 3 = Depth (which rack, counted from the walkway: 1 is the front rack, 2 the back rack of a back-to-back pair)\n" +
+            "  • 3 = Level (shelf tier — 1 is the one closest to the ground, counting up)\n" +
+            "  • 1 = Bin (the exact spot along that shelf, from the left)\n" +
+            "  • 1 = Row (how far back on a shelf spot that is several bins deep: 1 is the front-most bin, " +
+            "closest to the walkway; 2 is one bin further back, hidden behind it until that one's moved)\n\n" +
             "Pick from the dropdowns above, or just type the code directly if you already know it."
         );
     }
@@ -12523,7 +12531,7 @@ Respond with ONLY the JSON object, nothing else.`;
     import { parseOrderRequest } from './modules/order-parser.js';
     import { createEmailClient, buildMailtoLink, buildPackOrderEmailTemplate } from './modules/email-sender.js';
     import { parseDeliveryNoteImage, resolveDeliveryNoteItems } from './modules/delivery-note-parser.js';
-    import { buildVismaImportDraft, parsePlatsLocation, lookupEnhetUnitType } from './modules/visma-import.js';
+    import { buildVismaImportDraft, lookupEnhetUnitType } from './modules/visma-import.js';
     import { resolveRackGeometry, buildIsoRackSVG, buildIsoFloorSVG } from './modules/iso-rack.js';
     import { extractJsonObjects } from './modules/json-extract.js';
     window.extractJsonObjects = extractJsonObjects; // the AI assistant reads its reply's action with it
@@ -12538,10 +12546,8 @@ Respond with ONLY the JSON object, nothing else.`;
     window.parseDeliveryNoteImage = parseDeliveryNoteImage;
     window.resolveDeliveryNoteItems = resolveDeliveryNoteItems;
     window.buildVismaImportDraft = buildVismaImportDraft;
-    // Also used outside the Visma importer itself — by normalizeBinCode() (a Plats-style
-    // "A 3-2 2-1" bin coordinate from ANY import path becomes a real LocationCode) and by
-    // unitTypeFromText() (a Swedish unit word from any CSV becomes an internal unit code).
-    window.parsePlatsLocation = parsePlatsLocation;
+    // Also used outside the Visma importer itself — by unitTypeFromText() (a Swedish unit word from
+    // any CSV becomes an internal unit code).
     window.lookupEnhetUnitType = lookupEnhetUnitType;
     window.buildMailtoLink = buildMailtoLink;
     window.buildPackOrderEmailTemplate = buildPackOrderEmailTemplate;

@@ -8,14 +8,15 @@
 -- Run it, then apply whichever migration files show "MISSING" below, in order (oldest # first —
 -- a later one can depend on an earlier table/column existing).
 --
--- Two migrations aren't included below because they don't add a new checkable object (they alter
+-- Three migrations aren't included below because they don't add a new checkable object (they alter
 -- an existing constraint's definition instead): #12 schema_location_code_v2.sql (tightens
--- items_location_code_format) and #16 schema_bin_row.sql (loosens the same constraint to accept
--- an optional -Row suffix). Check those separately, after everything else here says "applied":
+-- items_location_code_format), #16 schema_bin_row.sql (loosens the same constraint to accept
+-- an optional -Row suffix) and #39 schema_bin_code_format.sql (replaces the notation with the
+-- warehouse's own "A 3-3 1-1"). Check those separately, after everything else here says "applied":
 --   select conname, pg_get_constraintdef(oid) from pg_constraint
 --   where conrelid = 'public.items'::regclass and contype = 'c';
--- Should read: location_code IS NULL OR location_code ~ '^[A-Z]{1,2}[0-9]{1,2}-[0-9]{1,2}-[0-9]{2}(-[0-9]{1,2})?$'
--- (or narrower) once both of those have run.
+-- Should read: location_code IS NULL OR location_code ~ '^[A-Z]{1,2} [0-9]{1,2}-[0-9]{1,2} [0-9]{1,2}-[0-9]{1,2}$'
+-- once all three have run (the two older ones each leave a different, older pattern behind).
 
 select
   t.n as "#",

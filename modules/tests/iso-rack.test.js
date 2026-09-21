@@ -6,10 +6,10 @@ import { resolveRackGeometry, buildIsoRackSVG, buildIsoFloorSVG, formatLocationC
 
 const count = (s, re) => (s.match(re) || []).length;
 
-test('formatLocationCode matches the app\'s own bin codes, Row omitted when 1', () => {
-  assert.equal(formatLocationCode('A', 3, 2, 2, 1), 'A3-2-02');
-  assert.equal(formatLocationCode('A', 3, 2, 2, 2), 'A3-2-02-2');
-  assert.equal(formatLocationCode('B', 1, 12, 14), 'B1-12-14');
+test('formatLocationCode matches the app\'s own bin codes: "Zone Depth-Level Bin-Row", Row always written', () => {
+  assert.equal(formatLocationCode('A', 3, 2, 2, 1), 'A 3-2 2-1');
+  assert.equal(formatLocationCode('A', 3, 2, 2, 2), 'A 3-2 2-2');
+  assert.equal(formatLocationCode('B', 1, 12, 14), 'B 1-12 14-1'); // Row defaults to 1
 });
 
 test('resolveRackGeometry falls back to schematic defaults when nothing is recorded, and says so', () => {
@@ -71,7 +71,7 @@ test('buildIsoRackSVG draws the located bin as one solid blue box with its coord
   assert.equal(count(svg, /class="iso-hl-front"/g), 1);
   assert.equal(count(svg, /class="iso-hl-side"/g), 1);
   assert.equal(count(svg, /class="iso-hl-top"/g), 1);
-  assert.ok(svg.includes('>A1-2-07<'), 'coordinates label');
+  assert.ok(svg.includes('>A 1-2 7-1<'), 'coordinates label');
   assert.ok(svg.includes(ISO_BLUE.front));
   assert.doesNotMatch(svg, /NaN|Infinity|undefined/);
 });
@@ -109,7 +109,7 @@ test('buildIsoRackSVG tints occupied bins, outlines a selected shelf, and marks 
   assert.equal(count(svg, /iso-bin iso-bin-occupied/g), 2);
   assert.equal(count(svg, /iso-shelf-selected/g), 2); // the rule + the one selected board
   assert.match(svg, /data-depth="1" data-level="1" data-bin="2" data-row="1"/);
-  assert.ok(svg.includes('B1-1-02 — 3 items'));
+  assert.ok(svg.includes('B 1-1 2-1 — 3 items'));
   assert.doesNotMatch(buildIsoRackSVG(g, {}), /data-depth/);
 });
 
@@ -149,7 +149,7 @@ test('buildIsoFloorSVG returns nothing when no zone is placed, otherwise blocks 
   assert.match(svg, /data-zone="A"/);
   assert.match(svg, /iso-zone-front iso-zone-selected/);
   assert.equal(count(svg, /class="iso-hl-front"/g), 1);
-  assert.ok(svg.includes('>A2-3-05<'));
+  assert.ok(svg.includes('>A 2-3 5-1<'));
   assert.doesNotMatch(svg, /NaN|Infinity|undefined/);
 });
 

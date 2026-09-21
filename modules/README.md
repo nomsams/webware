@@ -177,9 +177,7 @@ node --test modules/tests/*.test.js
   `lookupEnhetUnitType()` is the strict form of the same table: `null` for an unrecognized word
   instead of `'st'`, so a caller can tell a real "Styck" from "no idea" — index.html uses it (via
   `unitTypeFromText()`) in the plain Items import and in Quick Update, where an unknown unit should
-  be left alone rather than overwritten with a guess. `parsePlatsLocation()` is likewise exposed to
-  index.html (as `window.parsePlatsLocation`) so a `A 3-2 2-1` bin coordinate becomes a real
-  `LocationCode` from any import path, not only this one.
+  be left alone rather than overwritten with a guess.
 
   **Quantity** (`resolveQuantity()`): prefers the count file's physically-counted `Antal` when a row
   matches one; otherwise Visma's own `ant_i_lager` is used only when non-negative — it's unreliable
@@ -189,7 +187,13 @@ node --test modules/tests/*.test.js
   **Location** (`parsePlatsLocation()`): the count file's own `Plats` wins when a row matches one,
   else a later export's own `location` column on the row itself (same values, same 62 Best rows) —
   either way turned into a real `LocationCode` (confirmed field-by-field against the actual
-  warehouse: Zone, Depth, Level, Bin, Row — see the README's "Bin Location Codes" section).
+  warehouse: Zone, Depth, Level, Bin, Row — see the README's "Bin Location Codes" section). The
+  notation `A 3-3 1-1` *is* webware's code, so the result is the same text, only tidied (upper-case
+  zone, single spaces, no leading zeros, Row always present). ASCII zone letters only — that is all
+  the database's CHECK accepts, so an `Å 1-2 3-1` is not a coordinate and stays as text. A value that
+  parses is *moved*: `locationCode` is set and `inventoryLocation` is left `null`; one that doesn't
+  parse keeps its raw text in `inventoryLocation`. (index.html does the same tidy-up for every other
+  write path with its own `normalizeBinCode()`, which also reads the older `A3-2-02` notation.)
 
   `buildVismaImportDraft()` ties all of this together, joining the (optional) count file by article
   number and grouping the result by destination warehouse.
@@ -229,8 +233,8 @@ node --test modules/tests/*.test.js
   - `buildIsoFloorSVG(zones, opts)` — the whole floor: each *placed* zone (`grid_col`/`grid_row`) as a
     translucent block at its real footprint, the located bin marked inside its own zone, `''` when no
     zone is placed at all (so the caller can say why instead of showing an empty canvas).
-  - `formatLocationCode()` builds the same `ZoneDepth-Level-Bin(-Row)` text the app's own codes use
-    (Bin zero-padded to 2, Row omitted when 1), so the on-picture label always matches the field.
+  - `formatLocationCode()` builds the same `Zone Depth-Level Bin-Row` text the app's own codes use
+    (`A 3-2 2-1`, Row always written), so the on-picture label always matches the field.
 
   Tested in `tests/iso-rack.test.js` (geometry fallbacks/derivations, opacity of rack vs. bin, label
   escaping, occupied/selected/interactive markup, dimension callouts, and "every renderer stays finite

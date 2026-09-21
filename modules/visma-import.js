@@ -19,8 +19,8 @@
 //     comment recording what it was, never trusted as a literal quantity.
 //   - The inventory-count file's "Plats" values (e.g. "A 3-3 1-1") are Zone, Depth, Level, Bin,
 //     Row in that order (Depth = racks from the walkway, Level = levels up, Bin = position
-//     left-to-right, Row = position front-to-back, 1 = closest to the walkway) — matching
-//     webware's own LocationCode format (Zone+Depth-Level-Bin(-Row), Row omitted when 1).
+//     left-to-right, Row = position front-to-back, 1 = closest to the walkway) — which is
+//     webware's own LocationCode format ("Zone Depth-Level Bin-Row", written the same way).
 //
 // A later export ("v3") added two more columns directly on the Visma rows themselves —
 // `manufacturers` (hand-curated for ~60% of rows) and `location` (the same Plats values as the
@@ -236,18 +236,19 @@ export function resolveQuantity(antiLager, inventeringMatch) {
 
 // "A 3-3 1-1" -> Zone A, Depth 3, Level 3, Bin 1, Row 1, confirmed against the actual warehouse:
 // Depth = racks counted from the walkway/front, Level = levels up, Bin = position left-to-right,
-// Row = a bin's own front-to-back position (1 = closest to the walkway). Row 1 is the front-most
-// position and is omitted from the composed code entirely, per webware's own LocationCode format
-// (see the README's "Bin Location Codes" section).
-const PLATS_RE = /^([A-Za-zÅÄÖåäö]{1,2})\s*(\d{1,2})-(\d{1,2})\s+(\d{1,2})-(\d{1,2})$/;
+// Row = a bin's own front-to-back position (1 = closest to the walkway). This notation IS webware's
+// own LocationCode format (see the README's "Bin Location Codes" section), so the code is the same
+// text, only tidied: upper-case zone, single spaces, no leading zeros, Row always present.
+// The zone is ASCII letters only, because that is all the database's CHECK on items.location_code
+// accepts; a zone like "Å" is not a bin coordinate as far as webware is concerned (it stays as text).
+const PLATS_RE = /^([A-Za-z]{1,2})\s*(\d{1,2})-(\d{1,2})\s+(\d{1,2})-(\d{1,2})$/;
 
 export function parsePlatsLocation(plats) {
   const m = String(plats || '').trim().match(PLATS_RE);
   if (!m) return null;
-  const [, zone, depth, level, bin, row] = m;
-  const rowNum = parseInt(row, 10);
-  const locationCode = `${zone.toUpperCase()}${depth}-${level}-${bin.padStart(2, '0')}` + (rowNum > 1 ? `-${rowNum}` : '');
-  return { locationCode, zone: zone.toUpperCase(), depth: parseInt(depth, 10), level: parseInt(level, 10), bin: parseInt(bin, 10), row: rowNum };
+  const zone = m[1].toUpperCase();
+  const [depth, level, bin, row] = m.slice(2).map((n) => parseInt(n, 10));
+  return { locationCode: `${zone} ${depth}-${level} ${bin}-${row}`, zone, depth, level, bin, row };
 }
 
 function normalizeCode(code) {
@@ -328,13 +329,15 @@ export function buildVismaImportDraft(vismaRows, inventeringRows) {
     const location = platsValue ? parsePlatsLocation(platsValue) : null;
     if (!location) noLocationCount++;
 
+    // A value that is a bin coordinate lives in the bin location only — it is not repeated in the
+    // free-text Inventory Location. One that isn't (a note like "by the door") stays there as written.
     const item = {
       vismaCode, name: displayName, manufacturer,
       itemnumber, itemnumber2, itemnumber3: vismaCode,
       unitType: mapEnhetToUnitType(row.enhet),
       quantity, comment,
       locationCode: location ? location.locationCode : null,
-      inventoryLocation: platsValue,
+      inventoryLocation: location ? null : platsValue,
     };
 
     if (!buckets.has(suffixCode)) buckets.set(suffixCode, []);
