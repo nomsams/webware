@@ -639,7 +639,7 @@
 <div class="modal-overlay" id="manage-users-modal" onclick="handleUsersModalOverlayClick(event)">
     <div class="modal-box" style="max-width:620px;">
         <h3>👥 Manage Users</h3>
-        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">The dropdown sets each person's global role (their home warehouse, from account setup). The row below it grants an *additional* role in one specific warehouse — e.g. "Maintainer in Warehouse 2" — without changing their global role. Changes take effect on that person's next action.</p>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">The dropdown sets each person's global role, which applies in their home warehouse (from account setup). <strong>A person can work in several warehouses</strong>: tick as many as you like under "Add warehouses" and pick what they can do there — it starts as their global role, so an Editor gets Editor in each. Admins work in every warehouse. Changes take effect on that person's next action.</p>
         <div id="users-list-container">Loading…</div>
         <div class="modal-actions">
             <button class="secondary full-width" onclick="closeManageUsersModal()">Close</button>
@@ -2827,43 +2827,58 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function renderUsersList(users) {
         const container = document.getElementById('users-list-container');
         if (!users.length) { container.innerHTML = '<p>No users found.</p>'; return; }
+        const whName = l => (manageUsersWarehouses.find(w => w.l === l) || {}).name || l;
         container.innerHTML = users.map(u => {
             const grants = manageUsersPermissions.filter(p => p.user_id === u.id);
-            const grantRows = grants.map(g => {
-                const whName = (manageUsersWarehouses.find(w => w.l === g.warehouse_id) || {}).name || g.warehouse_id;
-                return `<div style="display:flex; align-items:center; gap:8px; font-size:0.8rem; padding:2px 0;">
-                    <span style="flex:1;">${escapeHtml(whName)}: <strong style="text-transform:capitalize;">${escapeHtml(g.role)}</strong></span>
-                    <button class="secondary" data-user-id="${escapeHtml(u.id)}" data-wh-id="${escapeHtml(g.warehouse_id)}" onclick="revokeWarehousePermission(this.dataset.userId, this.dataset.whId)" style="padding:2px 8px; min-height:auto; font-size:0.75rem; color:var(--danger);">✕</button>
-                </div>`;
-            }).join('');
-            const warehouseOptions = manageUsersWarehouses.map(w => `<option value="${escapeHtml(w.l)}">${escapeHtml(w.name)}</option>`).join('');
+            const isAdmin = u.role === 'admin';
+            // Where this person works: their home warehouse (from account setup; not editable here) plus every
+            // per-warehouse grant. The rows are the same thing as the "Add warehouses" below, just already added.
+            const homeRow = u.warehouse_id
+                ? `<div style="display:flex; align-items:center; gap:8px; font-size:0.8rem; padding:2px 0;">
+                    <span style="flex:1;">${escapeHtml(whName(u.warehouse_id))}: <strong style="text-transform:capitalize;">${escapeHtml(u.role === 'maintainer' ? 'viewer' : u.role)}</strong> <span style="color:var(--text-muted);">(home warehouse)</span></span>
+                </div>` : '';
+            const grantRows = grants.map(g => `<div style="display:flex; align-items:center; gap:8px; font-size:0.8rem; padding:2px 0;">
+                    <span style="flex:1;">${escapeHtml(whName(g.warehouse_id))}: <strong style="text-transform:capitalize;">${escapeHtml(g.role)}</strong></span>
+                    <button class="secondary" data-user-id="${escapeHtml(u.id)}" data-wh-id="${escapeHtml(g.warehouse_id)}" onclick="revokeWarehousePermission(this.dataset.userId, this.dataset.whId)" title="Remove this warehouse" style="padding:2px 8px; min-height:auto; font-size:0.75rem; color:var(--danger);">✕</button>
+                </div>`).join('');
+            const worksIn = isAdmin
+                ? `<div style="font-size:0.78rem; color:var(--text-muted);">Admins work in every warehouse.</div>`
+                : (homeRow + grantRows) || `<div style="font-size:0.78rem; color:var(--text-muted);">Not assigned to any warehouse yet — add one below.</div>`;
+            // Warehouses they don't work in yet, as checkboxes so several can be added in one go.
+            const taken = new Set([u.warehouse_id, ...grants.map(g => g.warehouse_id)].filter(Boolean));
+            const available = manageUsersWarehouses.filter(w => !taken.has(w.l));
+            const defaultRole = ['viewer', 'editor', 'maintainer', 'admin'].includes(u.role) ? u.role : 'viewer';
+            const roleOption = (value, label) => `<option value="${value}" ${defaultRole === value ? 'selected' : ''}>${label}</option>`;
+            const addBox = isAdmin ? '' : (available.length ? `
+                <div id="grant-box-${u.id}" style="margin-top:6px;">
+                    <div style="font-size:0.78rem; color:var(--text-muted); margin-bottom:2px;">Add warehouses:</div>
+                    <div style="display:flex; flex-wrap:wrap; gap:4px 14px; margin-bottom:6px;">
+                        ${available.map(w => `<label style="display:flex; align-items:center; gap:5px; font-size:0.82rem; margin:0; cursor:pointer;"><input type="checkbox" class="grant-wh-check" value="${escapeHtml(w.l)}" style="width:auto; margin:0;"> ${escapeHtml(w.name)}</label>`).join('')}
+                    </div>
+                    <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                        <span style="font-size:0.78rem;">as</span>
+                        <select id="grant-role-${u.id}" title="What they can do in the ticked warehouses. Starts as their global role." style="width:auto; margin:0; padding:4px 8px; font-size:0.78rem;">
+                            ${roleOption('viewer', 'Viewer')}${roleOption('editor', 'Editor')}${roleOption('maintainer', 'Maintainer')}${roleOption('admin', 'Admin')}
+                        </select>
+                        <button class="secondary" onclick="grantWarehousePermission('${u.id}')" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">+ Add ticked</button>
+                    </div>
+                </div>` : `<div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Already works in every warehouse.</div>`);
             return `
             <div style="padding:10px 0; border-bottom:1px solid var(--border);">
                 <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                     <div style="flex:1; min-width:0;">
                         <div style="font-weight:600; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(u.email || u.id)}</div>
-                        <div style="font-size:0.8rem; color:var(--text-muted);">Home warehouse: ${escapeHtml(u.warehouse_id || '—')}</div>
+                        <div style="font-size:0.8rem; color:var(--text-muted);">Works in:</div>
                     </div>
-                    <select onchange="changeUserRole('${u.id}', this.value)" style="width:auto; margin:0;" title="Global role. 'Maintainer' is granted per warehouse (below), not globally.">
+                    <select onchange="changeUserRole('${u.id}', this.value)" style="width:auto; margin:0;" title="Global role. It applies in their home warehouse and is the default when adding warehouses below. 'Maintainer' is granted per warehouse, not globally.">
                         <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>Viewer</option>
                         <option value="editor" ${u.role === 'editor' ? 'selected' : ''}>Editor</option>
                         ${u.role === 'maintainer' ? '<option value="maintainer" selected>Maintainer (per-warehouse role — has no effect as a global role)</option>' : ''}
                         <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
                     </select>
                 </div>
-                <div style="margin:6px 0 4px;">
-                    ${grantRows || `<div style="font-size:0.78rem; color:var(--text-muted);">No extra per-warehouse permissions.</div>`}
-                </div>
-                <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                    <select id="grant-wh-${u.id}" style="width:auto; flex:1; min-width:90px; margin:0; padding:4px 8px; font-size:0.78rem;">${warehouseOptions}</select>
-                    <select id="grant-role-${u.id}" style="width:auto; margin:0; padding:4px 8px; font-size:0.78rem;">
-                        <option value="viewer">Viewer</option>
-                        <option value="editor">Editor</option>
-                        <option value="maintainer" selected>Maintainer</option>
-                        <option value="admin">Admin</option>
-                    </select>
-                    <button class="secondary" onclick="grantWarehousePermission('${u.id}')" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">+ Add</button>
-                </div>
+                <div style="margin:6px 0 4px;">${worksIn}</div>
+                ${addBox}
             </div>`;
         }).join('');
     }
@@ -2874,13 +2889,20 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         showToast("Role updated.", "success");
     }
 
+    // Adds every ticked warehouse with the chosen role — one call each, so a single failure doesn't hide the others.
     async function grantWarehousePermission(userId) {
-        const wid = document.getElementById(`grant-wh-${userId}`).value;
+        const box = document.getElementById(`grant-box-${userId}`);
+        const wids = box ? [...box.querySelectorAll('input.grant-wh-check:checked')].map(i => i.value) : [];
         const role = document.getElementById(`grant-role-${userId}`).value;
-        if (!wid) { showToast("No warehouses available to grant.", "warning"); return; }
-        const { error } = await sb.rpc('set_warehouse_permission', { p_user_id: userId, p_warehouse_id: wid, p_role: role });
-        if (error) { showToast("Could not add permission: " + error.message, "error"); return; }
-        showToast("Permission added.", "success");
+        if (!wids.length) { showToast("Tick at least one warehouse to add.", "warning"); return; }
+        let added = 0;
+        const failed = [];
+        for (const wid of wids) {
+            const { error } = await sb.rpc('set_warehouse_permission', { p_user_id: userId, p_warehouse_id: wid, p_role: role });
+            if (error) failed.push(`${wid}: ${error.message}`); else added++;
+        }
+        if (failed.length) showToast(`Added ${added} of ${wids.length} — could not add ${failed.join('; ')}`, "error", 8000);
+        else showToast(added === 1 ? "Warehouse added." : `${added} warehouses added.`, "success");
         openManageUsersModal();
     }
 
@@ -3209,18 +3231,37 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         delete displayNameCache[userId]; // next lookup (e.g. re-opening an item you just edited) picks up the change
     }
 
-    async function loadSupabaseSession(wid) {
+    // Returns the warehouse that was actually opened. That is `wid`, except with `fallbackToAccessible` (sign-in and
+    // page restore, where `wid` is just the login form's default): someone who works in several warehouses — their
+    // home plus any per-warehouse grants, see Manage Users — but not in `wid` would otherwise land on an empty
+    // list, so the first warehouse they DO work in is opened instead. An explicit choice (the switcher, a QR link)
+    // is never overridden.
+    async function loadSupabaseSession(wid, { fallbackToAccessible = false } = {}) {
         const { data: { user } } = await sb.auth.getUser();
         if (!user) throw new Error("No active Supabase session");
         const { data: profile, error } = await sb.from('profiles').select('*').eq('id', user.id).single();
         if (error) throw error;
+        let target = wid;
+        let role = await computeEffectiveRole(profile, wid);
+        if (fallbackToAccessible && profile.role !== 'admin') {
+            const mine = userWarehouseIds(profile);
+            if (mine.length && !mine.includes(wid)) { target = mine[0]; role = await computeEffectiveRole(profile, target); }
+        }
+        wid = target;
         currentWarehouseId = wid;
         currentActiveKey = 'supabase-session'; // sentinel so requireAuth() passes
-        currentUserRole = await computeEffectiveRole(profile, wid);
+        currentUserRole = role;
         currentProfileRole = profile.role;
         await supabaseLoadWarehouseMeta(wid);
         await supabaseLoadAllWarehouses(); // so the switcher offers every Supabase warehouse, not just this one
         await supabaseLoadWarehouseZones(wid);
+        return wid;
+    }
+
+    // Every warehouse a non-admin works in: the home warehouse on their profile (may be none), then each
+    // per-warehouse grant. Read after computeEffectiveRole(), which is what loads myWarehousePermissions.
+    function userWarehouseIds(profile) {
+        return [...new Set([profile.warehouse_id, ...myWarehousePermissions.map(p => p.warehouse_id)].filter(Boolean))];
     }
 
     // warehouses is public-read to any authenticated user, so this is safe for any signed-in role —
@@ -4588,8 +4629,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const { data: { session } } = await sb.auth.getSession();
             if (session) {
                 try {
-                    await loadSupabaseSession(currentWarehouseId);
-                    await supabaseLoadList(currentWarehouseId);
+                    const opened = await loadSupabaseSession(currentWarehouseId, { fallbackToAccessible: true });
+                    await supabaseLoadList(opened);
                     return;
                 } catch (e) { console.error("Supabase startup session load failed:", e); }
             }
@@ -4664,15 +4705,18 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 return showToast("Login failed: " + error.message, "error");
             }
             document.getElementById('auth-error').style.display = 'none';
+            let opened;
             try {
-                await loadSupabaseSession(wid);
+                // A QR link names its warehouse explicitly; otherwise the typed/default one is only a starting
+                // point and someone who works in other warehouses lands in one of theirs.
+                opened = await loadSupabaseSession(wid, { fallbackToAccessible: !pendingItemId });
             } catch (e) {
                 console.error("Profile load failed:", e);
                 return showToast("Signed in, but no profile found for this account.", "error");
             }
-            showToast("Signed in.", "success");
+            showToast(opened !== wid ? `Signed in — you don't work in warehouse ${wid}, so warehouse ${opened} was opened.` : "Signed in.", "success", opened !== wid ? 7000 : undefined);
             if (pendingItemId) { const id = pendingItemId; pendingItemId = null; await supabaseItemRoute(id, wid); }
-            else await supabaseLoadList(wid);
+            else await supabaseLoadList(opened);
         } finally {
             supabaseLoginInFlight = false;
             if (btn) btn.disabled = false;
@@ -10413,6 +10457,7 @@ th { background: #eee; }
                 `<div style="margin-top:1rem; padding:0.75rem; border:1px solid var(--danger); border-radius:8px;">
                     <label for="visma-import-confirm-text" style="color:var(--danger); font-weight:600;">Type DELETE BEST to confirm wiping Best's ${vismaImportBestExistingItems.length} current item(s) — including their photos — before importing:</label>
                     <input type="text" id="visma-import-confirm-text" oninput="onVismaImportConfirmTextInput()" style="margin-top:0.4rem;">
+                    <p style="margin:0.5rem 0 0; font-size:0.8rem; color:var(--text-muted);">Kit recipes are kept: the wipe empties every kit in Best, so each kit line is saved first and put back on the re-created item that has the same item numbers. Lines with no such item are counted in the result message.</p>
                 </div>`);
             confirmBtn.disabled = true;
         } else {
@@ -10491,6 +10536,42 @@ th { background: #eee; }
         vismaImportBestExistingItems = [];
     }
 
+    // A kit line is (kit, item, quantity) and the item is a BTK — a label that is NOT kept when an item is deleted and
+    // created again (kit_items.btk is ON DELETE CASCADE, so the wipe empties the kits). What survives is what the item
+    // is: its item numbers. This saves each line of the warehouse's kits together with those numbers (null if it
+    // couldn't be read); restoreKitLines() finds the re-created item again by them (modules/kit-relink.js).
+    async function snapshotKitLines(warehouseId, itemRows) {
+        try {
+            const { data: kits, error } = await supabaseSelectAll('kits', 'id', q => q.eq('warehouse_id', warehouseId).order('id'));
+            if (error) throw error;
+            const byBtk = new Map(itemRows.map(r => [r.btk, r]));
+            const lines = [];
+            for (const kitIds of chunkArray((kits || []).map(k => k.id), 100)) {
+                const { data, error: lineErr } = await supabaseSelectAll('kit_items', 'kit_id, btk, quantity', q => q.in('kit_id', kitIds).order('kit_id').order('btk'));
+                if (lineErr) throw lineErr;
+                (data || []).forEach(l => {
+                    const it = byBtk.get(l.btk);
+                    if (it) lines.push({ kit_id: l.kit_id, quantity: l.quantity, itemnumber: it.itemnumber, itemnumber2: it.itemnumber2, itemnumber3: it.itemnumber3, manufacturer: it.manufacturer, name: it.itemname_en });
+                });
+            }
+            return lines;
+        } catch (e) {
+            console.error("Could not read the kit lines:", e);
+            return null;
+        }
+    }
+
+    async function restoreKitLines(lines, newRows) {
+        const { links, unmatched } = window.relinkKitLines(lines, newRows);
+        let writeFailed = false;
+        for (const chunk of chunkArray(links, BULK_WRITE_CHUNK_SIZE)) {
+            const { error } = await sb.from('kit_items').insert(chunk);
+            if (error) { writeFailed = true; console.error("Could not put some kit lines back:", error); }
+        }
+        if (unmatched.length) console.warn(`${unmatched.length} kit line(s) had no item with the same numbers after the import:`, unmatched.map(u => `${u.line.name || ''} (${u.line.itemnumber3 || u.line.itemnumber || u.line.itemnumber2 || '—'}) — ${u.reason}`));
+        return { total: lines.length, matched: lines.length - unmatched.length, writeFailed };
+    }
+
     async function commitVismaImport() {
         const draft = vismaImportDraft;
         if (!draft) return;
@@ -10501,12 +10582,27 @@ th { background: #eee; }
         const batchId = window.crypto?.randomUUID ? window.crypto.randomUUID() : null;
         const userId = await currentAuthUserId();
         let deleted = 0, created = 0, createFailed = 0, warehousesCreated = 0, bestWipeFailed = false;
+        let kitRelink = null; // { total, matched, writeFailed } once Best's kit lines have been put back
+
+        // 0. Best's kits are about to lose every line (kit_items.btk is ON DELETE CASCADE): read what each
+        // line WAS first, by the item's numbers, so it can be put back on the re-created item below.
+        // If that can't be read, stop before anything is deleted rather than empty the kits silently.
+        const bestGroup = draft.groups.find(g => g.isBest);
+        let kitLineSnapshot = [];
+        if (bestGroup && vismaImportBestExistingItems.length) {
+            kitLineSnapshot = await snapshotKitLines('1', vismaImportBestExistingItems);
+            if (kitLineSnapshot === null) {
+                showToast("Could not read Best's kit recipes first, so nothing was changed. Try again.", "error", 8000);
+                btn.disabled = false;
+                btn.textContent = '✅ Confirm & Import';
+                return;
+            }
+        }
 
         // 1. Wipe Best first (if present) — one batched delete (before_data for each item's
         // activity_log entry was already captured in vismaImportBestExistingItems at parse time),
         // plus every Storage object those items' photos used (item_images rows cascade-delete with
         // the item row itself per schema_item_images.sql, but the actual Storage files don't).
-        const bestGroup = draft.groups.find(g => g.isBest);
         if (bestGroup && vismaImportBestExistingItems.length) {
             const { data: photoRows } = await supabaseSelectAll('item_images', 'full_url, thumb_url', q => q.eq('warehouse_id', '1').order('id'));
             const storagePaths = [];
@@ -10622,6 +10718,12 @@ th { background: #eee; }
                 action: 'create', btk: e.btk, beforeRow: null, afterRow: e.row, summary: `Visma import: added ${e.name} (${e.btk})`
             }));
             await logActivityBulk(createLogEntries, batchId, { warehouseId, userId });
+
+            // Best's kits are empty now (the wipe cascaded) — put each line back on the item that has the
+            // same numbers. Only when the wipe really happened; a failed wipe left the old links alone.
+            if (group.isBest && !bestWipeFailed && kitLineSnapshot.length) {
+                kitRelink = await restoreKitLines(kitLineSnapshot, groupEntries.filter(e => succeededBTKs.has(e.btk)).map(e => e.row));
+            }
         }
 
         document.getElementById('visma-import-summary-modal').classList.remove('open');
@@ -10637,6 +10739,11 @@ th { background: #eee; }
         if (deleted) parts.push(`removed ${deleted} old Best item${deleted === 1 ? '' : 's'}`);
         if (created) parts.push(`added ${created} item${created === 1 ? '' : 's'}`);
         if (createFailed) parts.push(`${createFailed} item${createFailed === 1 ? '' : 's'} failed`);
+        if (kitRelink) {
+            parts.push(`put ${kitRelink.matched} of ${kitRelink.total} kit line${kitRelink.total === 1 ? '' : 's'} back on the new items` +
+                (kitRelink.matched < kitRelink.total ? ` (the other ${kitRelink.total - kitRelink.matched} had no item with the same numbers)` : '') +
+                (kitRelink.writeFailed ? ' — some could not be saved, see the console' : ''));
+        }
         if (bestWipeFailed) parts.push(`could not wipe Best — its items were left untouched and its rows were skipped entirely this run`);
         const msg = parts.length ? `Visma import complete — ${parts.join(', ')}.` : 'Nothing was imported.';
         const canUndo = canUndoBatches() && batchId && (deleted + created > 0);
@@ -12534,6 +12641,8 @@ Respond with ONLY the JSON object, nothing else.`;
     import { buildVismaImportDraft, lookupEnhetUnitType } from './modules/visma-import.js';
     import { resolveRackGeometry, buildIsoRackSVG, buildIsoFloorSVG } from './modules/iso-rack.js';
     import { extractJsonObjects } from './modules/json-extract.js';
+    import { relinkKitLines } from './modules/kit-relink.js';
+    window.relinkKitLines = relinkKitLines; // the Visma import puts Best's kit lines back on the re-created items
     window.extractJsonObjects = extractJsonObjects; // the AI assistant reads its reply's action with it
     import { fitLabelText } from './modules/label-fit.js';
     window.fitLabelText = fitLabelText; // label printing: wraps on spaces and shrinks text to fit beside the QR code

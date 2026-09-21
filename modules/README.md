@@ -4,7 +4,7 @@ Standalone JS building blocks for functionality discussed for the app. Most of t
 imported by `index.html` yet — nothing changes until a module is deliberately wired in — except
 **`perspective-warp.js`**, **`groq-client.js`**, **`cors-proxy.js`**, **`web-search.js`**,
 **`order-parser.js`**, **`contacts.js`**, **`email-sender.js`**, **`delivery-note-parser.js`**,
-**`visma-import.js`**, **`iso-rack.js`**, **`json-extract.js`**, and **`label-fit.js`**, which are (via the
+**`visma-import.js`**, **`iso-rack.js`**, **`json-extract.js`**, **`label-fit.js`**, and **`kit-relink.js`**, which are (via the
 `<script type="module">` bridge near the end of `index.html`, since the rest of the app is one
 classic script) — the first four back the 🤖 AI Assistant chat bubble, `order-parser.js` backs its
 natural-language Pack Order action, `contacts.js` backs the Saved Recipients picker,
@@ -249,6 +249,18 @@ node --test modules/tests/*.test.js
   keeps the piece only if it parses. `extractJsonObjects()` returns the top-level objects in order;
   `lastJsonObject(text, accept)` picks the last one satisfying a predicate — the final answer, when a
   model quotes a draft or thinks aloud first. Tested in `tests/json-extract.test.js`.
+- **`kit-relink.js`** — **wired in**, in the Visma import. `relinkKitLines(lines, items)` puts kit recipe
+  lines back on items that were deleted and created again under new BTK numbers. Needed because
+  `kit_items.btk` is `ON DELETE CASCADE`: wiping Best's items empties every kit in it, and a BTK is a
+  label that is never reused for "the same" item afterwards. A line is matched by what the item IS — its
+  item numbers, most stable first (#3 = Visma's article number, then #1, #2), each number looked up in
+  any of the three slots, case-insensitively. If several new items share the number the manufacturer may
+  settle it; if not (or if there is no match) the line is returned in `unmatched` with the reason
+  (`none` / `ambiguous`) — never guessed. The synthetic `444…` filler numbers are never used as identity
+  (`isRealItemNumber`). Lines that reach the same item in the same kit have their quantities added up.
+  index.html's `snapshotKitLines()` saves the lines (with the item numbers) before the wipe — and stops
+  the whole import, deleting nothing, if they can't be read — and `restoreKitLines()` writes the result
+  back; the completion message says how many went back. Tested in `tests/kit-relink.test.js`.
 - **`label-fit.js`** — **wired in**, as the text layout of the printed/exported QR labels (item and
   warehouse). `fitLabelText(blocks, {width, height, measure, maxScale})` lays a label's fields
   (`nums` / `name` / `mfr` / `btk`, each with a base size, a floor, a weight and letter-spacing that
