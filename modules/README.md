@@ -4,7 +4,7 @@ Standalone JS building blocks for functionality discussed for the app. Most of t
 imported by `index.html` yet — nothing changes until a module is deliberately wired in — except
 **`perspective-warp.js`**, **`groq-client.js`**, **`cors-proxy.js`**, **`web-search.js`**,
 **`order-parser.js`**, **`contacts.js`**, **`email-sender.js`**, **`delivery-note-parser.js`**,
-**`visma-import.js`**, **`iso-rack.js`**, **`json-extract.js`**, **`label-fit.js`**, and **`kit-relink.js`**, which are (via the
+**`visma-import.js`**, **`visma-sync.js`**, **`iso-rack.js`**, **`json-extract.js`**, **`label-fit.js`**, and **`kit-relink.js`**, which are (via the
 `<script type="module">` bridge near the end of `index.html`, since the rest of the app is one
 classic script) — the first four back the 🤖 AI Assistant chat bubble, `order-parser.js` backs its
 natural-language Pack Order action, `contacts.js` backs the Saved Recipients picker,
@@ -183,6 +183,9 @@ node --test modules/tests/*.test.js
   matches one; otherwise Visma's own `ant_i_lager` is used only when non-negative — it's unreliable
   in the wild (frequently deeply negative in the real export), so a negative reading (from either
   source) becomes `0` with a comment recording what it actually said rather than being trusted.
+  Each item also carries `vismaQty`, Visma's own figure raw and untouched — deliberately *not* the
+  corrected quantity above. index.html stores it as the item's sync baseline, so a later Visma Sync
+  can tell whether Visma has moved since; the corrected number would claim the two already agree.
 
   **Location** (`parsePlatsLocation()`): the count file's own `Plats` wins when a row matches one,
   else a later export's own `location` column on the row itself (same values, same 62 Best rows) —
@@ -249,6 +252,26 @@ node --test modules/tests/*.test.js
   keeps the piece only if it parses. `extractJsonObjects()` returns the top-level objects in order;
   `lastJsonObject(text, accept)` picks the last one satisfying a predicate — the final answer, when a
   model quotes a draft or thinks aloud first. Tested in `tests/json-extract.test.js`.
+- **`visma-sync.js`** — **wired in**, as Settings → 🔄 Visma Sync and the "Visma stock" line on an
+  item's page. Keeping webware and Visma in step through the VismaScrap add-on's own CSV files.
+  Everything turns on one stored number per item, the **baseline** (`items.visma_qty`): what Visma
+  held at the last sync. With W = ours and V = Visma's, `W != B and V = B` is a safe push, `W != B
+  and V != B` means someone sold or received in Visma and must never be overwritten silently, and
+  `W = B and V != B` is a pull. `syncStateFor()` names the four states (`in-sync` / `pending` /
+  `never-synced` / `no-number` — Visma's article number lives in Item #3) and the delta a push would
+  apply. `buildSyncExport()` writes rows under the add-on's *own* column names (`visma_artikelnummer`,
+  `Antal`, `Produktnamn`) so its inventory importer needs no mapping by hand, plus `Antal_forvantad`,
+  the baseline it should still find — blank rather than `0` when there is none, since `0` would claim
+  Visma holds nothing. `planAuditImport()` reads the add-on's audit CSV: only `updated`/`created`
+  rows move the baseline (never `save_unconfirmed`), and a row is held back for a person when the
+  audit's `before_stock` isn't the baseline we exported, or when our own quantity changed after the
+  export. `planScrapeImport()` reads a scraped article list or a plain Visma export and applies a
+  pull only when webware has nothing to lose; both sides having moved yields a `suggestion` of
+  `V + (W - B)` and never an automatic write. Both return the same `{apply, review, ignored, counts}`
+  shape, so index.html renders one review table for either. Field-level rule throughout: fill a
+  blank, never overwrite a difference. Tested in `tests/visma-sync.test.js` (all four states, the
+  export's exact column names and blank baseline, every audit status, drift on both sides, the merge
+  suggestion, the column-name fallbacks, and that nothing is ever dropped silently).
 - **`kit-relink.js`** — **wired in**, in the Visma import. `relinkKitLines(lines, items)` puts kit recipe
   lines back on items that were deleted and created again under new BTK numbers. Needed because
   `kit_items.btk` is `ON DELETE CASCADE`: wiping Best's items empties every kit in it, and a BTK is a

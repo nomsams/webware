@@ -17,7 +17,7 @@ Every importer below (Items/Kits/Warehouses) shares the same shape: a **📁 Upl
   - A row with no `BTKnumber` is first checked against the existing catalog's own `itemnumber`/`itemnumber2`/`itemnumber3` — a supplier's export or a scanned barcode identifies an item that way, not by your BTK — and matched to that item's real BTK if found, so it becomes a normal update instead of a spurious new item. Only a row that matches nothing gets a fresh `BTK######` minted for it (the lowest vacant number in the warehouse, same gap-filling logic as Duplicate — see [Duplicate, Remove & Merge](#features)), so a CSV of brand-new stock doesn't need numbers assigned by hand first either way.
   - `images` (Supabase mode only): a value starting with `http://`/`https://` is fetched and attached as the item's photo automatically — same Storage upload path a manual upload uses, just resized/compressed without the crop/rotate editor since there's no one there to drive it. Best-effort: whether a given host allows this from a browser varies, and a failure (blocked, 404, etc.) is skipped silently rather than failing the row — a photo is a bonus on an otherwise-successful import, not a reason to fail it.
 - Click **📥 Import Items** in the header (editor/maintainer/admin; hidden for viewers in Supabase mode) — the chooser modal also has a third option, **📊 Quick Update (stock, unit, bin location)**, a deliberately lighter path for fixing up items that are already there: upload or paste a CSV with a BTK-or-part-number column to match on plus any of a **quantity**, a **unit** (Swedish words like `Styck`/`Kilo`/`Pall` or our own `st`/`kg`/`pallet`) and a **bin location** (`A 3-2 2-1` — Zone, Depth-Level, Bin-Row), and every matched item gets just those fields set — no merge review, since only those fields are ever touched. A value it can't understand (an unknown unit word, a location that isn't a bin coordinate, a negative quantity) is skipped rather than overwriting what the item already has, and rows that already match are left out of the count. This is the non-destructive way to repair items that went in through the plain Items import with every unit stuck on `st` or no bin code: feed the same Visma export back in and it matches on the article number (Item #3, or any Item # field). One undo batch, same as a full import. Works in both static and Supabase-mode warehouses; in Supabase mode, resolved/new rows are written straight to the database instead of the local encrypted draft, everything else below is identical either way.
-- **Column matching ("smart repair")**: if the file's headers don't already match our column names exactly, a mapping step appears before anything is imported — for each header found, it suggests a target column (exact name → a table of common alternate spellings like "Brand"/"Qty"/"Part Number" → a fuzzy typo-tolerant fallback), flags anything it's not confident about, and lets you correct any of it via dropdown before continuing. An exactly-matching file skips this step entirely. Pointing two different columns at Comments (e.g. both a "Notes" and a "Remarks" column) combines both values — separated by " | " — rather than one silently overwriting the other. Pointing two columns at any *other* field (BTK/item numbers, quantity, Link, a location) isn't something concatenating would help — a warning names the clash and only the first non-blank value per row is kept, the rest ignored, rather than corrupting the field with both values mashed together. Either way, a blank cell in one of the clashing columns never blanks out a value another one already set.
+- **Column matching ("smart repair")**: if the file's headers don't already match our column names exactly, a mapping step appears before anything is imported — for each header found, it suggests a target column (exact name → **the exact names the files we actually import use** → a table of common alternate spellings like "Brand"/"Qty"/"Part Number" → a fuzzy typo-tolerant fallback), flags anything it's not confident about, and lets you correct any of it via dropdown before continuing. That second step means a Visma article export, a VismaScrap scrape or audit CSV, a physical count file and a [Visma Sync](#6-visma-sync-settings--visma-sync-editor-supabase-mode) export all map themselves: `artikelnr`/`visma_artikelnummer`/`article_number` → Item #3 (where the rest of the app looks for Visma's own number, *not* Item #1 where a generic "article number" would otherwise land), `artikelnamn`/`clean_name`/`Produktnamn` → the name, `ant_i_lager`/`Antal`/`lagersaldo` → quantity, `enhet` → unit, `Företag` → manufacturer, `Plats` → bin location. An exactly-matching file skips this step entirely. Pointing two different columns at Comments (e.g. both a "Notes" and a "Remarks" column) combines both values — separated by " | " — rather than one silently overwriting the other. Pointing two columns at any *other* field (BTK/item numbers, quantity, Link, a location) isn't something concatenating would help — a warning names the clash and only the first non-blank value per row is kept, the rest ignored, rather than corrupting the field with both values mashed together. Either way, a blank cell in one of the clashing columns never blanks out a value another one already set.
 - **📋 Import Summary**: before anything is touched, a breakdown of exactly what's about to happen — new items, updates, possible duplicates, part-number matches, auto-assigned BTKs, in-file duplicate BTKs — each as its own color-coded count. "Continue" either imports directly (nothing needs review) or walks into the review below.
 - A row with no name/number overlap with anything already here is added as new, no review needed. Two things trigger a review, through the same merge-grid used for manually merging items ([Duplicate, Remove & Merge](#features)) — nothing is written until every one is resolved, and cancelling drops the whole import with no changes made:
   - **A conflict** — the same BTK number already exists. Pick per field whether the database's current value or the CSV's incoming value wins.
@@ -123,6 +123,74 @@ Every importer below (Items/Kits/Warehouses) shares the same shape: a **📁 Upl
 - **↩️ Undo**: the whole run — Best's deletions and every warehouse's new items alike — shares one
   batch ID, so it reverts as a single action from the success toast (or later from Settings →
   📜 Activity Log), the same mechanism a CSV import uses.
+- **The sync baseline** is recorded as each item is created: Visma's own `ant_i_lager` figure, raw,
+  separate from the quantity webware ends up holding (a physical count wins, a negative reading is
+  reset to 0). That is what lets Visma Sync below tell later whether Visma has moved — see it.
+
+### 6. Visma Sync (Settings → 🔄 Visma Sync, editor+, Supabase mode)
+
+Keeping the two in step, both ways, through the VismaScrap add-on (a separate project — a
+Tampermonkey userscript and browser extension that drives Visma eAccounting's own article pages).
+webware never talks to Visma itself, and the add-on writes one reviewed article at a time. What makes an update
+safe rather than a blind overwrite is one extra number per item: **the baseline**, what Visma held
+the last time the two were in step (`items.visma_qty`, `supabase/schema_visma_sync.sql`).
+
+| | webware (W) | baseline (B) | Visma (V) | |
+|---|---|---|---|---|
+| nothing to do | 5 | 5 | 5 | in sync |
+| safe push | **7** | 5 | 5 | nobody touched Visma — write 7 |
+| **needs a person** | **7** | 5 | **4** | someone sold one in Visma; webware offers `4 + 2 = 6` |
+| offer a pull | 5 | 5 | **3** | Visma moved on its own |
+
+The baseline is written **only by a sync**, never by an ordinary edit — that is exactly what makes
+an edit here show up as "waiting to be pushed". Each item's page shows where it stands ("Visma
+stock: 5 · +2 waiting to be pushed"), and the panel counts the four states across the warehouse.
+
+1. **⬇️ Download sync CSV** — the items whose quantity has moved since the last sync (optionally
+   also ones never synced). It uses the add-on's own column names, so its **Inventory CSV** box
+   needs no column mapping by hand: `visma_artikelnummer`, `Antal` (the number to write),
+   `Produktnamn`, plus **`Antal_forvantad`** — the baseline, the number Visma should still hold —
+   and `Antal_differens`, `btk`, `Lagerplats`, `Enhet` for whoever reviews each article (the add-on
+   shows every column of the row beside the live Visma article). Items with no Visma article number
+   can't be matched and are counted separately; those are the ones to *create* in Visma.
+2. **Run the add-on** over that CSV. It opens each article by exact article number, shows old and
+   new side by side, and needs a **Confirm & save** per article.
+3. **⬆️ Import add-on audit CSV** — its audit records what it actually saved, which becomes each
+   item's new baseline. Only rows it really saved (`updated`/`created`) count: `skipped`,
+   `not_found` and especially **`save_unconfirmed`** (Save was clicked but completion couldn't be
+   verified) never move the baseline.
+4. **⬆️ Import scraped article list** — or a plain Visma article export: what Visma holds *right
+   now*. Visma having moved on its own is pulled in; anything else is asked about.
+
+**Nothing is overwritten without being asked.** Rows that agree are applied as they are; every
+disagreement is one row in a review table with both values side by side and an explicit choice that
+starts at *Leave unchanged*:
+
+- **the baseline had drifted** — the audit's `before_stock` isn't the number we exported, so Visma
+  had already changed when the add-on wrote to it, and it may have overwritten a real sale;
+- **webware's own quantity changed after the export**, so Visma was set to the older number;
+- **both sides moved** since the last sync — offered as "take Visma's", "merge to V + (W − B)",
+  "keep ours and just record Visma's", or leave it;
+- **a field webware already has** differs from the incoming one. A blank is filled (nothing to
+  lose); a difference is never overwritten.
+
+Every applied change is an ordinary Activity Log entry under one batch ID, so a whole sync reverts
+in one action — the baseline included (`schema_visma_sync.sql` extends `revert_activity_log_entry()`
+to restore it, while leaving it alone when the snapshot doesn't carry one, which is every other
+write path).
+
+**What the add-on doesn't do yet.** `Antal_forvantad` is an extra column it currently ignores, so
+today it checks nothing before saving and webware catches the drift *afterwards*, from the audit's
+own `before_stock` — the flag arrives one step later, but nothing is lost. For the check to happen
+*before* each save, the add-on needs, in `vismascrap.user.js`: a fourth optional column mapping
+defaulting to `Antal_forvantad` (`populateInventoryMapping`, `selectedInventoryMapping`,
+`prepareInventoryPlan`); a comparison of that value against the live `stock.stockBalance` right
+after `extractArticleSnapshot()` in `runInventoryUpdates`, using its own `quantitiesEqual`; a banner
+and a default of *Skip* for a mismatch in `showArticleReview`; and `expected_stock`/`stock_check`
+appended to `INVENTORY_AUDIT_COLUMNS` with a `changed_in_visma` status added to
+`auditRetryStatuses`. An "auto-apply the rows that match" option would then be a genuine
+time-saver, but it loosens the add-on's one-confirmation-per-save rule, so it belongs in its own
+step behind its own switch.
 
 ## CSV Formats
 
@@ -392,6 +460,7 @@ Everything lives in the `public` schema with RLS enabled. Set up a fresh project
 | 37 | `schema_grant_aware_policies.sql` | makes per-warehouse grants (`warehouse_permissions`) count on `orders`, `kits`/`kit_items`, `warehouse_zones`, `warehouse_rack_images`, `manufacturers` and the `rack-images`/`manufacturer-logos` Storage buckets — 24 additive policies, see the Supabase Mode roles paragraph. Run after #36 (or any time after `schema_maintainer_role.sql` and `schema_warehouse_layout.sql`); safe to re-run, and changes nothing while `warehouse_permissions` is empty |
 | 38 | `schema_editor_add_items.sql` | the item rule "editors and maintainers add and update in their warehouse, only admins delete": `p_items_insert` now also lets an editor insert into their home warehouse; `p_items_update` gets a real `WITH CHECK` (was `true`); the single `FOR ALL` grant policy `p_items_warehouse_permission_write` is replaced by separate insert / update (editor, maintainer, admin grant) and delete (admin grant only) policies. Run after #15 (`schema_maintainer_role.sql`, which now creates the split grant policies itself); safe to re-run |
 | 39 | `schema_bin_code_format.sql` | bin codes switch to the warehouse's own notation, `A 3-3 1-1` (was `A3-3-01`): converts any code already stored in the old notation, replaces the `items_location_code_format` `CHECK`, and moves a bin coordinate left in the free-text `inventorylocation` into `location_code` (only for items with no bin code yet; a duplicate of the item's own code is dropped, anything else is left alone). Run after #16 (`schema_bin_row.sql`); safe to re-run |
+| 40 | `schema_visma_sync.sql` | `items.visma_qty` (numeric) + `items.visma_synced_at` — what Visma held at the last sync, the baseline behind [Visma Sync](#6-visma-sync-settings--visma-sync-editor-supabase-mode); also extends `revert_activity_log_entry()` to restore those two columns, but only when the snapshot carries them (every other write path leaves the baseline alone and so doesn't, and reading a missing key as null would wipe it). Run after #39; safe to re-run |
 | — | `schema_image_storage_fix_bucket_public.sql` | not numbered/sequential — a standalone repair for an already-provisioned project where `item-images` was created private before `schema_image_storage.sql` ran; forces the bucket `public = true`. Safe to re-run, run any time you're seeing broken images. |
 
 **Which of these has your project actually had run?** Paste `supabase/schema_audit.sql` into the SQL Editor (or run it with `supabase db query --linked --file …`): it is read-only and lists every migration above that leaves something checkable behind — a table, a column, a policy, a function setting, the current `CHECK` — as `applied` or `MISSING - run this migration`. It covers #2–#39; the few numbers it skips (#12, #16 — the constraint that #39 replaces — #26 and #32) leave nothing separate to look for. The audit is what found that `activity_log.batch_id` (#33) had never been added to the live project — every activity-log insert was being rejected (the log was empty), and "↩️ Undo" had nothing to look up — and that two functions had lost their `search_path` pin (#28) when a later migration recreated them.
@@ -405,7 +474,7 @@ Everything lives in the `public` schema with RLS enabled. Set up a fresh project
 - **`item_images`** — up to 5 rows per item (see the Images entry in Supabase Mode above for the full behavior). `id` (bigint identity, PK), `btk` (FK to `items.btk`, `on delete cascade`), `warehouse_id`, `full_url` (always set), `thumb_url` (only set for the main photo), `is_main` (boolean; a partial unique index on `(btk) where is_main` keeps at most one main photo per item even under a race), `sort_order`, `created_at`. RLS mirrors `items`' own policies (including the per-warehouse `warehouse_permissions` grant, unlike the simpler profiles-role-only shape most other satellite tables use) rather than a plain profiles-role check — a photo is logically part of an item's own data, so whoever can edit the item should be able to manage its photos too.
 - **`warehouse_rack_images`** — one row per photographed rack. `id` (bigint identity, PK), `warehouse_id` (FK), `zone`, `aisle`, `rack` (smallint, composite-unique with `warehouse_id`+`zone`), `image_url` (the original, as-uploaded photo), `grid_overlay` (jsonb — set by the **📐 Straighten** perspective-correction tool: `{ corners, rectifiedWidth, rectifiedHeight, rectifiedImageUrl, calibration }`, see [Warehouse Page & Layout Designer](#warehouse-page--layout-designer) — `null` until a photo has been straightened), `created_at`. Uploaded from the Warehouse page (editor/admin); each (zone, aisle, rack) has at most one photo — re-uploading replaces it (upsert). Backed by the `rack-images` Storage bucket (public-read, editor/admin write — same shape as `item-images`).
 - **`profiles`** — one row per auth account. `id` (uuid, PK = `auth.users.id`), `role` (`viewer`/`editor`/`admin`), `warehouse_id` (FK → `warehouses.l`), `display_name` (text, optional, self-settable only), `created_at`. A user may read their own row and update only its `display_name` (column-scoped grant — they can never touch their own `role`).
-- **`items`** — `btk` (text, PK), `warehouse_id` (FK), `manufacturer` (text, denormalized display copy kept in sync with `manufacturer_id`), `manufacturer_id` (FK → `manufacturers.id`, nullable), `itemnumber`, `itemname_en`, `itemname_sv`, `itemnumber2`, `itemnumber3`, `numberofitems` (int), `inventorylocation`, `map_position` (text, `A1`–`F6`), `location_code` (text, `Zone Depth-Level Bin-Row` e.g. `A 3-3 1-1`, CHECK-constrained format — see [Bin Location Codes](#bin-location-codes)), `comments`, `images` (legacy, unused for Supabase-mode items), `image_full_url`, `image_thumb_url`, `reorder_threshold` (int, nullable — per-item override for the Low Stock badge, see [Features](#features)), `updated_at`/`updated_by` (set by a trigger on every write), `last_inventoried_at`/`_by`/`_location` (set client-side when a stocktake marks the item Done — a snapshot of `location_code` at that moment, not a live reference — see [Stocktaking](#features) — `_location`/`_at`/`_by` all stay `null` until the item's first count).
+- **`items`** — `btk` (text, PK), `warehouse_id` (FK), `manufacturer` (text, denormalized display copy kept in sync with `manufacturer_id`), `manufacturer_id` (FK → `manufacturers.id`, nullable), `itemnumber`, `itemname_en`, `itemname_sv`, `itemnumber2`, `itemnumber3`, `numberofitems` (int), `inventorylocation`, `map_position` (text, `A1`–`F6`), `location_code` (text, `Zone Depth-Level Bin-Row` e.g. `A 3-3 1-1`, CHECK-constrained format — see [Bin Location Codes](#bin-location-codes)), `comments`, `images` (legacy, unused for Supabase-mode items), `image_full_url`, `image_thumb_url`, `reorder_threshold` (int, nullable — per-item override for the Low Stock badge, see [Features](#features)), `updated_at`/`updated_by` (set by a trigger on every write), `visma_qty` (numeric, nullable — what Visma held at the last sync; written only by a Visma Sync, never by an ordinary edit, so `numberofitems <> visma_qty` means "waiting to be pushed"; null = never synced) and `visma_synced_at`, `last_inventoried_at`/`_by`/`_location` (set client-side when a stocktake marks the item Done — a snapshot of `location_code` at that moment, not a live reference — see [Stocktaking](#features) — `_location`/`_at`/`_by` all stay `null` until the item's first count).
 - **`kits`** — `id` (bigint identity, PK), `kitnumber` (text, nullable — several kits can legitimately share `null`, so the app never treats it alone as a unique key), `name`, `warehouse_id` (FK).
 - **`kit_items`** — `kit_id` (FK → `kits.id`), `btk` (FK → `items.btk`), `quantity` (int); composite PK `(kit_id, btk)`.
 - **`manufacturers`** — `id` (bigint identity, PK), `name` (text, unique), `description`, `contact_name`, `email`, `logo_url`, `created_at`. Global, not warehouse-scoped — the same supplier can ship to multiple warehouses.

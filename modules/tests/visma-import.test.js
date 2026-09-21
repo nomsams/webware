@@ -188,6 +188,9 @@ test('buildVismaImportDraft routes rows to the right destination and enriches ma
   assert.equal(best.needsNewWarehouse, false);
   assert.equal(best.items[0].quantity, 36); // from inventering Antal, not ant_i_lager
   assert.equal(best.items[0].locationCode, 'A 3-3 1-1');
+  // the sync baseline is Visma's OWN figure, not the corrected quantity webware will hold
+  assert.equal(best.items[0].vismaQty, -432);
+  assert.equal(best.items[0].quantity, 36);
   assert.equal(best.items[0].inventoryLocation, null); // a coordinate is moved to the bin location, not repeated
   assert.equal(best.items[0].itemnumber3, '1103236MB');
   assert.equal(best.items[0].manufacturer, 'HÄNY');

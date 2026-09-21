@@ -1116,6 +1116,50 @@
     </div>
 </div>
 
+<!-- Visma Sync (admin, Supabase mode) — the round trip through the VismaScrap add-on. Export what
+     has changed here, let the add-on write it into Visma one reviewed article at a time, then bring
+     its audit CSV back so each item records what Visma now holds. See modules/visma-sync.js for the
+     baseline rule; nothing here writes to Visma itself. -->
+<div class="modal-overlay" id="visma-sync-modal" onclick="handleVismaSyncModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:640px;">
+        <h3 style="margin-top:0;">🔄 Visma Sync</h3>
+        <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:0.75rem;">Each item remembers what Visma held the last time the two were in step. A quantity changed here since then is <strong>waiting to be pushed</strong>; the export carries both numbers so the add-on can check that nobody sold or received the article in Visma meanwhile.</p>
+        <div id="visma-sync-counts" style="margin-bottom:0.75rem;"></div>
+        <div class="setting-row">
+            <strong style="font-size:0.9rem;">1. Send to Visma</strong>
+            <p class="setting-desc">A CSV using the add-on's own column names (<code>visma_artikelnummer</code>, <code>Antal</code>, <code>Produktnamn</code>) plus <code>Antal_forvantad</code>, the number Visma should still hold. Open it in the add-on's <strong>Inventory CSV</strong> box.</p>
+            <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; margin:0.4rem 0;"><input type="checkbox" id="visma-sync-include-never" checked style="width:auto; margin:0;"> Include items never synced before</label>
+            <button class="secondary full-width" onclick="downloadVismaSyncExport()">⬇️ Download sync CSV</button>
+        </div>
+        <div class="setting-row">
+            <strong style="font-size:0.9rem;">2. Bring the result back</strong>
+            <p class="setting-desc">The add-on's <strong>audit CSV</strong> records what it actually saved — that becomes each item's new baseline. A <strong>scraped article list</strong> (or a plain Visma article export) instead says what Visma holds right now, and can pull those numbers in. Neither overwrites anything without asking.</p>
+            <button class="secondary full-width" onclick="document.getElementById('visma-sync-audit-upload').click()" style="margin-bottom:0.4rem;">⬆️ Import add-on audit CSV</button>
+            <input type="file" id="visma-sync-audit-upload" accept=".csv" class="hidden" onchange="handleVismaSyncFileUpload(event, 'audit')" aria-label="Upload VismaScrap audit CSV">
+            <button class="secondary full-width" onclick="document.getElementById('visma-sync-scrape-upload').click()">⬆️ Import scraped article list</button>
+            <input type="file" id="visma-sync-scrape-upload" accept=".csv" class="hidden" onchange="handleVismaSyncFileUpload(event, 'scrape')" aria-label="Upload scraped Visma article list CSV">
+        </div>
+        <p id="visma-sync-error" class="hidden" style="color:var(--danger); font-size:0.85rem;"></p>
+        <div class="modal-actions" style="margin-top:0.75rem;">
+            <button class="secondary full-width" onclick="closeVismaSyncModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Review before anything is written. Rows that agree are applied as-is; every disagreement is one
+     row here with the two values side by side and an explicit choice. See renderVismaSyncReview(). -->
+<div class="modal-overlay" id="visma-sync-review-modal" onclick="handleVismaSyncReviewModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:900px;">
+        <h3 style="margin-top:0;" id="visma-sync-review-title">🔄 Review Visma Sync</h3>
+        <div id="visma-sync-review-counts" style="margin-bottom:0.75rem;"></div>
+        <div id="visma-sync-review-body" style="max-height:55vh; overflow-y:auto;"></div>
+        <div class="modal-actions" style="margin-top:0.75rem;">
+            <button class="secondary full-width" onclick="closeVismaSyncReview()">Cancel</button>
+            <button class="full-width" id="btn-visma-sync-apply" onclick="commitVismaSyncPlan()">✅ Apply</button>
+        </div>
+    </div>
+</div>
+
 <!-- Pre-commit summary — a full breakdown of what a CSV import is about to do, shown before ANY
      row is touched (whether or not anything actually needs one-by-one review afterward), so a big
      or unfamiliar file's effect is clear up front rather than only surfacing as individual
@@ -1824,6 +1868,7 @@
         <button class="secondary full-width hidden" id="btn-backorder-report" onclick="openBackorderReportModal()" style="margin-bottom:1rem;">📋 Backorder Report</button>
         <button class="secondary full-width hidden" id="btn-pack-order-history" onclick="openPackOrderHistoryModal()" style="margin-bottom:1rem;">🧾 Pack Order History</button>
         <button class="secondary full-width hidden" id="btn-unassigned-images" onclick="openUnassignedImagesModal()" style="margin-bottom:1rem;">🗄️ Unassigned Images</button>
+        <button class="secondary full-width hidden" id="btn-visma-sync" onclick="openVismaSyncModal()" style="margin-bottom:1rem;">🔄 Visma Sync</button>
 
         <div class="setting-row">
             <label>🔑 Your Personal Groq API Key (optional)</label>
@@ -2336,6 +2381,23 @@
     // match COLUMNS_B verbatim. Common alternate spellings a real-world export might use, keyed by
     // our own canonical name; matched after normalizing away case/spacing/punctuation, so "Item
     // Name", "item_name", and "ITEMNAME" all hit the same alias. See suggestColumnMapping().
+    // Checked BEFORE the general aliases below: the exact column names the files we actually import
+    // use, so a Visma article export, a VismaScrap scrape/audit CSV, a physical count file or a
+    // Visma Sync export maps itself with no column mapping by hand. The order matters in one place —
+    // Visma's own article number (`artikelnr` / `visma_artikelnummer` / the add-on's `article_number`)
+    // belongs in Item #3, where the rest of the app looks for it, NOT in Item #1 where the general
+    // alias "articlenumber" would otherwise put it.
+    const VISMA_COLUMN_NAMES = {
+        'itemnumber3': ['artikelnr', 'vismaartikelnummer', 'articlenumber', 'resolvedarticlenumber', 'artikelnummervisma'],
+        'itemname(english)': ['artikelnamn', 'cleanname', 'produktnamn', 'articlename', 'benamning'],
+        'Numberofitems': ['antilager', 'antalilager', 'antal', 'lagersaldo', 'stockbalance', 'confirmedquantity'],
+        'UnitType': ['enhet'],
+        'Manufacturer': ['foretag', 'manufacturers', 'tillverkare'],
+        'LocationCode': ['plats', 'lagerplats'],
+        'itemnumber': ['articlecode1', 'artikelnummer'],
+        'itemnumber2': ['articlecode2'],
+        'Comments': ['notes', 'anteckningar'],
+    };
     const CSV_COLUMN_ALIASES = {
         'BTKnumber': ['btk', 'btknumber', 'btknum', 'btkno', 'systemid', 'id'],
         'itemname(english)': ['itemname', 'name', 'englishname', 'itemnameenglish', 'productname', 'description', 'title'],
@@ -2372,16 +2434,20 @@
         }
         return dp[m][n];
     }
-    // One suggested COLUMNS_B target per raw header — exact name match first, then the alias
-    // table, then a loose edit-distance fallback (so a typo like "Manufaturer" still lands on the
-    // right field) rather than silently dropping an unrecognized column. Never maps two different
-    // headers onto the same target field.
+    // One suggested COLUMNS_B target per raw header — exact name match first, then the exact Visma /
+    // add-on column names, then the general alias table, then a loose edit-distance fallback (so a
+    // typo like "Manufaturer" still lands on the right field) rather than silently dropping an
+    // unrecognized column. Never maps two different headers onto the same target field.
     function suggestColumnMapping(rawHeaders) {
         const used = new Set();
         return rawHeaders.map(header => {
             const norm = normalizeHeaderName(header);
             let target = COLUMNS_B.find(c => normalizeHeaderName(c) === norm) || null;
             let confident = !!target;
+            if (!target) {
+                target = COLUMNS_B.find(c => (VISMA_COLUMN_NAMES[c] || []).some(a => normalizeHeaderName(a) === norm)) || null;
+                confident = !!target;
+            }
             if (!target) {
                 target = COLUMNS_B.find(c => (CSV_COLUMN_ALIASES[c] || []).some(a => normalizeHeaderName(a) === norm)) || null;
                 confident = !!target;
@@ -2729,7 +2795,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             images: row.images || '', // legacy static-mode field, unused for Supabase-mode items now
             imageFullUrl: row.image_full_url || '',
             imageThumbUrl: row.image_thumb_url || '',
-            ReorderThreshold: (row.reorder_threshold === null || row.reorder_threshold === undefined) ? '' : String(row.reorder_threshold)
+            ReorderThreshold: (row.reorder_threshold === null || row.reorder_threshold === undefined) ? '' : String(row.reorder_threshold),
+            // What Visma held at the last sync — null means never synced. Deliberately NOT part of
+            // itemToSupabaseRow: an ordinary edit must leave it alone, which is what makes that edit
+            // show up as "waiting to be pushed to Visma". See modules/visma-sync.js.
+            VismaQty: (row.visma_qty === null || row.visma_qty === undefined) ? null : Number(row.visma_qty),
+            VismaSyncedAt: row.visma_synced_at || null
         };
     }
 
@@ -5183,7 +5254,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // what the item already has. Also the non-destructive way to repair items that went in through
     // the plain Items import with the wrong unit or no bin code: feed the same export back in,
     // matched on its own article number.
-    const STOCK_QTY_ALIASES = ['quantity', 'qty', 'stock', 'count', 'amount', 'onhand', 'numberofitems'];
+    // 'antal'/'antalilager'/'antilager'/'lagersaldo' are the Visma export's and the add-on's own
+    // names (see VISMA_COLUMN_NAMES) — a Visma file therefore needs no mapping by hand. A Visma Sync
+    // export's other two quantity columns ("Antal_forvantad"/"Antal_differens") deliberately don't
+    // normalize onto any of these, so feeding one back in updates stock from `Antal` only.
+    const STOCK_QTY_ALIASES = ['quantity', 'qty', 'stock', 'count', 'amount', 'onhand', 'numberofitems', 'antal', 'antalilager', 'antilager', 'lagersaldo', 'stockbalance'];
     const STOCK_UNIT_ALIASES = ['unittype', 'unit', 'uom', 'unitofmeasure', 'enhet'];
     const STOCK_BIN_ALIASES = ['locationcode', 'bincode', 'binlocation', 'binlocationcode', 'plats', 'lagerplats', 'location', 'inventorylocation'];
     const STOCK_BTK_ALIASES = ['btk', 'btknumber', 'btknum', 'btkno', 'systemid', 'id'];
@@ -8424,6 +8499,21 @@ th { background: #eee; }
         });
     }
 
+    // Where this item stands against Visma — what Visma held at the last sync, and whether our own
+    // number has moved since (see modules/visma-sync.js). Supabase mode only; a warehouse that never
+    // syncs shows nothing rather than a row of dashes on every item.
+    function vismaSyncField(item) {
+        if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase' || typeof window.syncStateFor !== 'function') return '';
+        const s = window.syncStateFor(item);
+        if (s.state === 'no-number') return '';
+        const when = item.VismaSyncedAt ? new Date(item.VismaSyncedAt).toLocaleDateString() : '';
+        let body;
+        if (s.state === 'never-synced') body = `<span style="color:var(--text-muted);">never synced</span>`;
+        else if (s.state === 'in-sync') body = `${escapeHtml(String(s.baseline))} — in sync${when ? ` <span style="color:var(--text-muted);">(${escapeHtml(when)})</span>` : ''}`;
+        else body = `${escapeHtml(String(s.baseline))} <span style="color:var(--primary); font-weight:600;">· ${s.delta > 0 ? '+' : ''}${escapeHtml(String(s.delta))} waiting to be pushed</span>${when ? ` <span style="color:var(--text-muted);">(last synced ${escapeHtml(when)})</span>` : ''}`;
+        return `<div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Visma stock:</span><span>${body}</span></div>`;
+    }
+
     function renderItemFields(item, id) {
         const getStr = val => (!val || val === 'None') ? '<span style="color:var(--text-muted)">N/A</span>' : escapeHtml(val);
         const dMfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
@@ -8463,6 +8553,7 @@ th { background: #eee; }
                     <button class="secondary" style="min-width:34px;min-height:34px;padding:0;" onclick="adjustStock(1)" aria-label="Increase stock">+</button>
                 </span>` : ''}
             </div>
+            ${vismaSyncField(item)}
             <div style="margin-bottom:12px;display:flex;gap:10px;"><span style="font-weight:600;width:200px;flex-shrink:0;color:var(--text-muted);">Inventory Location:</span><span>${getStr(item.Inventorylocation)}</span></div>
             <div id="cross-warehouse-breakdown"></div>
             ${field('Map Position', item.MapPosition)}
@@ -10696,7 +10787,19 @@ th { background: #eee; }
                     LocationCode: item.locationCode || 'None', Comments: item.comment || 'None', Link: 'None',
                 };
                 const row = await itemToSupabaseRow(legacyItem);
-                groupEntries.push({ btk, row: { ...row, btk, warehouse_id: warehouseId, images: '' }, name: item.name });
+                // The sync baseline: what VISMA's own export said it holds for this article, which is
+                // not necessarily the quantity above (a physical count wins, a negative reading is
+                // reset to 0). Recording it here means a later Visma Sync export can tell whether
+                // Visma has moved since — see modules/visma-sync.js.
+                groupEntries.push({
+                    btk,
+                    row: {
+                        ...row, btk, warehouse_id: warehouseId, images: '',
+                        visma_qty: item.vismaQty === null || item.vismaQty === undefined ? null : item.vismaQty,
+                        visma_synced_at: item.vismaQty === null || item.vismaQty === undefined ? null : new Date().toISOString(),
+                    },
+                    name: item.name,
+                });
             }
 
             const succeededBTKs = new Set();
@@ -10749,6 +10852,227 @@ th { background: #eee; }
         const canUndo = canUndoBatches() && batchId && (deleted + created > 0);
         showToast(msg, (createFailed || bestWipeFailed) ? 'warning' : (parts.length ? 'success' : 'info'), canUndo ? 15000 : 8000,
             canUndo ? { label: '↩️ Undo', onClick: () => undoImportBatch(batchId) } : null);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  VISMA SYNC — the round trip through the VismaScrap add-on
+    // ════════════════════════════════════════════════════════════════════════
+    // webware never talks to Visma itself: the add-on does, one reviewed article at a time, and the
+    // two exchange CSV files. What makes an update safe rather than a blind overwrite is the
+    // BASELINE each item keeps (items.visma_qty — what Visma held at the last sync). The rule and
+    // every decision live in modules/visma-sync.js; this is the file handling, the review table and
+    // the writes. Nothing is written until "Apply", and nothing webware already holds is overwritten
+    // without being asked about first.
+    var vismaSyncPlan = null;      // { kind: 'audit'|'scrape', plan, choices: [] } between review and apply
+
+    function openVismaSyncModal() {
+        if (!requireAuth()) return;
+        if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') { showToast("Visma Sync needs a Supabase-mode warehouse.", "warning"); return; }
+        if (!canEditItems()) { showToast("Editor or admin only.", "warning"); return; }
+        document.getElementById('visma-sync-error').classList.add('hidden');
+        document.getElementById('visma-sync-modal').classList.add('open');
+        renderVismaSyncCounts();
+    }
+    function closeVismaSyncModal() { document.getElementById('visma-sync-modal').classList.remove('open'); }
+    function handleVismaSyncModalOverlayClick(e) { if (e.target === document.getElementById('visma-sync-modal')) closeVismaSyncModal(); }
+
+    function renderVismaSyncCounts() {
+        const c = window.summarizeSyncStates(globalInventory);
+        const box = (label, n, tone) => `<div style="flex:1; min-width:110px; padding:8px 10px; border:1px solid var(--border); border-radius:8px;">
+            <div style="font-size:1.3rem; font-weight:800; color:${tone};">${n}</div>
+            <div style="font-size:0.76rem; color:var(--text-muted);">${label}</div></div>`;
+        document.getElementById('visma-sync-counts').innerHTML =
+            `<div style="display:flex; gap:8px; flex-wrap:wrap;">
+                ${box('waiting to be pushed', c.pending, 'var(--primary)')}
+                ${box('in sync with Visma', c['in-sync'], 'var(--text-main)')}
+                ${box('never synced', c['never-synced'], 'var(--text-muted)')}
+                ${box('no article number', c['no-number'], 'var(--text-muted)')}
+            </div>`;
+    }
+
+    function downloadVismaSyncExport() {
+        const includeNever = document.getElementById('visma-sync-include-never').checked;
+        const states = includeNever ? ['pending', 'never-synced'] : ['pending'];
+        const { columns, rows, skipped } = window.buildSyncExport(globalInventory, { states, warehouseName: getWarehouseMeta(currentWarehouseId).name || currentWarehouseId });
+        if (!rows.length) { showToast("Nothing to send — every item with a Visma article number already matches what Visma last held.", "info", 6000); return; }
+        const stamp = new Date().toISOString().slice(0, 10);
+        downloadTextFile(`visma-sync-${currentWarehouseId}-${stamp}.csv`, Papa.unparse(rows, { columns }), 'text/csv');
+        showToast(`${rows.length} item(s) exported.${skipped.length ? ` ${skipped.length} left out — no Visma article number.` : ''} Open it in the add-on's Inventory CSV box.`, "success", 9000);
+    }
+
+    function handleVismaSyncFileUpload(event, kind) {
+        const file = event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = e => beginVismaSyncImport(String(e.target.result || ''), kind);
+        reader.readAsText(file);
+    }
+
+    function beginVismaSyncImport(csvText, kind) {
+        const err = document.getElementById('visma-sync-error');
+        const fail = msg => { err.textContent = msg; err.classList.remove('hidden'); };
+        err.classList.add('hidden');
+        if (!csvText.trim()) { fail("That file is empty."); return; }
+        const parsed = Papa.parse(csvText.trim(), { header: true, skipEmptyLines: true });
+        if (!parsed.meta.fields || !parsed.data.length) { fail("Couldn't find a header row and at least one data row in that CSV."); return; }
+        const plan = kind === 'audit'
+            ? window.planAuditImport(parsed.data, globalInventory)
+            : window.planScrapeImport(parsed.data, globalInventory, { scrapedAt: new Date().toISOString() });
+        if (!plan.counts.apply && !plan.counts.review) {
+            fail(`Nothing to do from that file — ${plan.counts.ignored} row(s) had nothing to act on` +
+                (plan.counts.unmatched ? `, including ${plan.counts.unmatched} whose article number matches no item in this warehouse.` : '.') +
+                (kind === 'audit' ? ' An audit CSV only counts rows the add-on actually saved.' : ''));
+            return;
+        }
+        // Every conflict starts at "leave it alone": a difference is something to decide, not a default.
+        vismaSyncPlan = { kind, plan, choices: plan.review.map(() => 'skip') };
+        closeVismaSyncModal();
+        document.getElementById('visma-sync-review-modal').classList.add('open');
+        renderVismaSyncReview();
+    }
+
+    function vismaSyncChoiceOptions(entry, kind) {
+        // What each choice does for this row, in the row's own numbers.
+        const opts = [{ value: 'skip', label: 'Leave unchanged' }];
+        if (kind === 'audit') {
+            if (entry.visma !== null && entry.visma !== undefined) {
+                opts.push({ value: 'baseline', label: `Record Visma = ${entry.visma}` });
+                if (entry.visma !== entry.ours) opts.push({ value: 'theirs', label: `…and set our quantity to ${entry.visma}` });
+            }
+        } else {
+            if (entry.visma !== null && entry.visma !== undefined) opts.push({ value: 'theirs', label: `Take Visma's ${entry.visma}` });
+            if (entry.suggestion !== undefined) opts.push({ value: 'merge', label: `Merge to ${entry.suggestion}` });
+            opts.push({ value: 'baseline', label: `Keep our ${entry.ours}, just record Visma` });
+        }
+        return opts;
+    }
+
+    function renderVismaSyncReview() {
+        const { kind, plan, choices } = vismaSyncPlan;
+        document.getElementById('visma-sync-review-title').textContent = kind === 'audit' ? '🔄 Review add-on audit' : '🔄 Review Visma article list';
+        const counts = document.getElementById('visma-sync-review-counts');
+        counts.innerHTML = `<p style="font-size:0.9rem; margin:0 0 0.35rem;">${plan.counts.apply} row(s) agree and will be applied as they are. <strong>${plan.counts.review} need a decision.</strong> ${plan.counts.ignored} ignored${plan.counts.unmatched ? ` (${plan.counts.unmatched} matched no item here)` : ''}.</p>` +
+            (plan.counts.review ? `<p style="font-size:0.82rem; color:var(--text-muted); margin:0;">Everything below starts at <em>Leave unchanged</em> — nothing is overwritten unless you pick it.
+                <button type="button" class="stats-link" onclick="setAllVismaSyncChoices('baseline')">record Visma's number on all</button> ·
+                <button type="button" class="stats-link" onclick="setAllVismaSyncChoices('skip')">reset all</button></p>` : '');
+
+        const rowsHtml = plan.review.map((entry, i) => {
+            const conflicts = entry.conflicts.map(c => `<div style="font-size:0.78rem;"><span style="color:var(--text-muted);">${escapeHtml(c.field)}:</span> ours <strong>${escapeHtml(c.ours || '—')}</strong> · Visma <strong>${escapeHtml(c.theirs)}</strong></div>`).join('');
+            const opts = vismaSyncChoiceOptions(entry, kind).map(o =>
+                `<label style="display:inline-flex; align-items:center; gap:5px; font-size:0.8rem; margin:0 10px 0 0; cursor:pointer;">
+                    <input type="radio" name="vsync-${i}" value="${o.value}" ${choices[i] === o.value ? 'checked' : ''} onchange="setVismaSyncChoice(${i}, this.value)" style="width:auto; margin:0;"> ${escapeHtml(o.label)}</label>`).join('');
+            return `<div style="padding:8px 0; border-bottom:1px solid var(--border);">
+                <div style="font-weight:600; font-size:0.86rem;">${escapeHtml(entry.name || entry.btk || entry.articleNumber)} <span style="color:var(--text-muted); font-weight:400;">${escapeHtml(entry.btk || '')} · ${escapeHtml(entry.articleNumber)}</span></div>
+                <div style="font-size:0.8rem; color:var(--warning, #b8860b); margin:2px 0;">${escapeHtml(entry.reason || 'needs a decision')}</div>
+                ${conflicts}
+                <div style="margin-top:5px;">${opts}</div>
+            </div>`;
+        }).join('');
+
+        const appliedHtml = plan.apply.length
+            ? `<details style="margin-top:0.6rem;"><summary style="cursor:pointer; font-size:0.85rem;">${plan.apply.length} applied without asking</summary>
+                <div style="font-size:0.78rem; color:var(--text-muted); padding-top:4px;">${plan.apply.slice(0, 200).map(e => `${escapeHtml(e.btk || e.articleNumber)}: ${escapeHtml(e.reason || '')}`).join('<br>')}${plan.apply.length > 200 ? '<br>…' : ''}</div></details>` : '';
+        const ignoredHtml = plan.ignored.length
+            ? `<details style="margin-top:0.4rem;"><summary style="cursor:pointer; font-size:0.85rem;">${plan.ignored.length} ignored</summary>
+                <div style="font-size:0.78rem; color:var(--text-muted); padding-top:4px;">${plan.ignored.slice(0, 200).map(e => `row ${e.rowNumber}${e.articleNumber ? ' · ' + escapeHtml(e.articleNumber) : ''}: ${escapeHtml(e.reason)}`).join('<br>')}${plan.ignored.length > 200 ? '<br>…' : ''}</div></details>` : '';
+        document.getElementById('visma-sync-review-body').innerHTML = rowsHtml + appliedHtml + ignoredHtml;
+    }
+
+    function setVismaSyncChoice(index, choice) { if (vismaSyncPlan) vismaSyncPlan.choices[index] = choice; }
+    function setAllVismaSyncChoices(choice) {
+        if (!vismaSyncPlan) return;
+        vismaSyncPlan.choices = vismaSyncPlan.plan.review.map(entry =>
+            vismaSyncChoiceOptions(entry, vismaSyncPlan.kind).some(o => o.value === choice) ? choice : 'skip');
+        renderVismaSyncReview();
+    }
+    function closeVismaSyncReview() { document.getElementById('visma-sync-review-modal').classList.remove('open'); vismaSyncPlan = null; }
+    function handleVismaSyncReviewModalOverlayClick(e) { if (e.target === document.getElementById('visma-sync-review-modal')) closeVismaSyncReview(); }
+
+    function commitVismaSyncPlan() { return runExclusive('visma-sync', doCommitVismaSyncPlan); }
+    async function doCommitVismaSyncPlan() {
+        if (!vismaSyncPlan) return;
+        const { kind, plan, choices } = vismaSyncPlan;
+        const btn = document.getElementById('btn-visma-sync-apply');
+        btn.disabled = true; btn.textContent = 'Applying…';
+
+        // One list of {item, changes}: the rows that agreed, plus each reviewed row the way it was answered.
+        const work = [];
+        plan.apply.forEach(entry => {
+            const item = globalInventory.find(i => i.BTKnumber === entry.btk);
+            if (item) work.push({ item, changes: { ...entry.changes }, note: entry.reason });
+        });
+        plan.review.forEach((entry, i) => {
+            const choice = choices[i];
+            if (choice === 'skip') return;
+            const item = globalInventory.find(i => i.BTKnumber === entry.btk);
+            if (!item) return;
+            const changes = {};
+            // 'baseline' records what Visma holds without touching our own number; the others also
+            // move the quantity, to Visma's value or to the merge that keeps both sides' changes.
+            if (entry.visma !== null && entry.visma !== undefined) { changes.VismaQty = entry.visma; changes.VismaSyncedAt = entry.changes.VismaSyncedAt || new Date().toISOString(); }
+            if (choice === 'theirs') changes.Numberofitems = entry.visma;
+            if (choice === 'merge') changes.Numberofitems = entry.suggestion;
+            // A blank field the row offered to fill is only carried along when the person chose to act.
+            Object.keys(entry.changes).forEach(k => { if (k !== 'VismaQty' && k !== 'VismaSyncedAt' && k !== 'Numberofitems') changes[k] = entry.changes[k]; });
+            if (Object.keys(changes).length) work.push({ item, changes, note: `reviewed: ${choice}` });
+        });
+
+        if (!work.length) {
+            closeVismaSyncReview();
+            btn.disabled = false; btn.textContent = '✅ Apply';
+            showToast("Nothing applied — every row was left unchanged.", "info");
+            return;
+        }
+
+        const batchId = window.crypto?.randomUUID ? window.crypto.randomUUID() : null;
+        const userId = await currentAuthUserId();
+        const entries = [];
+        for (const { item, changes } of work) {
+            // The "before" snapshot has to be what is actually stored, baseline included, so an Undo
+            // puts both back (revert_activity_log_entry restores visma_qty too — schema_visma_sync.sql).
+            const beforeRow = await itemToSupabaseRow(item);
+            beforeRow.location_code = (item.LocationCode && item.LocationCode !== 'None') ? item.LocationCode : null;
+            beforeRow.inventorylocation = (item.Inventorylocation && item.Inventorylocation !== 'None') ? item.Inventorylocation : null;
+            beforeRow.visma_qty = item.VismaQty ?? null;
+            beforeRow.visma_synced_at = item.VismaSyncedAt || null;
+            const updated = { ...item };
+            if (changes.Numberofitems !== undefined) updated.Numberofitems = String(changes.Numberofitems);
+            if (changes['itemname(english)'] !== undefined) updated['itemname(english)'] = changes['itemname(english)'];
+            if (changes.UnitType !== undefined) updated.UnitType = unitTypeFromText(changes.UnitType) || item.UnitType;
+            const row = await itemToSupabaseRow(updated);
+            entries.push({
+                btk: item.BTKnumber, beforeRow, changes,
+                row: {
+                    ...row, btk: item.BTKnumber, warehouse_id: currentWarehouseId, images: item.images || '',
+                    visma_qty: changes.VismaQty ?? (item.VismaQty ?? null),
+                    visma_synced_at: changes.VismaSyncedAt || item.VismaSyncedAt || null,
+                },
+            });
+        }
+
+        const { succeeded, failed } = await bulkUpsertItemRows(entries);
+        await logActivityBulk(entries.filter(e => succeeded.has(e.btk)).map(e => ({
+            action: 'update', btk: e.btk, beforeRow: e.beforeRow, afterRow: e.row,
+            summary: `Visma sync: ${summarizeVismaSyncChange(e)}`,
+        })), batchId, { userId });
+        await supabaseLoadList(currentWarehouseId);
+
+        closeVismaSyncReview();
+        btn.disabled = false; btn.textContent = '✅ Apply';
+        const qtyChanged = entries.filter(e => e.changes.Numberofitems !== undefined && succeeded.has(e.btk)).length;
+        const canUndo = canUndoBatches() && batchId && succeeded.size > 0;
+        showToast(`Visma sync: ${succeeded.size} item(s) updated${qtyChanged ? `, ${qtyChanged} of them a quantity` : ' (baseline only)'}.${failed ? ` ${failed} failed — see console.` : ''}`,
+            failed ? 'warning' : 'success', canUndo ? 15000 : 7000,
+            canUndo ? { label: '↩️ Undo', onClick: () => undoImportBatch(batchId) } : null);
+        if (document.getElementById('visma-sync-modal').classList.contains('open')) renderVismaSyncCounts();
+    }
+
+    function summarizeVismaSyncChange(entry) {
+        const parts = [];
+        if (entry.changes.Numberofitems !== undefined) parts.push(`Qty: ${entry.beforeRow.numberofitems} → ${entry.changes.Numberofitems}`);
+        if (entry.changes.VismaQty !== undefined) parts.push(`Visma: ${entry.beforeRow.visma_qty ?? '—'} → ${entry.changes.VismaQty}`);
+        return parts.join(', ') || 'no field change';
     }
 
     function submitItemForm() { return runExclusive('save-item', doSubmitItemForm); }
@@ -11240,6 +11564,9 @@ ${css}
         document.getElementById('btn-backorder-report').classList.toggle('hidden', !(isSupa && canEditItems()));
         document.getElementById('btn-pack-order-history').classList.toggle('hidden', !(isSupa && canEditItems()));
         document.getElementById('btn-unassigned-images').classList.toggle('hidden', !(isSupa && canEditItems()));
+        // Editor+ like the other stock tools: a sync only ever changes quantities and the baseline,
+        // it never creates or deletes an item.
+        document.getElementById('btn-visma-sync').classList.toggle('hidden', !(isSupa && canEditItems()));
         document.getElementById('display-name-row').classList.toggle('hidden', !isSupa);
         // Storage/database usage stats are admin-only — editors/maintainers/viewers don't need
         // (or, per the requested role model, shouldn't see) account-wide quota info.
@@ -12643,6 +12970,13 @@ Respond with ONLY the JSON object, nothing else.`;
     import { extractJsonObjects } from './modules/json-extract.js';
     import { relinkKitLines } from './modules/kit-relink.js';
     window.relinkKitLines = relinkKitLines; // the Visma import puts Best's kit lines back on the re-created items
+    import { summarizeSyncStates, buildSyncExport, planAuditImport, planScrapeImport, syncStateFor } from './modules/visma-sync.js';
+    // Settings → 🔄 Visma Sync, and the badge on an item's own page
+    window.summarizeSyncStates = summarizeSyncStates;
+    window.buildSyncExport = buildSyncExport;
+    window.planAuditImport = planAuditImport;
+    window.planScrapeImport = planScrapeImport;
+    window.syncStateFor = syncStateFor;
     window.extractJsonObjects = extractJsonObjects; // the AI assistant reads its reply's action with it
     import { fitLabelText } from './modules/label-fit.js';
     window.fitLabelText = fitLabelText; // label printing: wraps on spaces and shrinks text to fit beside the QR code

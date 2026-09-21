@@ -60,7 +60,7 @@
 //   // draft: {
 //   //   groups: [{ suffixCode, isBest, needsNewWarehouse, warehouseName, city, items: [{
 //   //     vismaCode, name, manufacturer, itemnumber, itemnumber2, itemnumber3, unitType,
-//   //     quantity, comment, locationCode, inventoryLocation,
+//   //     quantity, comment, vismaQty, locationCode, inventoryLocation,
 //   //   }] }],
 //   //   unresolvedManufacturerCount, noLocationCount, resetQuantityCount,
 //   // }
@@ -320,6 +320,13 @@ export function buildVismaImportDraft(vismaRows, inventeringRows) {
 
     const { quantity, comment } = resolveQuantity(row.ant_i_lager, inventeringMatch);
     if (comment) resetQuantityCount++;
+    // What VISMA itself says it holds, raw and untouched — separate from `quantity`, which is what
+    // WEBWARE will hold (the physical count when there is one, and a negative reading reset to 0).
+    // It becomes the sync baseline, so a later export can tell whether Visma has moved since; using
+    // the corrected quantity here would claim Visma already agrees with us when it does not.
+    // See modules/visma-sync.js.
+    const vismaRaw = parseSwedishNumber(row.ant_i_lager);
+    const vismaQty = Number.isFinite(vismaRaw) ? vismaRaw : null;
 
     // The inventory-count file's own Plats wins when this row has a match there; otherwise fall
     // back to the Visma export's own `location` column (added in the "v3" export, carrying the same
@@ -335,7 +342,7 @@ export function buildVismaImportDraft(vismaRows, inventeringRows) {
       vismaCode, name: displayName, manufacturer,
       itemnumber, itemnumber2, itemnumber3: vismaCode,
       unitType: mapEnhetToUnitType(row.enhet),
-      quantity, comment,
+      quantity, comment, vismaQty,
       locationCode: location ? location.locationCode : null,
       inventoryLocation: location ? null : platsValue,
     };

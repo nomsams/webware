@@ -130,5 +130,10 @@ from (
   select 39, 'schema_bin_code_format.sql', 'items_location_code_format is the "A 3-3 1-1" pattern',
     exists (select 1 from pg_constraint where conrelid = 'public.items'::regclass and conname = 'items_location_code_format'
             and pg_get_constraintdef(oid) like '%[A-Z]{1,2} [0-9]{1,2}-[0-9]{1,2} [0-9]{1,2}-[0-9]{1,2}$%')
+  union all
+  select 40, 'schema_visma_sync.sql', 'items.visma_qty column + revert restores it',
+    exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'items' and column_name = 'visma_qty')
+    and exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'public' and p.proname = 'revert_activity_log_entry' and pg_get_functiondef(p.oid) ilike '%visma_qty%')
 ) t
 order by t.n;
