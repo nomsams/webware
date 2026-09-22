@@ -219,27 +219,39 @@ node --test modules/tests/*.test.js
   and handles the clicks (`data-depth`/`data-level`/`data-bin` on bins, `data-zone` on floor blocks).
   Three exports beyond the constants:
   - `resolveRackGeometry(zone, bounds, extra)` — turns a `warehouse_zones` row (all sizes optional,
-    in cm: rack width per bay/depth/height, shelf width/depth/clear-height, bin width/depth/height)
-    plus the zone's Depth/Level/Bin counts into one geometry object. Anything not recorded falls back
+    in cm: rack width per bay/depth/height, shelf width/depth/clear-height, bin width/depth/height,
+    plus `rack_style`) and the zone's Depth/Level/Bin counts into one geometry object, whose `style`
+    field is `'pallet'` or `'shelving'` (`z.rack_style === 'shelving'` picks the latter, anything
+    else — including unset — is `'pallet'`, matched against real photos of this warehouse's own two
+    kinds of racking rather than one generic shape for everything). Anything not recorded falls back
     to a schematic default so the picture still reads, and the result's `recorded` field says which
     values were real — that's what lets the callouts show a dashed "≈" for a guess and a solid value
-    for a measurement. Junk (negative, zero, `NaN`, text) counts as not recorded. A bin/Row beyond
-    the configured size (`extra.minBin`/`minRows`) widens the picture instead of falling off it.
-  - `buildIsoRackSVG(geom, opts)` — one rack area. The rack (boards, end faces, bin outlines) is
-    semi-transparent through CSS-variable classes so it follows the app's light/dark theme; the
-    located bin (`opts.highlight`) is one **solid blue** box with a coordinates pill, painted at its
-    true depth in painter's order plus an opaque-ish overlay copy so a rack standing in front can't
-    wash it out. `opts.occupied` tints bins that hold items (the Bin Locator), `opts.selected`
-    outlines a shelf, `opts.interactive` adds the `data-*` hooks, `opts.showDimensions` /
-    `opts.sampleBin` add the measurement callouts and a sample bin for the dimensions panel. Empty-bin
-    outlines are dropped past ~2500 bins so a huge rack stays cheap; occupied/selected bins never are.
+    for a measurement. Junk (negative, zero, `NaN`, text, an unrecognized `rack_style`) counts as not
+    recorded. A bin/Row beyond the configured size (`extra.minBin`/`minRows`) widens the picture
+    instead of falling off it.
+  - `buildIsoRackSVG(geom, opts)` — one rack area, drawn to match `geom.style`: **pallet racking**
+    gets a thick orange beam at each level (`iso-beam-top/front/side` — no solid deck, since a pallet
+    sits directly on the beams) and yellow corner guards at floor level on the nearest rack
+    (`iso-foot`); **shelving** gets a solid shelf board at each level (`iso-board-top/front/side`,
+    the original single style) and a diagonal X cross-brace per bay up the back (`iso-brace`).
+    Uprights (`iso-post`) are a fixed rack-blue either way — real racking is painted blue regardless
+    of the app's light/dark theme, unlike the rest of the drawing, which follows it through
+    CSS-variable classes. All of this is semi-transparent so the located bin (`opts.highlight`) —
+    one **solid blue** box with a coordinates pill, painted at its true depth in painter's order plus
+    an opaque-ish overlay copy — reads through a rack standing in front of it, in both styles.
+    `opts.occupied` tints bins that hold items (the Bin Locator), `opts.selected` outlines a shelf,
+    `opts.interactive` adds the `data-*` hooks, `opts.showDimensions` / `opts.sampleBin` add the
+    measurement callouts and a sample bin for the dimensions panel. Empty-bin outlines are dropped
+    past ~2500 bins so a huge rack stays cheap; occupied/selected bins never are.
   - `buildIsoFloorSVG(zones, opts)` — the whole floor: each *placed* zone (`grid_col`/`grid_row`) as a
     translucent block at its real footprint, the located bin marked inside its own zone, `''` when no
     zone is placed at all (so the caller can say why instead of showing an empty canvas).
   - `formatLocationCode()` builds the same `Zone Depth-Level Bin-Row` text the app's own codes use
     (`A 3-2 2-1`, Row always written), so the on-picture label always matches the field.
 
-  Tested in `tests/iso-rack.test.js` (geometry fallbacks/derivations, opacity of rack vs. bin, label
+  Tested in `tests/iso-rack.test.js` (geometry fallbacks/derivations, `rack_style` resolution
+  including junk values, opacity of rack vs. bin for both styles, which classes each style actually
+  draws (beam/foot-guard for pallet, board/brace for shelving — and never the other style's), label
   escaping, occupied/selected/interactive markup, dimension callouts, and "every renderer stays finite
   over odd inputs"). SQL for the sizes it reads is `supabase/schema_zone_dimensions.sql`.
 - **`json-extract.js`** — **wired in**: reads JSON objects out of free-form model output. Used by

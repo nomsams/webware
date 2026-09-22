@@ -135,5 +135,8 @@ from (
     exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'items' and column_name = 'visma_qty')
     and exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                 where n.nspname = 'public' and p.proname = 'revert_activity_log_entry' and pg_get_functiondef(p.oid) ilike '%visma_qty%')
+  union all
+  select 41, 'schema_zone_rack_style.sql', 'warehouse_zones.rack_style column',
+    exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'warehouse_zones' and column_name = 'rack_style')
 ) t
 order by t.n;

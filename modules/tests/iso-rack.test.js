@@ -13,14 +13,18 @@ test('formatLocationCode matches the app\'s own bin codes: "Zone Depth-Level Bin
 });
 
 test('resolveRackGeometry falls back to schematic defaults when nothing is recorded, and says so', () => {
+  // No rack_style recorded -> defaults to 'pallet', whose beam is thicker (7cm) than a shelf's
+  // decking board (3cm) — see the 'shelving style' test below for the boardT=3 numbers this test
+  // used to assert before that default existed.
   const g = resolveRackGeometry(null, { maxDepth: 2, maxLevel: 3, maxBin: 10 });
+  assert.equal(g.style, 'pallet');
   assert.equal(g.binsPerLevel, 10);
   assert.equal(g.runLength, 400); // 10 bins x the 40 cm default
   assert.equal(g.cellW, 40);
   assert.equal(g.rackD, 60);
   assert.equal(g.totalDepth, 2 * 60 + 8); // two racks plus the small gap between them
-  assert.equal(g.pitch, 45);
-  assert.equal(g.height, 3 * 45 + 3);
+  assert.equal(g.pitch, 49); // 42 clear + 7 (pallet beam thickness)
+  assert.equal(g.height, 3 * 49 + 7);
   assert.equal(g.recorded.rackW, null);
   assert.equal(g.recorded.shelfH, null);
 });
@@ -35,9 +39,19 @@ test('resolveRackGeometry uses recorded rack/shelf/bin dimensions', () => {
   assert.equal(g.cellW, 24); // 20 bins across 480 cm
   assert.equal(g.rackD, 80);
   assert.equal(g.clear, 50);
-  assert.equal(g.pitch, 53);
-  assert.equal(g.height, 5 * 53 + 3);
+  assert.equal(g.pitch, 57); // 50 recorded clear height + 7 (pallet beam thickness, the default style)
+  assert.equal(g.height, 5 * 57 + 7);
   assert.equal(g.recorded.rackW, 120);
+});
+
+test('resolveRackGeometry: rack_style picks pallet (open beam) vs shelving (thinner board), and rejects an unknown value', () => {
+  const bounds = { maxDepth: 1, maxLevel: 2, maxBin: 4 };
+  assert.equal(resolveRackGeometry({ zone: 'A' }, bounds).style, 'pallet'); // unset -> pallet
+  assert.equal(resolveRackGeometry({ zone: 'A', rack_style: 'pallet' }, bounds).style, 'pallet');
+  const shelving = resolveRackGeometry({ zone: 'A', rack_style: 'shelving' }, bounds);
+  assert.equal(shelving.style, 'shelving');
+  assert.equal(shelving.boardT, 3); // the older, thinner decking-board thickness
+  assert.equal(resolveRackGeometry({ zone: 'A', rack_style: 'unicorn' }, bounds).style, 'pallet'); // never crashes on junk
 });
 
 test('resolveRackGeometry derives the level height from a recorded rack height when the shelf height is missing', () => {
@@ -77,18 +91,62 @@ test('buildIsoRackSVG draws the located bin as one solid blue box with its coord
 });
 
 test('buildIsoRackSVG: the rack structure is see-through (fill-opacity below 1), only the located bin is opaque', () => {
+  // Default (unset) style is 'pallet' — the beam classes are what this geometry actually draws.
+  // Checks must anchor on `class="X"` (actual element usage), not a bare substring: every class
+  // name also appears once in the embedded <style> block's own rule, regardless of whether
+  // anything on the drawing actually uses it.
   const g = resolveRackGeometry({ zone: 'A' }, { maxDepth: 1, maxLevel: 2, maxBin: 4 });
   const svg = buildIsoRackSVG(g, { highlight: { depth: 1, level: 1, bin: 1 } });
-  for (const cls of ['iso-board-top', 'iso-board-front', 'iso-board-side', 'iso-bin']) {
+  for (const cls of ['iso-beam-top', 'iso-beam-front', 'iso-beam-side', 'iso-bin']) {
+    assert.ok(new RegExp(`class="${cls}[" ]`).test(svg), `${cls} is actually drawn`);
     const rule = svg.match(new RegExp(`\\.${cls}\\{([^}]*)\\}`));
     assert.ok(rule, `${cls} has a rule`);
     const m = rule[1].match(/fill-opacity:([0-9.]+)/);
-    assert.ok(m && parseFloat(m[1]) < 0.6, `${cls} is semi-transparent`);
+    assert.ok(m && parseFloat(m[1]) < 0.75, `${cls} is semi-transparent`); // beams read more solid than boards, still see-through
   }
   for (const cls of ['iso-hl-front', 'iso-hl-side', 'iso-hl-top']) {
     const rule = svg.match(new RegExp(`\\.${cls}\\{([^}]*)\\}`))[1];
     assert.doesNotMatch(rule, /fill-opacity/, `${cls} is fully opaque`);
   }
+});
+
+test('buildIsoRackSVG: shelving style draws board classes (not beam classes) and is see-through too', () => {
+  const g = resolveRackGeometry({ zone: 'A', rack_style: 'shelving' }, { maxDepth: 1, maxLevel: 2, maxBin: 4 });
+  const svg = buildIsoRackSVG(g, { highlight: { depth: 1, level: 1, bin: 1 } });
+  assert.doesNotMatch(svg, /class="iso-beam-(top|front|side)/); // the pallet-only classes are never USED (their rule still exists in <style>)
+  for (const cls of ['iso-board-top', 'iso-board-front', 'iso-board-side']) {
+    assert.ok(new RegExp(`class="${cls}[" ]`).test(svg), `${cls} is actually drawn`);
+    const rule = svg.match(new RegExp(`\\.${cls}\\{([^}]*)\\}`))[1];
+    const m = rule.match(/fill-opacity:([0-9.]+)/);
+    assert.ok(m && parseFloat(m[1]) < 0.6, `${cls} is semi-transparent`);
+  }
+});
+
+test('buildIsoRackSVG: pallet racking gets yellow foot guards on the nearest rack only; shelving does not', () => {
+  const pallet = resolveRackGeometry({ zone: 'A', max_aisle: 2 }, { maxDepth: 2, maxLevel: 2, maxBin: 3 });
+  const svgPallet = buildIsoRackSVG(pallet);
+  assert.equal(count(svgPallet, /class="iso-foot"/g), pallet.bays + 1); // one per post on the front rack only
+
+  const shelving = resolveRackGeometry({ zone: 'A', max_aisle: 2, rack_style: 'shelving' }, { maxDepth: 2, maxLevel: 2, maxBin: 3 });
+  const svgShelving = buildIsoRackSVG(shelving);
+  assert.doesNotMatch(svgShelving, /class="iso-foot"/); // its <style> rule can still be present, just unused
+});
+
+test('buildIsoRackSVG: shelving racks are X cross-braced per bay per rack; pallet racking is not', () => {
+  const shelving = resolveRackGeometry({ zone: 'A', max_aisle: 3, rack_style: 'shelving' }, { maxDepth: 2, maxLevel: 2, maxBin: 3 });
+  const svgShelving = buildIsoRackSVG(shelving);
+  assert.equal(count(svgShelving, /class="iso-brace"/g), 2 * shelving.bays * shelving.depthCount); // an X = 2 lines, per bay, per depth-rack
+
+  const pallet = resolveRackGeometry({ zone: 'A', max_aisle: 3 }, { maxDepth: 2, maxLevel: 2, maxBin: 3 });
+  assert.doesNotMatch(buildIsoRackSVG(pallet), /class="iso-brace"/);
+});
+
+test('buildIsoRackSVG: uprights are a fixed rack-blue, not the theme-following muted colour', () => {
+  const g = resolveRackGeometry({ zone: 'A' }, { maxDepth: 1, maxLevel: 1, maxBin: 2 });
+  const svg = buildIsoRackSVG(g);
+  const rule = svg.match(/\.iso-post\{([^}]*)\}/)[1];
+  assert.doesNotMatch(rule, /var\(--text-muted\)/);
+  assert.match(rule, /stroke:#[0-9a-f]{6}/i);
 });
 
 test('buildIsoRackSVG escapes a label instead of injecting markup', () => {

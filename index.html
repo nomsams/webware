@@ -6674,6 +6674,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                     <input type="number" id="zone-inspector-bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('max_bin', this.value)">
                 </div>
             </div>
+            <label class="modal-label" for="zone-inspector-style">Rack style (how this area is drawn in the 3D view)</label>
+            <select id="zone-inspector-style" ${readOnly ? 'disabled' : ''} onchange="onZoneRackStyleChange(this.value)">
+                <option value="pallet" ${z.rack_style === 'shelving' ? '' : 'selected'}>🟧 Pallet racking (open beams)</option>
+                <option value="shelving" ${z.rack_style === 'shelving' ? 'selected' : ''}>🗄️ Boltless shelving (solid shelves)</option>
+            </select>
             <div style="margin-top:0.75rem; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                 <button class="secondary" data-zone="${escapeHtml(z.zone)}" onclick="focusDimPanel(this.dataset.zone)" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.82rem;">📏 Rack, shelf &amp; bin dimensions…</button>
                 <span style="color:var(--text-muted); font-size:0.8rem;">${escapeHtml(dimShortSummary(z))}</span>
@@ -6691,6 +6696,18 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         else if (field === 'shelf_width_cm' || field === 'shelf_height_cm') z[field] = value === '' ? null : (parseFloat(value) || null);
         else z[field] = parseInt(value, 10) || 1;
         pushZoneHistory(false); // debounced — don't create an undo step per keystroke
+    }
+
+    // A separate handler, not routed through updateSelectedZoneField() above — that function's own
+    // fallback branch does parseInt(value, 10) on anything it doesn't recognize by name, which would
+    // silently turn 'pallet'/'shelving' into 1. Fires once per selection (not per keystroke), so —
+    // like onDimInput()'s own preview refresh — it re-renders immediately rather than debounced.
+    function onZoneRackStyleChange(value) {
+        const z = globalWarehouseZones.find(z => z.zone === selectedZoneLetter);
+        if (!z) return;
+        z.rack_style = value === 'shelving' ? 'shelving' : 'pallet';
+        pushZoneHistory(true);
+        renderDimPreview();
     }
 
     function deleteSelectedZone() {
@@ -6716,6 +6733,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Depth <input type="number" data-field="max_rack" min="1" value="${z.max_rack || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_rack', this.value)"></label>
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Levels <input type="number" data-field="max_level" min="1" value="${z.max_level || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_level', this.value)"></label>
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Bins <input type="number" data-field="max_bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_bin', this.value)"></label>
+                <select data-field="rack_style" title="Rack style — how this area is drawn in the 3D view" ${readOnly ? 'disabled' : ''} onchange="updateManualZoneField(${idx}, 'rack_style', this.value)" style="width:auto; margin:0; padding:2px 4px; font-size:0.75rem;">
+                    <option value="pallet" ${z.rack_style === 'shelving' ? '' : 'selected'}>🟧 Pallet</option>
+                    <option value="shelving" ${z.rack_style === 'shelving' ? 'selected' : ''}>🗄️ Shelving</option>
+                </select>
                 <button class="secondary" data-zone="${escapeHtml(z.zone)}" onclick="focusDimPanel(this.dataset.zone)" title="Rack, shelf and bin dimensions${dimShortSummary(z) !== 'no dimensions recorded yet' ? ' — ' + escapeHtml(dimShortSummary(z)) : ''}" style="padding:0.35rem 0.6rem; min-height:auto;">📏</button>
                 ${readOnly ? '' : `<button class="secondary" onclick="removeManualZoneRow(${idx})" style="color:var(--danger); padding:0.35rem 0.6rem; min-height:auto;">✕</button>`}
             </div>`).join('') || `<p style="color:var(--text-muted); font-size:0.85rem;">No zones defined yet.</p>`;
@@ -6727,8 +6748,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!z) return;
         if (field === 'zone' || field === 'label') z[field] = value;
         else if (field === 'shelf_width_cm' || field === 'shelf_height_cm') z[field] = value === '' ? null : (parseFloat(value) || null);
+        // Not a count to parseInt like the branch below — an enum, same guard as onZoneRackStyleChange().
+        else if (field === 'rack_style') z[field] = value === 'shelving' ? 'shelving' : 'pallet';
         else z[field] = parseInt(value, 10) || 1;
-        pushZoneHistory(false); // debounced — don't create an undo step per keystroke
+        pushZoneHistory(field === 'rack_style'); // immediate for a <select> (fires once, not per keystroke)
+        if (field === 'rack_style') renderDimPreview();
     }
 
     function addManualZoneRow() {
@@ -6752,9 +6776,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // change (modules/iso-rack.js). Edits the same globalWarehouseZones the designer above edits —
     // same undo history, same Save Layout — so there's no second thing to remember to save.
     // shelf_width_cm / shelf_height_cm are the older columns (schema_zone_shelf_dimensions.sql), the
-    // other seven are new (schema_zone_dimensions.sql). Shelf height means the CLEAR height of one
+    // next seven are newer (schema_zone_dimensions.sql), and rack_style is newer still
+    // (schema_zone_rack_style.sql — 'pallet' open beam racking vs 'shelving' boltless shelving,
+    // purely how the isometric view draws this zone). Shelf height means the CLEAR height of one
     // level (top of a shelf board to the underside of the next), not the height of the whole rack.
-    const ZONE_NEW_DIM_COLUMNS = ['rack_width_cm', 'rack_depth_cm', 'rack_height_cm', 'shelf_depth_cm', 'bin_width_cm', 'bin_depth_cm', 'bin_height_cm'];
+    // Bundled as one "new columns" group below on purpose: whichever of these migrations hasn't
+    // been run yet, saveZoneLayout()'s fallback drops the same lot and says so, rather than needing
+    // to tell apart which specific migration is missing.
+    const ZONE_NEW_DIM_COLUMNS = ['rack_width_cm', 'rack_depth_cm', 'rack_height_cm', 'shelf_depth_cm', 'bin_width_cm', 'bin_depth_cm', 'bin_height_cm', 'rack_style'];
     const DIM_GROUPS = [
         { title: 'Rack', hint: 'the whole shelving frame', fields: [['rack_width_cm', 'Width (one bay)', '120'], ['rack_depth_cm', 'Depth', '60'], ['rack_height_cm', 'Height', '250']] },
         { title: 'Shelf', hint: 'one level of it', fields: [['shelf_width_cm', 'Width', '120'], ['shelf_depth_cm', 'Depth', '60'], ['shelf_height_cm', 'Clear height', '45']] },
@@ -8349,7 +8378,13 @@ th { background: #eee; }
                 badge.textContent = extra.badge;
                 wrap.appendChild(badge);
             }
-            if (quickEditMode && canEditItems()) {
+            // Removing/re-starring a photo is its own immediate write (removeItemImage/
+            // makeItemPhotoMain — Supabase or draft, either way), unrelated to Quick Edit's own
+            // Save/Cancel state, same as "➕ Add Photo" below (renderImageAddControls) already only
+            // gates on canEditItems(). Gating this one pair of buttons on quickEditMode too was
+            // needless — an editor had to open Quick Edit just to remove a photo they could already
+            // add from the regular item view.
+            if (canEditItems()) {
                 if (extra?.onMakeMain) {
                     const star = document.createElement('button');
                     star.type = 'button';

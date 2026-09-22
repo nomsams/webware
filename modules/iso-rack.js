@@ -30,6 +30,16 @@ const SIN30 = 0.5;
 export const ISO_DEFAULTS = Object.freeze({ binW: 40, rackD: 60, clear: 42, boardT: 3, gap: 8 });
 export const ISO_BLUE = Object.freeze({ front: '#2563eb', side: '#1d4ed8', top: '#60a5fa' });
 
+// Two rack STYLES, per zone (warehouse_zones.rack_style — schema_zone_rack_style.sql), matched
+// against real photos of the two kinds of storage actually in use: open pallet racking (a beam
+// bolted between uprights at each level, pallets set directly on the beams, no solid deck) and
+// boltless shelving (a solid shelf board at each level, X cross-braced uprights at the back). A
+// zone with no style recorded draws as 'pallet' — the more common default, and what the one zone
+// with real data today (Zone A) actually is. Only the decorative beam/brace thickness differs
+// between them; a recorded rack/shelf height (resolveRackGeometry's `rec`) still governs the real
+// geometry either way, this is purely how thick the schematic level itself is drawn.
+const RACK_STYLES = Object.freeze(['pallet', 'shelving']);
+export const PALLET_BEAM_T = 7; // cm — a pallet-rack beam is a visibly thicker steel member than shelf decking
 const MAX_ROWS_PER_SHELF = 6;
 const MAX_DRAWN_BINS = 2500; // beyond this the empty-bin outlines are skipped, board outlines and any occupied/selected bin still are drawn
 
@@ -55,6 +65,7 @@ export function formatLocationCode(zone, depth, level, bin, row = 1) {
 export function resolveRackGeometry(zone, bounds, extra = {}) {
   const z = zone || {};
   const b = bounds || {};
+  const style = RACK_STYLES.includes(z.rack_style) ? z.rack_style : 'pallet';
   const levels = Math.max(1, Math.floor(b.maxLevel || 1));
   const depthCount = Math.max(1, Math.floor(b.maxDepth || 1));
   const binsPerLevel = Math.max(1, Math.floor(Math.max(b.maxBin || 1, extra.minBin || 1)));
@@ -78,7 +89,10 @@ export function resolveRackGeometry(zone, bounds, extra = {}) {
   const gap = ISO_DEFAULTS.gap;
   const totalDepth = depthCount * rackD + (depthCount - 1) * gap;
 
-  const boardT = ISO_DEFAULTS.boardT;
+  // A pallet-rack beam is a visibly thicker steel member than a shelf's decking board — purely
+  // decorative (nothing here is ever recorded/configurable), but it makes the two styles read
+  // apart at a glance even before the beam/board colouring below is applied.
+  const boardT = style === 'pallet' ? PALLET_BEAM_T : ISO_DEFAULTS.boardT;
   const clear = rec.shelfH
     || (rec.rackH ? Math.max(5, (rec.rackH - boardT) / levels - boardT) : null)
     || (rec.binH ? rec.binH + 8 : ISO_DEFAULTS.clear);
@@ -93,7 +107,7 @@ export function resolveRackGeometry(zone, bounds, extra = {}) {
   const binDrawD = rec.binD ? Math.min(rec.binD, binD) : binD;
 
   return {
-    zone: z.zone || '', bays, depthCount, levels, binsPerLevel, rows,
+    zone: z.zone || '', style, bays, depthCount, levels, binsPerLevel, rows,
     bayW, runLength, cellW, rackD, gap, totalDepth, boardT, clear, pitch, height, binH,
     binD, binDrawW, binDrawD,
     recorded: rec,
@@ -166,13 +180,21 @@ function makeScene(fs) {
 
 // Drawn with CSS variables so it follows light/dark theme; the rack is deliberately see-through
 // (low fill opacity everywhere) and the located bin is the only fully opaque thing in the picture.
+// Uprights and, for pallet racking, the beams use fixed (not theme-following) colours instead —
+// real racking is painted blue/orange regardless of which theme the app happens to be in, matching
+// actual photos of the two rack types this warehouse uses (schema_zone_rack_style.sql).
 const STYLE = `<style>
 .iso-floor{fill:var(--border);fill-opacity:.3}
 .iso-grid{stroke:var(--text-muted);stroke-opacity:.18;stroke-width:1;vector-effect:non-scaling-stroke;fill:none}
-.iso-post{stroke:var(--text-muted);stroke-opacity:.5;stroke-width:2;vector-effect:non-scaling-stroke;fill:none}
+.iso-post{stroke:#3b5f8a;stroke-opacity:.55;stroke-width:2.5;vector-effect:non-scaling-stroke;fill:none}
 .iso-board-top{fill:var(--card-bg);fill-opacity:.32;stroke:var(--text-muted);stroke-opacity:.45;stroke-width:1;vector-effect:non-scaling-stroke}
 .iso-board-front{fill:var(--text-muted);fill-opacity:.3;stroke:var(--text-muted);stroke-opacity:.45;stroke-width:1;vector-effect:non-scaling-stroke}
 .iso-board-side{fill:var(--text-muted);fill-opacity:.42;stroke:var(--text-muted);stroke-opacity:.45;stroke-width:1;vector-effect:non-scaling-stroke}
+.iso-beam-top{fill:var(--card-bg);fill-opacity:.1;stroke:var(--text-muted);stroke-opacity:.3;stroke-width:1;vector-effect:non-scaling-stroke}
+.iso-beam-front{fill:#d9581f;fill-opacity:.62;stroke:#8a3410;stroke-opacity:.7;stroke-width:1;vector-effect:non-scaling-stroke}
+.iso-beam-side{fill:#b8460f;fill-opacity:.62;stroke:#8a3410;stroke-opacity:.7;stroke-width:1;vector-effect:non-scaling-stroke}
+.iso-brace{stroke:var(--text-muted);stroke-opacity:.4;stroke-width:1.3;vector-effect:non-scaling-stroke;fill:none}
+.iso-foot{fill:#f2c318;fill-opacity:.85;stroke:#8a6d10;stroke-opacity:.8;stroke-width:1;vector-effect:non-scaling-stroke}
 .iso-bin{fill:var(--card-bg);fill-opacity:.14;stroke:var(--text-muted);stroke-opacity:.3;stroke-width:1;vector-effect:non-scaling-stroke}
 .iso-bin-occupied{fill:var(--primary);fill-opacity:.3;stroke:var(--primary);stroke-opacity:.6}
 .iso-shelf-selected{fill:var(--primary);fill-opacity:.16;stroke:var(--primary);stroke-opacity:.85;stroke-width:1.5}
@@ -284,15 +306,28 @@ export function buildIsoRackSVG(geom, opts = {}) {
   };
 
   // racks back to front, levels bottom to top, so nearer/higher things paint over farther/lower ones
+  const isPallet = g.style === 'pallet';
+  const topCls = isPallet ? 'iso-beam-top' : 'iso-board-top';
+  const frontCls = isPallet ? 'iso-beam-front' : 'iso-board-front';
+  const sideCls = isPallet ? 'iso-beam-side' : 'iso-board-side';
   for (let d = g.depthCount; d >= 1; d--) {
     const y0 = (d - 1) * (g.rackD + g.gap), y1 = y0 + g.rackD;
     for (let k = 0; k <= g.bays; k++) S.line('iso-post', [k * g.bayW, y1, 0], [k * g.bayW, y1, H]);
+    // Boltless shelving is X cross-braced between each pair of uprights, back to front — drawn once
+    // per bay (not per level, it spans the whole rack height) on the back plane, since that is the
+    // one place it is visible through the shelves' own translucency without cutting across a bin.
+    if (!isPallet) {
+      for (let k = 0; k < g.bays; k++) {
+        S.line('iso-brace', [k * g.bayW, y1, 0], [(k + 1) * g.bayW, y1, H]);
+        S.line('iso-brace', [(k + 1) * g.bayW, y1, 0], [k * g.bayW, y1, H]);
+      }
+    }
     for (let l = 1; l <= g.levels; l++) {
       const zb = (l - 1) * g.pitch, zt = zb + g.boardT;
       const isSel = selected && selected.depth === d && selected.level === l;
-      S.poly(`iso-board-top${isSel ? ' iso-shelf-selected' : ''}${interactive ? ' iso-click' : ''}`, [[0, y0, zt], [L, y0, zt], [L, y1, zt], [0, y1, zt]], dataAttrs(d, l), isSel || !interactive ? '' : `Rack ${d} · Level ${l}`);
-      S.poly('iso-board-front', [[0, y0, zb], [L, y0, zb], [L, y0, zt], [0, y0, zt]]);
-      S.poly('iso-board-side', [[L, y0, zb], [L, y1, zb], [L, y1, zt], [L, y0, zt]]);
+      S.poly(`${topCls}${isSel ? ' iso-shelf-selected' : ''}${interactive ? ' iso-click' : ''}`, [[0, y0, zt], [L, y0, zt], [L, y1, zt], [0, y1, zt]], dataAttrs(d, l), isSel || !interactive ? '' : `Rack ${d} · Level ${l}`);
+      S.poly(frontCls, [[0, y0, zb], [L, y0, zb], [L, y0, zt], [0, y0, zt]]);
+      S.poly(sideCls, [[L, y0, zb], [L, y1, zb], [L, y1, zt], [L, y0, zt]]);
       for (let r = g.rows; r >= 1; r--) {
         for (let b = 1; b <= g.binsPerLevel; b++) {
           const count = occ.get(`${d}|${l}|${b}|${r}`) || 0;
@@ -307,6 +342,14 @@ export function buildIsoRackSVG(geom, opts = {}) {
       }
     }
     for (let k = 0; k <= g.bays; k++) S.line('iso-post', [k * g.bayW, y0, 0], [k * g.bayW, y0, H]);
+    // Yellow foot/corner guards at floor level — only the nearest rack's near posts, since anything
+    // behind it is hidden anyway and this is purely decorative (a real forklift-strike guard).
+    if (isPallet && d === 1) {
+      const footW = Math.min(g.bayW * 0.16, 14), footH = Math.min(g.height * 0.06, 18);
+      for (let k = 0; k <= g.bays; k++) {
+        S.poly('iso-foot', [[k * g.bayW - footW / 2, y0, 0], [k * g.bayW + footW / 2, y0, 0], [k * g.bayW + footW / 2, y0, footH], [k * g.bayW - footW / 2, y0, footH]]);
+      }
+    }
   }
   if (hlSpec && !hl) drawBlueBin(hlSpec); // a spot outside the drawn rack: still show it rather than nothing
   if (hl) drawBlueBinOverlay();
