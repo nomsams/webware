@@ -83,16 +83,17 @@ export async function parseOrderRequest(groqClient, text, {
   webSearch,
   fetchPageText,
   fromAddress = null,
-  model = GROQ_MODELS.TEXT,
+  model = GROQ_MODELS.MULTIMODAL,
   reasoningEffort = 'medium',
-  // TEXT is a reasoning model — at 'medium' effort its own internal reasoning tokens count against
-  // max_completion_tokens same as the visible reply, and can run long enough on their own to leave
-  // no room left for the actual JSON answer, which then arrives truncated (or not at all): every
-  // extractJsonObjects() call finds an opened but never-closed "{" and parseJsonReply() throws "did
-  // not contain JSON" for what looks, from the caller's side, like every single request failing the
-  // same way regardless of wording. Comfortably larger than groq-client's own 2048 default so
-  // reasoning has room to finish before the answer does.
-  maxTokens = 4096,
+  // A reasoning model's own internal reasoning tokens count against max_completion_tokens same as
+  // the visible reply, and can run long enough on their own — especially at 'medium' effort or
+  // above — to leave no room left for the actual JSON answer, which then arrives truncated (or not
+  // at all): every extractJsonObjects() call finds an opened but never-closed "{" and
+  // parseJsonReply() throws "did not contain JSON" for what looks, from the caller's side, like
+  // every single request failing the same way regardless of wording. 8192 matches groq-proxy's own
+  // ceiling (MAX_COMPLETION_TOKENS in supabase/functions/groq-proxy) so a caller asking for this
+  // much is never silently clamped down to less than it asked for.
+  maxTokens = 8192,
 } = {}) {
   if (!text || !text.trim()) throw new Error('parseOrderRequest: text is required');
 

@@ -1894,6 +1894,26 @@
         </div>
 
         <div class="setting-row">
+            <label for="ai-model-select">🧠 AI model</label>
+            <select id="ai-model-select" onchange="onAiModelSettingChange()">
+                <option value="qwen/qwen3.8-27b">🖼️ Qwen 3.8 27B — text + vision (default)</option>
+                <option value="openai/gpt-oss-120b">🧠 GPT-OSS 120B — text only, deeper reasoning</option>
+            </select>
+            <p class="setting-desc">Qwen understands photos too (the camera/photo message and Delivery Note capture always use it for that, regardless of this setting, since it's the only one of the two that can). GPT-OSS is text-only but a stronger reasoner for plain requests. Per-device, takes effect on your next message.</p>
+        </div>
+
+        <div class="setting-row">
+            <label for="ai-reasoning-select">🎚️ Reasoning level</label>
+            <select id="ai-reasoning-select" onchange="onAiReasoningSettingChange()">
+                <option value="low">Low — fastest, cheapest (default)</option>
+                <option value="medium">Medium — more careful, slower</option>
+                <option value="high">High — most thorough, slowest</option>
+                <option value="default">Model's own default</option>
+            </select>
+            <p class="setting-desc">How much the model reasons before answering, for every AI Assistant request (chat, search, pack orders, editing fields). Higher levels can improve trickier requests but cost more of the reply's own token budget and take longer — if replies start getting cut off, try Low. Per-device.</p>
+        </div>
+
+        <div class="setting-row">
             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
                 <input type="checkbox" id="cors-public-fallback-enabled" onchange="onCorsPublicFallbackChange()" style="width:auto; min-height:unset; margin:0;">
                 Allow public CORS proxy fallback for web search
@@ -11570,6 +11590,9 @@ ${css}
         // The actual corsFetch() behavior is already applied at page load (see the module bridge
         // script, which reads this same key) — this just syncs the checkbox to match.
         document.getElementById('cors-public-fallback-enabled').checked = localStorage.getItem('cors-allow-public-fallback') === '1';
+
+        document.getElementById('ai-model-select').value = getAiModel();
+        document.getElementById('ai-reasoning-select').value = getAiReasoningEffort();
     }
     function onLowStockSettingChange() {
         document.getElementById('lowstock-threshold-row').classList.toggle('hidden', !document.getElementById('lowstock-enabled').checked);
@@ -11766,6 +11789,33 @@ ${css}
         return personalKey ? window.createGroqClient({ apiKey: personalKey }) : window.aiGroq;
     }
 
+    // ── AI model / reasoning level (per-device, Settings → 🤖 AI Assistant) ────────────────────
+    // Qwen is the default because it's the one model of the two that can also see a photo — picking
+    // it everywhere means a text request and an image message never need two different "which model"
+    // decisions. GPT-OSS is offered for someone who wants a stronger text-only reasoner and never
+    // sends photos; aiChatHandlePhotoSelected()/parseDeliveryNoteImage() always use Qwen regardless of
+    // this setting, since GPT-OSS simply can't take an image as input at all.
+    const LS_AI_MODEL = 'ai-model-choice';
+    const LS_AI_REASONING = 'ai-reasoning-effort';
+    function getAiModel() {
+        try {
+            const saved = localStorage.getItem(LS_AI_MODEL);
+            return (saved === window.GROQ_MODELS.TEXT || saved === window.GROQ_MODELS.MULTIMODAL) ? saved : window.GROQ_MODELS.MULTIMODAL;
+        } catch { return window.GROQ_MODELS.MULTIMODAL; }
+    }
+    function getAiReasoningEffort() {
+        try {
+            const saved = localStorage.getItem(LS_AI_REASONING);
+            return (window.REASONING_EFFORTS || []).includes(saved) ? saved : 'low';
+        } catch { return 'low'; }
+    }
+    function onAiModelSettingChange() {
+        localStorage.setItem(LS_AI_MODEL, document.getElementById('ai-model-select').value);
+    }
+    function onAiReasoningSettingChange() {
+        localStorage.setItem(LS_AI_REASONING, document.getElementById('ai-reasoning-select').value);
+    }
+
     // Turns a raw JS/network error into something a non-technical user can actually act on,
     // instead of a stack trace or a bare fetch failure.
     function aiFriendlyError(e) {
@@ -11928,7 +11978,8 @@ ${css}
         const thinking = aiAppendMessage('system', 'Looking at the photo…');
         try {
             const reply = await aiGetGroqClient().chat({
-                model: window.GROQ_MODELS.MULTIMODAL,
+                model: window.GROQ_MODELS.MULTIMODAL, // forced — only Qwen can take an image, regardless of the Settings model choice
+                reasoningEffort: getAiReasoningEffort(),
                 messages: [
                     { role: 'user', content: [
                         { type: 'text', text: typedText || AI_PHOTO_DEFAULT_PROMPT },
@@ -12021,8 +12072,8 @@ Respond with ONLY the JSON object, nothing else.`;
         let reply;
         try {
             const raw = await aiGetGroqClient().chat({
-                model: window.GROQ_MODELS.TEXT,
-                reasoningEffort: 'low',
+                model: getAiModel(),
+                reasoningEffort: getAiReasoningEffort(),
                 messages: [
                     { role: 'system', content: AI_SYSTEM_PROMPT },
                     ...history,
@@ -12065,13 +12116,18 @@ Respond with ONLY the JSON object, nothing else.`;
             if (!canEditItems()) return "You don't have permission to edit items.";
             if (!AI_FIELD_MAP[reply.field]) return "I don't know how to change that field yet.";
         }
-        if (reply.action === 'search_item') return "I couldn't find an item matching that — try a different name, number, or manufacturer.";
+        if (reply.action === 'search_item') {
+            const phrase = aiSuggestionPhrase(aiSuggestItems(reply.query || '').map(aiItemName));
+            return `I couldn't find an item matching that.${phrase || ' Try a different name, number, or manufacturer.'}`;
+        }
         if (reply.action === 'pack_kit') {
             // Re-checked here (cheap, no network) purely to give a more specific reason than a flat
             // "no kit found" — a kit DID match, it's just that nothing inside it matched the filter.
             const kitMatch = aiFuzzyFindKit(reply.query || '');
             if (kitMatch && reply.filter) return `I found the kit "${kitMatch.kit.name}", but nothing in it matched "${reply.filter}" — check the wording and try again.`;
-            return "I couldn't find a kit or item matching that — check the name and try again.";
+            const names = [...aiSuggestKits(reply.query || '').map(k => k.name), ...aiSuggestItems(reply.query || '').map(aiItemName)].slice(0, 3);
+            const phrase = aiSuggestionPhrase(names);
+            return `I couldn't find a kit or item matching that.${phrase || ' Check the name and try again.'}`;
         }
         return "I couldn't find what you're referring to — could you be more specific?";
     }
@@ -12096,6 +12152,73 @@ Respond with ONLY the JSON object, nothing else.`;
         aTok.forEach(t => { if (bTok.has(t)) overlap++; });
         return overlap / Math.max(aTok.size, bTok.size);
     }
+
+    // Classic edit distance — how many single-character insert/delete/substitute steps turn a into
+    // b. Only used for aiSuggestionScore() below: item numbers/BTKs are short codes where a typo is
+    // usually one or two characters off ("784.019" for "784.020"), not a word-overlap difference —
+    // aiWordOverlapScore alone scores that pair 0 (they share no whole word and neither contains
+    // the other), so a genuinely close typo would otherwise never be offered as a suggestion.
+    function aiLevenshtein(a, b) {
+        const m = a.length, n = b.length;
+        if (!m) return n;
+        if (!n) return m;
+        let prev = Array.from({ length: n + 1 }, (_, j) => j);
+        for (let i = 1; i <= m; i++) {
+            const curr = [i];
+            for (let j = 1; j <= n; j++) {
+                curr[j] = a[i - 1] === b[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+            }
+            prev = curr;
+        }
+        return prev[n];
+    }
+
+    // Word-overlap score, or — for two short, similarly-sized codes only — a closeness score from
+    // how few characters apart they are. Deliberately only for "did you mean...?" suggestions
+    // (aiSuggestItems/aiSuggestKits below), never for aiFuzzyFindItem/Kit's own match-and-act
+    // decision: a suggestion costs nothing to be wrong about, an auto-resolved item does.
+    function aiSuggestionScore(q, field) {
+        const f = (field || '').toString().toLowerCase().trim();
+        if (!f) return 0;
+        const overlap = aiWordOverlapScore(q, f);
+        if (overlap > 0) return overlap;
+        if (q.length <= 14 && f.length <= 14 && Math.abs(q.length - f.length) <= 2) {
+            const dist = aiLevenshtein(q, f);
+            if (dist > 0 && dist <= 2) return Math.max(0.2, 1 - dist / Math.max(q.length, f.length));
+        }
+        return 0;
+    }
+
+    // Up to `limit` OTHER items loosely resembling `query` — for "I couldn't find X, did you mean
+    // Y or Z?" fallback text (aiFallbackReasonMessage, the pack-order draft's unresolved items).
+    // Deliberately looser than aiFuzzyFindItem's own "found anything usable" floor: a wrong
+    // suggestion here is just a word offered in a sentence, never something auto-selected.
+    function aiSuggestItems(query, limit = 3) {
+        const q = String(query ?? '').trim().toLowerCase();
+        if (!q) return [];
+        const scored = globalInventory.map(item => {
+            const fields = [item['itemname(english)'], item['itemname(swedish)'], item.itemnumber, item.itemnumber2, item.itemnumber3, item.Manufacturer, item.BTKnumber];
+            return { item, score: Math.max(...fields.map(f => aiSuggestionScore(q, f))) };
+        }).filter(s => s.score >= 0.15).sort((a, b) => b.score - a.score);
+        return scored.slice(0, limit).map(s => s.item);
+    }
+    function aiSuggestKits(query, limit = 3) {
+        const q = String(query ?? '').trim().toLowerCase();
+        if (!q) return [];
+        const scored = globalKits.map(kit => {
+            const fields = [kit.name, kit.kitnumber];
+            return { kit, score: Math.max(...fields.map(f => aiSuggestionScore(q, f))) };
+        }).filter(s => s.score >= 0.15).sort((a, b) => b.score - a.score);
+        return scored.slice(0, limit).map(s => s.kit);
+    }
+    // Shared by aiFallbackReasonMessage/the pack-order draft — turns a list of suggested names into
+    // "did you mean X or Y?" phrasing, or "" when there's nothing worth suggesting.
+    function aiSuggestionPhrase(names) {
+        if (!names.length) return '';
+        const quoted = names.map(n => `"${n}"`);
+        return quoted.length === 1 ? ` Did you mean ${quoted[0]}?` : ` Did you mean ${quoted.slice(0, -1).join(', ')} or ${quoted[quoted.length - 1]}?`;
+    }
+    const aiItemName = (it) => it['itemname(english)'] || it.BTKnumber;
 
     // Returns { item/kit, confident } for the best match found, or null if nothing at all is
     // similar (an empty inventory/kit list, or a query sharing no words with anything). "confident"
@@ -12234,9 +12357,9 @@ Respond with ONLY the JSON object, nothing else.`;
         } else if (action.type === 'pack_order_draft') {
             const lines = [];
             action.items.forEach(it => {
-                lines.push(it.btk
-                    ? `${escapeHtml(it.matchedName || it.btk)} × ${it.quantity}`
-                    : `<span style="color:var(--danger);">❓ "${escapeHtml(it.reference)}" — no match found</span>`);
+                if (it.btk) { lines.push(`${escapeHtml(it.matchedName || it.btk)} × ${it.quantity}`); return; }
+                const phrase = aiSuggestionPhrase(aiSuggestItems(it.reference).map(aiItemName));
+                lines.push(`<span style="color:var(--danger);">❓ "${escapeHtml(it.reference)}" — no match found${escapeHtml(phrase)}</span>`);
             });
             let recipientLine = '';
             if (action.recipientName) {
@@ -12384,6 +12507,8 @@ Respond with ONLY the JSON object, nothing else.`;
                 webSearch: window.duckySearch,
                 fetchPageText: window.crawly,
                 fromAddress: { name: wh.name, address: wh.address },
+                model: getAiModel(),
+                reasoningEffort: getAiReasoningEffort(),
             });
             thinking.remove();
             const resolved = draft.items.filter(it => it.btk);
@@ -12485,8 +12610,8 @@ Respond with ONLY the JSON object, nothing else.`;
             let pageText = '';
             try { pageText = await window.crawly(top.url, { maxChars: 3000 }); } catch (e) { /* fall back to the search snippet */ }
             const answer = await aiGetGroqClient().chat({
-                model: window.GROQ_MODELS.TEXT,
-                reasoningEffort: 'low',
+                model: getAiModel(),
+                reasoningEffort: getAiReasoningEffort(),
                 messages: [
                     { role: 'system', content: 'Answer the user briefly, in plain language with no jargon, using only the page content given. If they asked for specific facts — an address, phone number, organization/registration number, etc. — list each on its own line clearly labeled (e.g. "Address: ..."), not buried in a paragraph. If something they asked for isn\'t in the page content, say so plainly rather than guessing.' },
                     { role: 'user', content: `Question: ${query}\n\nSource: ${top.url}\n${pageText || top.snippet}` },
@@ -12519,8 +12644,8 @@ Respond with ONLY the JSON object, nothing else.`;
             const thinking = aiAppendMessage('system', 'Cleaning up the scanned text…');
             try {
                 const cleaned = await aiGetGroqClient().chat({
-                    model: window.GROQ_MODELS.TEXT,
-                    reasoningEffort: 'low',
+                    model: getAiModel(),
+                    reasoningEffort: getAiReasoningEffort(),
                     messages: [
                         { role: 'system', content: OCR_CLEANUP_SYSTEM_PROMPT },
                         { role: 'user', content: rawText },
@@ -12620,7 +12745,7 @@ Respond with ONLY the JSON object, nothing else.`;
         const thinking = aiAppendMessage('system', 'Reading the delivery note…');
         let draft;
         try {
-            draft = await window.parseDeliveryNoteImage(aiGetGroqClient(), dataUrl);
+            draft = await window.parseDeliveryNoteImage(aiGetGroqClient(), dataUrl, { reasoningEffort: getAiReasoningEffort() });
         } catch (e) {
             thinking.remove();
             aiAppendMessage('assistant', "Couldn't read that delivery note — " + aiFriendlyError(e));
@@ -13038,7 +13163,7 @@ Respond with ONLY the JSON object, nothing else.`;
     import * as PerspectiveWarp from './modules/perspective-warp.js';
     window.PerspectiveWarp = PerspectiveWarp;
 
-    import { createGroqClient, GROQ_MODELS } from './modules/groq-client.js';
+    import { createGroqClient, GROQ_MODELS, REASONING_EFFORTS } from './modules/groq-client.js';
     import { configureCorsProxy, setAllowPublicFallback } from './modules/cors-proxy.js';
     import { webSearch, fetchPageText } from './modules/web-search.js';
     import { parseVCardFile, generateVCard } from './modules/contacts.js';
@@ -13083,6 +13208,7 @@ Respond with ONLY the JSON object, nothing else.`;
         getAccessToken: window.getSupabaseAccessToken,
     });
     window.GROQ_MODELS = GROQ_MODELS;
+    window.REASONING_EFFORTS = REASONING_EFFORTS;
     // The pre-built proxy-mode client (needs groq-proxy deployed) — the fallback when no personal
     // key is set. window.createGroqClient itself is also exposed so aiGetGroqClient() can build a
     // direct-mode client on the fly ({apiKey}, no Supabase/groq-proxy involved at all) whenever a

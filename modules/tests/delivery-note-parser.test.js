@@ -70,6 +70,17 @@ test('parseDeliveryNoteImage sends the image as an image_url content part alongs
   assert.deepEqual(userContent[1], { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAAA' } });
 });
 
+test('parseDeliveryNoteImage asks for a generous completion-token budget by default, and lets a caller override it', async () => {
+  let captured;
+  const fakeGroq = { chat: async (opts) => { captured = opts; return JSON.stringify({ items: [] }); } };
+
+  await parseDeliveryNoteImage(fakeGroq, 'data:image/jpeg;base64,AAAA');
+  assert.equal(captured.maxTokens, 8192);
+
+  await parseDeliveryNoteImage(fakeGroq, 'data:image/jpeg;base64,AAAA', { maxTokens: 6000 });
+  assert.equal(captured.maxTokens, 6000);
+});
+
 test('parseDeliveryNoteImage requires an image', async () => {
   await assert.rejects(parseDeliveryNoteImage({ chat: async () => '{}' }, ''), /imageDataUrl is required/);
 });

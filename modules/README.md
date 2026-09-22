@@ -22,8 +22,17 @@ node --test modules/tests/*.test.js
 ## What's here
 
 - **`groq-client.js`** + **`../supabase/functions/groq-proxy/index.ts`** — chat with Groq-hosted
-  models (model + reasoning-effort selectable, streaming supported) and Whisper audio
-  transcription. `createGroqClient()` supports two modes:
+  models (model + reasoning-effort selectable via `GROQ_MODELS`/`REASONING_EFFORTS`, streaming
+  supported) and Whisper audio transcription. `chat()`/`transcribe()` default to 4096 completion
+  tokens (`maxTokens`, up from 2048) — a reasoning model's own internal reasoning tokens count
+  against this same budget as its visible reply, so a low ceiling risks the answer being cut off
+  before it's even started; `order-parser.js`/`delivery-note-parser.js` ask for more still (8192)
+  for their own heavier structured-extraction tasks. Both `chat()`/`transcribe()` also guard the
+  response body's own `.json()` call — a gateway timeout, a WAF block page, or an Edge Function
+  crashing before it can call `json()` itself all still come back as a successful `fetch()` whose
+  body isn't JSON at all, which would otherwise throw an opaque `SyntaxError` no error-message check
+  could ever recognize; caught and rethrown as a real `groq-client: HTTP 5xx ...` error instead.
+  `createGroqClient()` supports two modes:
   - **Proxy mode** (`{supabaseUrl, supabaseAnonKey, getAccessToken}`): the API key is held
     server-side — not in the browser, and not even in the Edge Function's own secrets, but in the
     `llm_api_keys` table (`supabase/schema_llm_assistant.sql`), shared across every app user with
@@ -80,7 +89,12 @@ node --test modules/tests/*.test.js
   vCard has a slot for it — only into `buildPackOrderEmailTemplate()`'s optional "Org. no:" line
   and the local-only Saved Recipients entry, same treatment as the recipient's email address.
   `fromAddress` is the current warehouse's own name/address (via `getWarehouseMeta()`), not
-  inferred from the text.
+  inferred from the text. Requests 8192 completion tokens by default (`maxTokens`, matching
+  `groq-proxy`'s own ceiling so it's never silently clamped down) rather than `groq-client.js`'s own
+  smaller default — a reasoning model's internal reasoning tokens count against that same budget as
+  its visible reply, and this extraction task asks for enough structured thinking (items,
+  quantities, a recipient) that a low ceiling risked the JSON answer arriving truncated or not at
+  all, which read from the caller's side as every single pack-order request failing identically.
 
   **Multi-warehouse handling**: orders are already single-warehouse (`orders.warehouse_id`) and,
   per the user, pack orders are only ever sent from one warehouse at a time — so item resolution
@@ -101,7 +115,10 @@ node --test modules/tests/*.test.js
   see `parseDeliveryNoteImage()`) rather than Tesseract OCR + text cleanup the way the "📝 Scan
   Text" button works — a vision model keeps the note's own layout/context (which column is qty vs.
   item number, which address block is the ship-to vs. the supplier's own letterhead) that flattened
-  OCR text alone loses. `parseDeliveryNoteReply()` is the pure JSON-extraction half (same
+  OCR text alone loses. Requests 8192 completion tokens by default (`maxTokens`) for the same reason
+  `order-parser.js` does — a note with many line items needs real room for the JSON answer, on top
+  of whatever the model's own reasoning uses from the same budget. `parseDeliveryNoteReply()` is the
+  pure JSON-extraction half (same
   code-fence/prose-tolerant approach as `order-parser.js`'s `parseJsonReply`), returning
   `{ manufacturer, warehouseAddress, items: [{ name, itemNumber, quantity }] }`.
   `resolveDeliveryNoteItems()` is the pure matching half — dependency-injected `findByPartNumber`/

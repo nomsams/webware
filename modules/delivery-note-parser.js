@@ -42,11 +42,16 @@ export const DELIVERY_NOTE_SYSTEM_PROMPT = `You read a delivery note / packing s
 }
 "manufacturer" is the supplier/sender's company name shown on the note. "warehouseAddress" is the delivery/recipient ("ship to"/"leverans till") address the goods are being sent to — not the sender's own letterhead address. "itemNumber" is the manufacturer's own part/article number for that line if the note actually shows one, otherwise null — never invent one. "quantity" is the delivered quantity for that line (only default to 1 if the note truly gives no number at all for an otherwise clear line item). If the image isn't a delivery note, or nothing readable is on it, respond with {"manufacturer":null,"warehouseAddress":null,"items":[]} instead of guessing.`;
 
-export async function parseDeliveryNoteImage(groqClient, imageDataUrl, { model = GROQ_MODELS.MULTIMODAL, reasoningEffort } = {}) {
+// 8192 (matches order-parser.js's own default, and groq-proxy's MAX_COMPLETION_TOKENS ceiling): a
+// delivery note can carry many line items, and — same risk as order-parser.js's own extraction —
+// a reasoning-capable model's internal reasoning tokens count against this same budget as the
+// visible JSON answer, so a low ceiling risks the answer arriving truncated.
+export async function parseDeliveryNoteImage(groqClient, imageDataUrl, { model = GROQ_MODELS.MULTIMODAL, reasoningEffort, maxTokens = 8192 } = {}) {
   if (!imageDataUrl) throw new Error('parseDeliveryNoteImage: imageDataUrl is required');
   const reply = await groqClient.chat({
     model,
     reasoningEffort,
+    maxTokens,
     messages: [
       { role: 'system', content: DELIVERY_NOTE_SYSTEM_PROMPT },
       { role: 'user', content: [

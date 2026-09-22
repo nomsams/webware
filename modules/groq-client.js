@@ -115,7 +115,11 @@ export function createGroqClient({ supabaseUrl, supabaseAnonKey, getAccessToken,
     });
   }
 
-  function buildPayload({ model, messages, temperature, maxTokens = 2048, topP, reasoningEffort, stream = false }) {
+  // 4096 (was 2048): a reasoning model's own internal reasoning tokens count against this same
+  // budget as its visible reply, and a low ceiling risks the answer being cut off before it's
+  // even started once reasoning has run a while — see order-parser.js's own, larger override for
+  // its more demanding structured-extraction task.
+  function buildPayload({ model, messages, temperature, maxTokens = 4096, topP, reasoningEffort, stream = false }) {
     if (!model) throw new Error('groq-client: model is required');
     if (!Array.isArray(messages) || messages.length === 0) throw new Error('groq-client: messages must be a non-empty array');
     const defaults = MODEL_DEFAULTS[model] || FALLBACK_MODEL_DEFAULTS;

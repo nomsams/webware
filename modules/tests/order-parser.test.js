@@ -219,10 +219,10 @@ test('parseOrderRequest asks for a generous completion-token budget by default, 
     },
   };
   await parseOrderRequest(fakeGroq, 'pack 1 of item 1', { knownItems: KNOWN_ITEMS });
-  assert.equal(captured.maxTokens, 4096);
+  assert.equal(captured.maxTokens, 8192);
 
-  await parseOrderRequest(fakeGroq, 'pack 1 of item 1', { knownItems: KNOWN_ITEMS, maxTokens: 8000 });
-  assert.equal(captured.maxTokens, 8000);
+  await parseOrderRequest(fakeGroq, 'pack 1 of item 1', { knownItems: KNOWN_ITEMS, maxTokens: 6000 });
+  assert.equal(captured.maxTokens, 6000);
 });
 
 test('parseOrderRequest falls back to searchItemCandidates when a reference is not in knownItems', async () => {
