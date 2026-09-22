@@ -55,6 +55,19 @@ const MODEL_DEFAULTS = {
 };
 const FALLBACK_MODEL_DEFAULTS = MODEL_DEFAULTS[GROQ_MODELS.TEXT];
 
+// A gateway timeout, a Cloudflare/WAF block page, or an Edge Function crashing before it can even
+// call json() all come back as a successful fetch() with a non-JSON body (HTML, plain text, or
+// nothing at all) — res.json() throws a bare, unhelpful SyntaxError for any of them ("Unexpected
+// token < in JSON", "Unexpected end of JSON input"). Caught here so chat()/transcribe() below can
+// still throw a real, informative `groq-client: ...` error instead of that opaque parse failure.
+async function safeJson(res) {
+  try {
+    return await res.json();
+  } catch {
+    throw new Error(`groq-client: HTTP ${res.status}${res.statusText ? ' ' + res.statusText : ''} (response was not JSON)`);
+  }
+}
+
 // Dependency-injected so this module has no hard dependency on a particular supabase-js
 // version or global — pass plain values/callbacks instead of the sb client object itself.
 export function createGroqClient({ supabaseUrl, supabaseAnonKey, getAccessToken, fetchImpl = fetch, apiKey } = {}) {
@@ -119,7 +132,7 @@ export function createGroqClient({ supabaseUrl, supabaseAnonKey, getAccessToken,
   // One-shot, non-streaming call. Returns the assistant's reply text.
   async function chat(options) {
     const res = await callChat(buildPayload({ ...options, stream: false }));
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) throw new Error(`groq-client: ${data?.error?.message || data?.error || `HTTP ${res.status}`}`);
     const text = data?.choices?.[0]?.message?.content;
     if (typeof text !== 'string') throw new Error('groq-client: unexpected response shape');
@@ -144,7 +157,7 @@ export function createGroqClient({ supabaseUrl, supabaseAnonKey, getAccessToken,
     form.append('file', blob, fileName);
     form.append('model', model);
     const res = await callTranscribe(form);
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) throw new Error(`groq-client: ${data?.error?.message || data?.error || `HTTP ${res.status}`}`);
     return data.text || '';
   }

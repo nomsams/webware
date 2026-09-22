@@ -111,6 +111,38 @@ test('createGroqClient requires its config', () => {
   assert.throws(() => createGroqClient({}), /required/);
 });
 
+test('chat() throws an informative error instead of a bare JSON-parse SyntaxError when the response body is not JSON', async () => {
+  // A gateway timeout, a WAF block page, or an Edge Function crashing before it can call json()
+  // all still come back as a successful-looking fetch() whose body is HTML/plain-text/empty —
+  // res.json() itself throws, and unguarded that reaches the caller as an opaque SyntaxError
+  // ("Unexpected token < in JSON") that no error-message pattern-match could ever recognize.
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 502,
+    statusText: 'Bad Gateway',
+    json: async () => { throw new SyntaxError('Unexpected token < in JSON at position 0'); },
+  });
+  const groq = createGroqClient({ apiKey: 'gsk_x', fetchImpl });
+
+  await assert.rejects(
+    groq.chat({ model: GROQ_MODELS.TEXT, messages: [{ role: 'user', content: 'hi' }] }),
+    /groq-client: HTTP 502/,
+  );
+});
+
+test('chat() passes maxTokens through as max_completion_tokens', async () => {
+  let capturedBody;
+  const fetchImpl = async (url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'ok' } }] }) };
+  };
+  const groq = createGroqClient({ supabaseUrl: 'https://example.supabase.co', supabaseAnonKey: 'anon-key', getAccessToken: fakeGetAccessToken(), fetchImpl });
+
+  await groq.chat({ model: GROQ_MODELS.TEXT, messages: [{ role: 'user', content: 'hi' }], maxTokens: 4096 });
+
+  assert.equal(capturedBody.max_completion_tokens, 4096);
+});
+
 test('chat() applies the text model\'s own defaults when none are given', async () => {
   let capturedBody;
   const fetchImpl = async (url, init) => {

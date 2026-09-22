@@ -85,6 +85,14 @@ export async function parseOrderRequest(groqClient, text, {
   fromAddress = null,
   model = GROQ_MODELS.TEXT,
   reasoningEffort = 'medium',
+  // TEXT is a reasoning model — at 'medium' effort its own internal reasoning tokens count against
+  // max_completion_tokens same as the visible reply, and can run long enough on their own to leave
+  // no room left for the actual JSON answer, which then arrives truncated (or not at all): every
+  // extractJsonObjects() call finds an opened but never-closed "{" and parseJsonReply() throws "did
+  // not contain JSON" for what looks, from the caller's side, like every single request failing the
+  // same way regardless of wording. Comfortably larger than groq-client's own 2048 default so
+  // reasoning has room to finish before the answer does.
+  maxTokens = 4096,
 } = {}) {
   if (!text || !text.trim()) throw new Error('parseOrderRequest: text is required');
 
@@ -95,6 +103,7 @@ export async function parseOrderRequest(groqClient, text, {
   const reply = await groqClient.chat({
     model,
     reasoningEffort,
+    maxTokens,
     messages: [
       { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
       { role: 'user', content: `${itemsList}\n\nText:\n${text}` },

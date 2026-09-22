@@ -11782,6 +11782,17 @@ ${css}
         if (/not authenticated|sign in/i.test(msg)) return "Please sign in first.";
         if (/429|rate limit/i.test(msg)) return "The assistant is busy right now — try again in a moment.";
         if (/no groq api key|no AI key/i.test(msg)) return aiNoKeyMessage();
+        // The model's reply didn't come back as usable JSON at all (order-parser.js/json-extract.js) —
+        // most often the model ran out of its reply budget mid-answer (its own reasoning ate into the
+        // token limit before it got to the actual JSON), which reads as every request failing the
+        // same way regardless of wording. Retrying often just works since token usage varies call to
+        // call; simplifying the request lowers how much the model needs to reason through.
+        if (/did not contain json|missing items array|unexpected response shape/i.test(msg)) {
+            return "The assistant's reply got cut off before it finished — try again, or ask for fewer items at once.";
+        }
+        // groq-client's own safeJson() fallback for a non-JSON HTTP response (a gateway error page,
+        // an Edge Function crash) — a transient server-side problem, not something Settings can fix.
+        if (/groq-client: http 5\d\d/i.test(msg)) return "The assistant service had a hiccup on its end — try again in a moment.";
         return "Something went wrong on my end — please try again.";
     }
 

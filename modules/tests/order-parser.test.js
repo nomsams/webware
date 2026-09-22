@@ -203,6 +203,28 @@ test('parseOrderRequest coerces a quantity the model sent as a string', async ()
   assert.equal(typeof draft.items[0].quantity, 'number');
 });
 
+test('parseOrderRequest asks for a generous completion-token budget by default, and lets a caller override it', async () => {
+  // Regression, reproducing a real report: every single pack-order request failed with a generic
+  // error, including the simplest possible one ("pack 2 of 784.019", no recipient, one item). The
+  // model (TEXT) is a reasoning model whose own internal reasoning tokens count against the same
+  // max_completion_tokens budget as its visible reply — at groq-client's own 2048-token default,
+  // reasoning alone can consume the whole budget before any JSON ever comes out, so
+  // parseJsonReply() throws "did not contain JSON" for what looks like every request failing
+  // identically regardless of wording.
+  let captured;
+  const fakeGroq = {
+    chat: async (opts) => {
+      captured = opts;
+      return JSON.stringify({ items: [{ reference: 'item 1', quantity: 1 }], recipientName: null, recipientAddressHint: null, needsAddressLookup: false });
+    },
+  };
+  await parseOrderRequest(fakeGroq, 'pack 1 of item 1', { knownItems: KNOWN_ITEMS });
+  assert.equal(captured.maxTokens, 4096);
+
+  await parseOrderRequest(fakeGroq, 'pack 1 of item 1', { knownItems: KNOWN_ITEMS, maxTokens: 8000 });
+  assert.equal(captured.maxTokens, 8000);
+});
+
 test('parseOrderRequest falls back to searchItemCandidates when a reference is not in knownItems', async () => {
   const fakeGroq = {
     chat: async () => JSON.stringify({
