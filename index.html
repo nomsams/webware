@@ -6659,7 +6659,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         box.innerHTML = `
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:0.75rem;">
                 <strong style="font-size:1.1rem;">Rack Area ${escapeHtml(z.zone)}</strong>
-                <span style="color:var(--text-muted); font-size:0.85rem;">${z.max_aisle} bays wide × ${z.max_rack} racks deep${z.max_rack >= 2 ? ' (back-to-back)' : ''}</span>
+                <span style="color:var(--text-muted); font-size:0.85rem;">${z.rack_style === 'shelving' ? `${z.max_rack || 1} section${(z.max_rack || 1) > 1 ? 's' : ''} wide` : `${z.max_aisle} bays wide × ${z.max_rack} racks deep${z.max_rack >= 2 ? ' (back-to-back)' : ''}`}</span>
                 ${readOnly ? '' : `<button class="secondary" onclick="deleteSelectedZone()" style="margin-left:auto; color:var(--danger); padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🗑️ Delete Zone</button>`}
             </div>
             <label class="modal-label" for="zone-inspector-label">Label</label>
@@ -6670,7 +6670,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                     <input type="number" id="zone-inspector-level" min="1" value="${z.max_level || 1}" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('max_level', this.value)">
                 </div>
                 <div style="flex:1;">
-                    <label class="modal-label" for="zone-inspector-bin">Bins per level</label>
+                    <label class="modal-label" for="zone-inspector-bin">${z.rack_style === 'shelving' ? 'Bins per section' : 'Bins per level'}</label>
                     <input type="number" id="zone-inspector-bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('max_bin', this.value)">
                 </div>
             </div>
@@ -6729,10 +6729,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             <div class="zone-manual-row">
                 <input type="text" data-field="zone" value="${escapeHtml(z.zone)}" maxlength="2" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'zone', this.value.toUpperCase())">
                 <input type="text" data-field="label" placeholder="Label (optional)" value="${escapeHtml(z.label || '')}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'label', this.value)">
-                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Bays <input type="number" data-field="max_aisle" min="1" value="${z.max_aisle || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_aisle', this.value)"></label>
-                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Depth <input type="number" data-field="max_rack" min="1" value="${z.max_rack || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_rack', this.value)"></label>
+                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;" title="Floor-plan footprint width in grid cells — not used for the 3D picture when this zone is Shelving (its Depth number provides the section count instead)">Bays <input type="number" data-field="max_aisle" min="1" value="${z.max_aisle || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_aisle', this.value)"></label>
+                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;" title="${z.rack_style === 'shelving' ? 'How many side-by-side sections this shelving run has' : 'How many racks deep, front to back (2 = back-to-back)'}">${z.rack_style === 'shelving' ? 'Sections' : 'Depth'} <input type="number" data-field="max_rack" min="1" value="${z.max_rack || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_rack', this.value)"></label>
                 <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Levels <input type="number" data-field="max_level" min="1" value="${z.max_level || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_level', this.value)"></label>
-                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;">Bins <input type="number" data-field="max_bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_bin', this.value)"></label>
+                <label style="font-size:0.75rem; color:var(--text-muted); margin:0;" title="${z.rack_style === 'shelving' ? 'Bins per section' : 'Bins per level'}">Bins <input type="number" data-field="max_bin" min="1" value="${z.max_bin || 1}" ${readOnly ? 'disabled' : ''} oninput="updateManualZoneField(${idx}, 'max_bin', this.value)"></label>
                 <select data-field="rack_style" title="Rack style — how this area is drawn in the 3D view" ${readOnly ? 'disabled' : ''} onchange="updateManualZoneField(${idx}, 'rack_style', this.value)" style="width:auto; margin:0; padding:2px 4px; font-size:0.75rem;">
                     <option value="pallet" ${z.rack_style === 'shelving' ? '' : 'selected'}>🟧 Pallet</option>
                     <option value="shelving" ${z.rack_style === 'shelving' ? 'selected' : ''}>🗄️ Shelving</option>
@@ -6895,7 +6895,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         } else {
             canvas.innerHTML = window.buildIsoRackSVG(geom, { showDimensions: true, sampleBin: true, ariaLabel: `Isometric view of rack area ${z.zone} with its dimensions` });
         }
-        document.getElementById('dim-summary').textContent = `Rack area ${z.zone}: ${geom.bays} bay${geom.bays > 1 ? 's' : ''} × ${geom.depthCount} rack${geom.depthCount > 1 ? 's' : ''} deep × ${geom.levels} level${geom.levels > 1 ? 's' : ''}, ${geom.binsPerLevel} bin${geom.binsPerLevel > 1 ? 's' : ''} per level — ${dimShortSummary(z)}`;
+        document.getElementById('dim-summary').textContent = geom.sectioned
+            ? `Rack area ${z.zone}: ${geom.sections} section${geom.sections > 1 ? 's' : ''} × ${geom.levels} level${geom.levels > 1 ? 's' : ''}, ${geom.binsPerSection} bin${geom.binsPerSection > 1 ? 's' : ''} per section — ${dimShortSummary(z)}`
+            : `Rack area ${z.zone}: ${geom.bays} bay${geom.bays > 1 ? 's' : ''} × ${geom.depthCount} rack${geom.depthCount > 1 ? 's' : ''} deep × ${geom.levels} level${geom.levels > 1 ? 's' : ''}, ${geom.binsPerLevel} bin${geom.binsPerLevel > 1 ? 's' : ''} per level — ${dimShortSummary(z)}`;
         document.getElementById('dim-notes').innerHTML = dimConsistencyNotes(geom).map(escapeHtml).join('<br>');
     }
 
@@ -8998,12 +9000,28 @@ th { background: #eee; }
         if (!m) return null;
         return { zone: m[1], depth: Number(m[2]), level: Number(m[3]), bin: Number(m[4]), binRow: Number(m[5]) };
     }
+    // "Depth" means a different physical thing depending on a zone's rack style: which rack, front
+    // or back, for pallet racking's back-to-back rows — or which horizontal section, left to right,
+    // for a single run of boltless shelving (see iso-rack.js's resolveRackGeometry() `sectioned`,
+    // which draws that same distinction). Every other part of a bin code — Level, Bin, Row — means
+    // the same thing either way.
+    function isShelvingZone(zone) {
+        const z = globalWarehouseZones.find(zz => zz.zone === zone);
+        return !!(z && z.rack_style === 'shelving');
+    }
+    function depthWord(zone, depth) {
+        return isShelvingZone(zone) ? `Section ${depth}` : depth === 1 ? 'front rack' : depth === 2 ? 'back rack' : `rack ${depth}`;
+    }
+    function depthParen(zone, depth) {
+        return isShelvingZone(zone) ? ` (section ${depth})` : depth === 1 ? ' (front)' : depth === 2 ? ' (back)' : '';
+    }
     function describeLocationCode(code) {
         const p = parseLocationCode(code);
         if (!p) return null;
-        const depthLabel = p.depth === 1 ? ' (front)' : p.depth === 2 ? ' (back)' : '';
         const rowLabel = p.binRow > 1 ? ` (${p.binRow - 1} bin${p.binRow > 2 ? 's' : ''} back)` : '';
-        return `Zone ${p.zone} · Rack ${p.depth}${depthLabel} · Level ${p.level} · Bin ${p.bin}${rowLabel}`;
+        return isShelvingZone(p.zone)
+            ? `Zone ${p.zone} · Section ${p.depth} · Level ${p.level} · Bin ${p.bin}${rowLabel}`
+            : `Zone ${p.zone} · Rack ${p.depth}${depthParen(p.zone, p.depth)} · Level ${p.level} · Bin ${p.bin}${rowLabel}`;
     }
 
     // items.location_code has a real Postgres CHECK constraint matching the canonical code — a value
@@ -9107,7 +9125,7 @@ th { background: #eee; }
         if (!zone) { caption.textContent = ''; return; }
         const bounds = getZoneBounds(zone);
         if (!bounds) { caption.textContent = `No sized layout for Zone ${zone} yet — use the dropdowns/text above.`; return; }
-        caption.textContent = `Zone ${zone} — tap a cell to set Depth × Level`;
+        caption.textContent = `Zone ${zone} — tap a cell to set ${isShelvingZone(zone) ? 'Section' : 'Depth'} × Level`;
         const curDepth = document.getElementById(`${prefix}-loc-depth`).value;
         const curLevel = document.getElementById(`${prefix}-loc-level`).value;
         grid.style.gridTemplateColumns = `repeat(${bounds.maxDepth}, 1fr)`;
@@ -9116,7 +9134,7 @@ th { background: #eee; }
                 const isActive = String(depth) === curDepth && String(level) === curLevel;
                 const cell = document.createElement('div');
                 cell.className = 'map-cell clickable' + (isActive ? ' active' : '');
-                cell.title = `Rack ${depth} · Level ${level}`;
+                cell.title = `${depthWord(zone, depth)} · Level ${level}`;
                 cell.innerText = `${depth}·${level}`;
                 cell.onclick = () => pickLocationCell(prefix, depth, level);
                 grid.appendChild(cell);
@@ -9246,8 +9264,7 @@ th { background: #eee; }
                 const isActive = itemPos && itemPos.zone === binMapSelectedZone && itemPos.depth === depth && itemPos.level === level;
                 const cell = document.createElement('div');
                 cell.className = 'map-cell' + (isActive ? ' active clickable' : '');
-                const depthLabel = depth === 1 ? ' (front)' : depth === 2 ? ' (back)' : '';
-                cell.title = isActive ? `${describeLocationCode(item.LocationCode)} — tap for the detailed shelf view` : `Rack ${depth}${depthLabel} · Level ${level}`;
+                cell.title = isActive ? `${describeLocationCode(item.LocationCode)} — tap for the detailed shelf view` : `${depthWord(binMapSelectedZone, depth)} · Level ${level}`;
                 cell.innerText = isActive ? `${depth}·${level}` : '';
                 if (isActive) cell.onclick = () => openBinDetailModal(item);
                 map.appendChild(cell);
@@ -9293,7 +9310,7 @@ th { background: #eee; }
                 ariaLabel: `Warehouse floor with rack area ${zone} selected`,
             });
         } else if (bounds) {
-            const geom = window.resolveRackGeometry(zoneRow ? { ...zoneRow } : { zone }, bounds, { minBin: hl ? hl.bin : 0, minRows: hl ? hl.row : 1 });
+            const geom = window.resolveRackGeometry(zoneRow ? { ...zoneRow } : { zone }, bounds, { minBin: hl ? hl.bin : 0, minRows: hl ? hl.row : 1, minDepth: hl ? hl.depth : 0 });
             canvas.innerHTML = window.buildIsoRackSVG(geom, { highlight: hl, ariaLabel: `Isometric view of rack area ${zone}${hl ? `, bin ${item.LocationCode}` : ''}` });
         } else {
             canvas.innerHTML = '';
@@ -9327,7 +9344,7 @@ th { background: #eee; }
         if (!pos) return;
         const bounds = getZoneBounds(pos.zone) || {};
         const width = bounds.maxBin || pos.bin;
-        const depthLabel = pos.depth === 1 ? 'front rack' : pos.depth === 2 ? 'back rack' : `rack ${pos.depth}`;
+        const depthLabel = depthWord(pos.zone, pos.depth);
 
         document.getElementById('bin-detail-title').textContent = `📍 ${item['itemname(english)'] || item['itemname(swedish)'] || 'Item'}`;
         document.getElementById('bin-detail-subtitle').textContent = describeLocationCode(item.LocationCode);
@@ -9453,6 +9470,7 @@ th { background: #eee; }
         const here = globalInventory.map(i => parseLocationCode(i.LocationCode)).filter(p => p && p.zone === zone);
         const geom = window.resolveRackGeometry({ ...(globalWarehouseZones.find(z => z.zone === zone) || { zone }) }, bounds, {
             minBin: Math.max(0, ...here.map(p => p.bin)), minRows: Math.max(1, ...here.map(p => p.binRow)),
+            minDepth: Math.max(0, ...here.map(p => p.depth)),
         });
         canvas.innerHTML = window.buildIsoRackSVG(geom, {
             interactive: true,
@@ -9487,16 +9505,15 @@ th { background: #eee; }
             for (let depth = 1; depth <= bounds.maxDepth; depth++) {
                 const count = itemsAtLocation(binLocatorZone, depth, level).length;
                 const isSelected = binLocatorSelectedDepth === depth && binLocatorSelectedLevel === level;
-                const depthLabel = depth === 1 ? ' (front)' : depth === 2 ? ' (back)' : '';
                 const cell = document.createElement('div');
                 cell.className = 'map-cell clickable' + (isSelected ? ' active' : '') + (count > 0 && !isSelected ? ' has-items' : '');
-                cell.title = `Rack ${depth}${depthLabel} · Level ${level}` + (count ? ` — ${count} item(s)` : ' — empty');
+                cell.title = `${depthWord(binLocatorZone, depth)} · Level ${level}` + (count ? ` — ${count} item(s)` : ' — empty');
                 cell.innerText = count > 0 ? String(count) : '';
                 cell.onclick = () => selectBinLocatorCell(depth, level);
                 grid.appendChild(cell);
             }
         }
-        caption.textContent = `Zone ${binLocatorZone} — each cell is one shelf (Rack × Level); the number is how many items are stored there.`;
+        caption.textContent = `Zone ${binLocatorZone} — each cell is one shelf (${isShelvingZone(binLocatorZone) ? 'Section' : 'Rack'} × Level); the number is how many items are stored there.`;
     }
 
     function selectBinLocatorCell(depth, level) {
@@ -9511,7 +9528,7 @@ th { background: #eee; }
         const itemsHere = itemsAtLocation(binLocatorZone, depth, level);
         const maxBinSeen = itemsHere.reduce((max, i) => Math.max(max, (parseLocationCode(i.LocationCode) || {}).bin || 0), 0);
         const width = bounds.maxBin || maxBinSeen || 1;
-        const depthLabel = depth === 1 ? 'front rack' : depth === 2 ? 'back rack' : `rack ${depth}`;
+        const depthLabel = depthWord(binLocatorZone, depth);
 
         document.getElementById('bin-locator-detail-title').textContent = `📍 Zone ${binLocatorZone} · ${depthLabel} · Level ${level}`;
 

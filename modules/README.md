@@ -227,18 +227,25 @@ node --test modules/tests/*.test.js
     to a schematic default so the picture still reads, and the result's `recorded` field says which
     values were real — that's what lets the callouts show a dashed "≈" for a guess and a solid value
     for a measurement. Junk (negative, zero, `NaN`, text, an unrecognized `rack_style`) counts as not
-    recorded. A bin/Row beyond the configured size (`extra.minBin`/`minRows`) widens the picture
-    instead of falling off it.
+    recorded. A bin/Row/Rack beyond the configured size (`extra.minBin`/`minRows`/`minDepth`) widens
+    the picture instead of an item actually sitting there silently failing to appear. A `'shelving'`
+    zone also resolves `sectioned: true`: its bin codes' Depth digit means which of `sections`
+    side-by-side sections a bin is in, not a second physical row, so `bays`/`binsPerLevel` fold the
+    section count in and `depthCount` (real front-to-back rows) is always 1; a `'pallet'` zone keeps
+    Depth as real racks (`sectioned: false`, `depthCount` = the configured/observed depth).
   - `buildIsoRackSVG(geom, opts)` — one rack area, drawn to match `geom.style`: **pallet racking**
     gets a thick orange beam at each level (`iso-beam-top/front/side` — no solid deck, since a pallet
     sits directly on the beams) and yellow corner guards at floor level on the nearest rack
-    (`iso-foot`); **shelving** gets a solid shelf board at each level (`iso-board-top/front/side`,
-    the original single style) and a diagonal X cross-brace per bay up the back (`iso-brace`).
-    Uprights (`iso-post`) are a fixed rack-blue either way — real racking is painted blue regardless
-    of the app's light/dark theme, unlike the rest of the drawing, which follows it through
-    CSS-variable classes. All of this is semi-transparent so the located bin (`opts.highlight`) —
-    one **solid blue** box with a coordinates pill, painted at its true depth in painter's order plus
-    an opaque-ish overlay copy — reads through a rack standing in front of it, in both styles.
+    (`iso-foot`), with Depth stacked back to front, front rack nearest; **shelving** gets a solid
+    shelf board at each level (`iso-board-top/front/side`, the original single style) and a diagonal
+    X cross-brace per section up the back (`iso-brace`), with Depth's sections laid out side by side
+    instead (`geom.sectioned`) — one real physical row, so occlusion between sections never comes up,
+    only level order does. Uprights (`iso-post`) are a fixed rack-blue either way — real racking is
+    painted blue regardless of the app's light/dark theme, unlike the rest of the drawing, which
+    follows it through CSS-variable classes. All of this is semi-transparent so the located bin
+    (`opts.highlight`) — one **solid blue** box with a coordinates pill, painted at its true position
+    in painter's order plus an opaque-ish overlay copy — reads through a rack standing in front of
+    it, in both styles.
     `opts.occupied` tints bins that hold items (the Bin Locator), `opts.selected` outlines a shelf,
     `opts.interactive` adds the `data-*` hooks, `opts.showDimensions` / `opts.sampleBin` add the
     measurement callouts and a sample bin for the dimensions panel. Empty-bin outlines are dropped
@@ -251,9 +258,12 @@ node --test modules/tests/*.test.js
 
   Tested in `tests/iso-rack.test.js` (geometry fallbacks/derivations, `rack_style` resolution
   including junk values, opacity of rack vs. bin for both styles, which classes each style actually
-  draws (beam/foot-guard for pallet, board/brace for shelving — and never the other style's), label
-  escaping, occupied/selected/interactive markup, dimension callouts, and "every renderer stays finite
-  over odd inputs"). SQL for the sizes it reads is `supabase/schema_zone_dimensions.sql`.
+  draws (beam/foot-guard for pallet, board/brace for shelving — and never the other style's), a
+  shelving zone's sections resolving side by side while ignoring `max_aisle` and a pallet zone's
+  Depth staying real racks, a sectioned zone drawing every section's occupied bins rather than just
+  the first, label escaping, occupied/selected/interactive markup, dimension callouts, and "every
+  renderer stays finite over odd inputs"). SQL for the sizes it reads is
+  `supabase/schema_zone_dimensions.sql`.
 - **`json-extract.js`** — **wired in**: reads JSON objects out of free-form model output. Used by
   `order-parser.js` and `delivery-note-parser.js` for their replies and, as
   `window.extractJsonObjects`, by the AI assistant to read which action a reply asks for. Replaces

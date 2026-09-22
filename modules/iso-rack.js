@@ -11,6 +11,11 @@
 // The viewer stands in front of the rack at its right-hand end, looking slightly down, so what's
 // visible is the front face (the walkway side), the right-hand end face, and the top.
 //
+// A pallet-style zone uses y this way: Depth really is which physical rack, front vs. back. A
+// shelving-style zone instead lays what its bin codes call "Depth" along x, side by side — a single
+// run of SECTIONS, not a second row behind the first (see resolveRackGeometry's `sectioned`). Every
+// other axis and every other part of a bin code (Level, Bin, Row) means the same thing either way.
+//
 // Dimensions come from a warehouse_zones row (all optional, all cm): rack_width_cm (one bay),
 // rack_depth_cm, rack_height_cm; shelf_width_cm, shelf_depth_cm, shelf_height_cm (the CLEAR
 // height of one level, board top to the underside of the next); bin_width_cm, bin_depth_cm,
@@ -34,10 +39,10 @@ export const ISO_BLUE = Object.freeze({ front: '#2563eb', side: '#1d4ed8', top: 
 // against real photos of the two kinds of storage actually in use: open pallet racking (a beam
 // bolted between uprights at each level, pallets set directly on the beams, no solid deck) and
 // boltless shelving (a solid shelf board at each level, X cross-braced uprights at the back). A
-// zone with no style recorded draws as 'pallet' — the more common default, and what the one zone
-// with real data today (Zone A) actually is. Only the decorative beam/brace thickness differs
-// between them; a recorded rack/shelf height (resolveRackGeometry's `rec`) still governs the real
-// geometry either way, this is purely how thick the schematic level itself is drawn.
+// zone with no style recorded draws as 'pallet' — the more common default in general warehousing,
+// though this warehouse's own two zones are both set explicitly. Only the decorative beam/brace
+// thickness differs between them; a recorded rack/shelf height (resolveRackGeometry's `rec`) still
+// governs the real geometry either way, this is purely how thick the schematic level itself is drawn.
 const RACK_STYLES = Object.freeze(['pallet', 'shelving']);
 export const PALLET_BEAM_T = 7; // cm — a pallet-rack beam is a visibly thicker steel member than shelf decking
 const MAX_ROWS_PER_SHELF = 6;
@@ -60,16 +65,30 @@ export function formatLocationCode(zone, depth, level, bin, row = 1) {
   return `${zone} ${depth}-${level} ${bin}-${row || 1}`;
 }
 
-// bounds: { maxDepth, maxLevel, maxBin } as index.html's getZoneBounds() returns; extra: { minBin, minRows }
-// so a bin further along (or a Row further back) than the configured size still fits in the picture.
+// bounds: { maxDepth, maxLevel, maxBin } as index.html's getZoneBounds() returns; extra: { minBin, minRows, minDepth }
+// so a bin further along (or a Row further back, or a Rack further deep) than the configured size
+// still fits in the picture — a zone's own recorded max_rack/max_bin is a drawing size, not a hard
+// limit, and an item actually sitting beyond it should never just silently fail to appear.
 export function resolveRackGeometry(zone, bounds, extra = {}) {
   const z = zone || {};
   const b = bounds || {};
   const style = RACK_STYLES.includes(z.rack_style) ? z.rack_style : 'pallet';
+  // Boltless shelving is normally a single run of side-by-side SECTIONS, not a second physical row
+  // behind the first — so for a shelving zone, what this warehouse's own bin codes call "Depth" is
+  // actually which section (counting left to right), not which rack (counting front to back) the
+  // way it works for pallet racking's front/back rows. Both still use the same LocationCode shape
+  // and the same "Depth" number; only which axis it draws on differs, matched to how each style is
+  // actually built in this warehouse.
+  const sectioned = style === 'shelving';
   const levels = Math.max(1, Math.floor(b.maxLevel || 1));
-  const depthCount = Math.max(1, Math.floor(b.maxDepth || 1));
-  const binsPerLevel = Math.max(1, Math.floor(Math.max(b.maxBin || 1, extra.minBin || 1)));
-  const bays = Math.max(1, Math.floor(z.max_aisle || 1));
+  const sections = Math.max(1, Math.floor(Math.max(b.maxDepth || 1, extra.minDepth || 1)));
+  const depthCount = sectioned ? 1 : sections; // real physical rows front-to-back — always 1 when sectioned
+  const binsPerSection = Math.max(1, Math.floor(Math.max(b.maxBin || 1, extra.minBin || 1)));
+  // Sectioned: each section has its own local Bin numbering, so the combined run has sections x
+  // binsPerSection distinct positions end to end — cellW below then comes out to one section's own
+  // per-bin width automatically, with no extra formula needed.
+  const binsPerLevel = sectioned ? sections * binsPerSection : binsPerSection;
+  const bays = sectioned ? sections : Math.max(1, Math.floor(z.max_aisle || 1));
 
   const rec = {
     rackW: num(z.rack_width_cm), rackD: num(z.rack_depth_cm), rackH: num(z.rack_height_cm),
@@ -107,7 +126,7 @@ export function resolveRackGeometry(zone, bounds, extra = {}) {
   const binDrawD = rec.binD ? Math.min(rec.binD, binD) : binD;
 
   return {
-    zone: z.zone || '', style, bays, depthCount, levels, binsPerLevel, rows,
+    zone: z.zone || '', style, sectioned, sections, binsPerSection, bays, depthCount, levels, binsPerLevel, rows,
     bayW, runLength, cellW, rackD, gap, totalDepth, boardT, clear, pitch, height, binH,
     binD, binDrawW, binDrawD,
     recorded: rec,
@@ -283,8 +302,12 @@ export function buildIsoRackSVG(geom, opts = {}) {
   let hl = null;
   const drawBlueBin = (spec) => {
     const { d, l, b, r } = spec;
-    const cx0 = (b - 1) * g.cellW, cx1 = b * g.cellW;
-    const cy0 = (d - 1) * (g.rackD + g.gap) + (r - 1) * g.binD, cy1 = cy0 + g.binD;
+    // Sectioned: d is which section, offsetting x instead of y — there is only ever one real y (the
+    // single physical row), with just Row making the small front-to-back offset within it.
+    const cx0 = g.sectioned ? (d - 1) * g.bayW + (b - 1) * g.cellW : (b - 1) * g.cellW;
+    const cx1 = cx0 + g.cellW;
+    const cy0 = g.sectioned ? (r - 1) * g.binD : (d - 1) * (g.rackD + g.gap) + (r - 1) * g.binD;
+    const cy1 = cy0 + g.binD;
     const z0 = (l - 1) * g.pitch + g.boardT, z1 = z0 + g.binH;
     // the recorded bin size, centred in its cell — and never smaller than a readable blob, however big the rack is
     const fit = (c0, c1, size) => { const c = (c0 + c1) / 2, w = Math.max(size, minSize); return [c - w / 2, c + w / 2]; };
@@ -310,44 +333,82 @@ export function buildIsoRackSVG(geom, opts = {}) {
   const topCls = isPallet ? 'iso-beam-top' : 'iso-board-top';
   const frontCls = isPallet ? 'iso-beam-front' : 'iso-board-front';
   const sideCls = isPallet ? 'iso-beam-side' : 'iso-board-side';
-  for (let d = g.depthCount; d >= 1; d--) {
-    const y0 = (d - 1) * (g.rackD + g.gap), y1 = y0 + g.rackD;
-    for (let k = 0; k <= g.bays; k++) S.line('iso-post', [k * g.bayW, y1, 0], [k * g.bayW, y1, H]);
-    // Boltless shelving is X cross-braced between each pair of uprights, back to front — drawn once
-    // per bay (not per level, it spans the whole rack height) on the back plane, since that is the
-    // one place it is visible through the shelves' own translucency without cutting across a bin.
-    if (!isPallet) {
-      for (let k = 0; k < g.bays; k++) {
-        S.line('iso-brace', [k * g.bayW, y1, 0], [(k + 1) * g.bayW, y1, H]);
-        S.line('iso-brace', [(k + 1) * g.bayW, y1, 0], [k * g.bayW, y1, H]);
-      }
+  if (g.sectioned) {
+    // One real physical row (fixed y0/y1) with `sections` bays side by side along x. Sections don't
+    // occlude each other (same y, disjoint x), so paint order among them doesn't matter — only level
+    // order does, same as the non-sectioned rack below. Occupancy is still looked up by (section,
+    // level, bin, row): "d" is which section instead of which physical rack, nothing else changes.
+    const y0 = 0, y1 = g.rackD;
+    for (let k = 0; k <= g.sections; k++) {
+      S.line('iso-post', [k * g.bayW, y1, 0], [k * g.bayW, y1, H]);
+      S.line('iso-post', [k * g.bayW, y0, 0], [k * g.bayW, y0, H]);
+    }
+    for (let k = 0; k < g.sections; k++) {
+      S.line('iso-brace', [k * g.bayW, y1, 0], [(k + 1) * g.bayW, y1, H]);
+      S.line('iso-brace', [(k + 1) * g.bayW, y1, 0], [k * g.bayW, y1, H]);
     }
     for (let l = 1; l <= g.levels; l++) {
       const zb = (l - 1) * g.pitch, zt = zb + g.boardT;
-      const isSel = selected && selected.depth === d && selected.level === l;
-      S.poly(`${topCls}${isSel ? ' iso-shelf-selected' : ''}${interactive ? ' iso-click' : ''}`, [[0, y0, zt], [L, y0, zt], [L, y1, zt], [0, y1, zt]], dataAttrs(d, l), isSel || !interactive ? '' : `Rack ${d} · Level ${l}`);
-      S.poly(frontCls, [[0, y0, zb], [L, y0, zb], [L, y0, zt], [0, y0, zt]]);
-      S.poly(sideCls, [[L, y0, zb], [L, y1, zb], [L, y1, zt], [L, y0, zt]]);
-      for (let r = g.rows; r >= 1; r--) {
-        for (let b = 1; b <= g.binsPerLevel; b++) {
-          const count = occ.get(`${d}|${l}|${b}|${r}`) || 0;
-          if (count || drawEmptyBins) {
-            const x0 = (b - 1) * g.cellW, x1 = b * g.cellW;
-            const ry0 = y0 + (r - 1) * g.binD, ry1 = ry0 + g.binD;
-            const title = interactive || count ? `${codeFor(d, l, b, r)}${count ? ` — ${count} item${count > 1 ? 's' : ''}` : ''}` : '';
-            S.poly(`iso-bin${count ? ' iso-bin-occupied' : ''}${interactive ? ' iso-click' : ''}`, [[x0, ry0, zt], [x1, ry0, zt], [x1, ry1, zt], [x0, ry1, zt]], dataAttrs(d, l, b, r), title);
+      for (let d = g.sections; d >= 1; d--) {
+        const sx0 = (d - 1) * g.bayW, sx1 = d * g.bayW;
+        const isSel = selected && selected.depth === d && selected.level === l;
+        S.poly(`${topCls}${isSel ? ' iso-shelf-selected' : ''}${interactive ? ' iso-click' : ''}`, [[sx0, y0, zt], [sx1, y0, zt], [sx1, y1, zt], [sx0, y1, zt]], dataAttrs(d, l), isSel || !interactive ? '' : `Section ${d} · Level ${l}`);
+        S.poly(frontCls, [[sx0, y0, zb], [sx1, y0, zb], [sx1, y0, zt], [sx0, y0, zt]]);
+        if (d === g.sections) S.poly(sideCls, [[sx1, y0, zb], [sx1, y1, zb], [sx1, y1, zt], [sx1, y0, zt]]);
+        for (let r = g.rows; r >= 1; r--) {
+          for (let b = 1; b <= g.binsPerSection; b++) {
+            const count = occ.get(`${d}|${l}|${b}|${r}`) || 0;
+            if (count || drawEmptyBins) {
+              const x0 = sx0 + (b - 1) * g.cellW, x1 = x0 + g.cellW;
+              const ry0 = y0 + (r - 1) * g.binD, ry1 = ry0 + g.binD;
+              const title = interactive || count ? `${codeFor(d, l, b, r)}${count ? ` — ${count} item${count > 1 ? 's' : ''}` : ''}` : '';
+              S.poly(`iso-bin${count ? ' iso-bin-occupied' : ''}${interactive ? ' iso-click' : ''}`, [[x0, ry0, zt], [x1, ry0, zt], [x1, ry1, zt], [x0, ry1, zt]], dataAttrs(d, l, b, r), title);
+            }
+            if (hlSpec && !hl && hlSpec.d === d && hlSpec.l === l && hlSpec.b === b && hlSpec.r === r) drawBlueBin(hlSpec);
           }
-          if (hlSpec && !hl && hlSpec.d === d && hlSpec.l === l && hlSpec.b === b && hlSpec.r === r) drawBlueBin(hlSpec);
         }
       }
     }
-    for (let k = 0; k <= g.bays; k++) S.line('iso-post', [k * g.bayW, y0, 0], [k * g.bayW, y0, H]);
-    // Yellow foot/corner guards at floor level — only the nearest rack's near posts, since anything
-    // behind it is hidden anyway and this is purely decorative (a real forklift-strike guard).
-    if (isPallet && d === 1) {
-      const footW = Math.min(g.bayW * 0.16, 14), footH = Math.min(g.height * 0.06, 18);
-      for (let k = 0; k <= g.bays; k++) {
-        S.poly('iso-foot', [[k * g.bayW - footW / 2, y0, 0], [k * g.bayW + footW / 2, y0, 0], [k * g.bayW + footW / 2, y0, footH], [k * g.bayW - footW / 2, y0, footH]]);
+  } else {
+    for (let d = g.depthCount; d >= 1; d--) {
+      const y0 = (d - 1) * (g.rackD + g.gap), y1 = y0 + g.rackD;
+      for (let k = 0; k <= g.bays; k++) S.line('iso-post', [k * g.bayW, y1, 0], [k * g.bayW, y1, H]);
+      // Boltless shelving is X cross-braced between each pair of uprights, back to front — drawn once
+      // per bay (not per level, it spans the whole rack height) on the back plane, since that is the
+      // one place it is visible through the shelves' own translucency without cutting across a bin.
+      if (!isPallet) {
+        for (let k = 0; k < g.bays; k++) {
+          S.line('iso-brace', [k * g.bayW, y1, 0], [(k + 1) * g.bayW, y1, H]);
+          S.line('iso-brace', [(k + 1) * g.bayW, y1, 0], [k * g.bayW, y1, H]);
+        }
+      }
+      for (let l = 1; l <= g.levels; l++) {
+        const zb = (l - 1) * g.pitch, zt = zb + g.boardT;
+        const isSel = selected && selected.depth === d && selected.level === l;
+        S.poly(`${topCls}${isSel ? ' iso-shelf-selected' : ''}${interactive ? ' iso-click' : ''}`, [[0, y0, zt], [L, y0, zt], [L, y1, zt], [0, y1, zt]], dataAttrs(d, l), isSel || !interactive ? '' : `Rack ${d} · Level ${l}`);
+        S.poly(frontCls, [[0, y0, zb], [L, y0, zb], [L, y0, zt], [0, y0, zt]]);
+        S.poly(sideCls, [[L, y0, zb], [L, y1, zb], [L, y1, zt], [L, y0, zt]]);
+        for (let r = g.rows; r >= 1; r--) {
+          for (let b = 1; b <= g.binsPerLevel; b++) {
+            const count = occ.get(`${d}|${l}|${b}|${r}`) || 0;
+            if (count || drawEmptyBins) {
+              const x0 = (b - 1) * g.cellW, x1 = b * g.cellW;
+              const ry0 = y0 + (r - 1) * g.binD, ry1 = ry0 + g.binD;
+              const title = interactive || count ? `${codeFor(d, l, b, r)}${count ? ` — ${count} item${count > 1 ? 's' : ''}` : ''}` : '';
+              S.poly(`iso-bin${count ? ' iso-bin-occupied' : ''}${interactive ? ' iso-click' : ''}`, [[x0, ry0, zt], [x1, ry0, zt], [x1, ry1, zt], [x0, ry1, zt]], dataAttrs(d, l, b, r), title);
+            }
+            if (hlSpec && !hl && hlSpec.d === d && hlSpec.l === l && hlSpec.b === b && hlSpec.r === r) drawBlueBin(hlSpec);
+          }
+        }
+      }
+      for (let k = 0; k <= g.bays; k++) S.line('iso-post', [k * g.bayW, y0, 0], [k * g.bayW, y0, H]);
+      // Yellow foot/corner guards at floor level — only the nearest rack's near posts, since anything
+      // behind it is hidden anyway and this is purely decorative (a real forklift-strike guard).
+      if (isPallet && d === 1) {
+        const footW = Math.min(g.bayW * 0.16, 14), footH = Math.min(g.height * 0.06, 18);
+        for (let k = 0; k <= g.bays; k++) {
+          S.poly('iso-foot', [[k * g.bayW - footW / 2, y0, 0], [k * g.bayW + footW / 2, y0, 0], [k * g.bayW + footW / 2, y0, footH], [k * g.bayW - footW / 2, y0, footH]]);
+        }
       }
     }
   }

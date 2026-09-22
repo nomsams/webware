@@ -66,10 +66,11 @@ test('resolveRackGeometry treats the older shelf width as the bay width, and spl
   assert.equal(g.binD, 30);
 });
 
-test('resolveRackGeometry widens to fit a bin or Row beyond the configured size, and ignores junk dimensions', () => {
-  const wide = resolveRackGeometry({ zone: 'A' }, { maxDepth: 1, maxLevel: 1, maxBin: 4 }, { minBin: 9, minRows: 3 });
+test('resolveRackGeometry widens to fit a bin, Row, or Rack beyond the configured size, and ignores junk dimensions', () => {
+  const wide = resolveRackGeometry({ zone: 'A' }, { maxDepth: 1, maxLevel: 1, maxBin: 4 }, { minBin: 9, minRows: 3, minDepth: 5 });
   assert.equal(wide.binsPerLevel, 9);
   assert.equal(wide.rows, 3);
+  assert.equal(wide.depthCount, 5); // an item actually recorded at Rack 5 is never silently dropped just because the zone's own configured max_rack says less
   const junk = resolveRackGeometry({ zone: 'A', rack_width_cm: 'abc', rack_depth_cm: -5, shelf_height_cm: NaN, bin_width_cm: 0 }, { maxDepth: 1, maxLevel: 1, maxBin: 2 });
   assert.equal(junk.recorded.rackW, null);
   assert.equal(junk.recorded.rackD, null);
@@ -133,12 +134,44 @@ test('buildIsoRackSVG: pallet racking gets yellow foot guards on the nearest rac
 });
 
 test('buildIsoRackSVG: shelving racks are X cross-braced per bay per rack; pallet racking is not', () => {
+  // max_aisle is ignored for a shelving zone (bays = sections instead — see the sectioned-geometry
+  // tests below), so this deliberately passes a max_aisle that does NOT match maxDepth to prove that.
   const shelving = resolveRackGeometry({ zone: 'A', max_aisle: 3, rack_style: 'shelving' }, { maxDepth: 2, maxLevel: 2, maxBin: 3 });
   const svgShelving = buildIsoRackSVG(shelving);
   assert.equal(count(svgShelving, /class="iso-brace"/g), 2 * shelving.bays * shelving.depthCount); // an X = 2 lines, per bay, per depth-rack
 
   const pallet = resolveRackGeometry({ zone: 'A', max_aisle: 3 }, { maxDepth: 2, maxLevel: 2, maxBin: 3 });
   assert.doesNotMatch(buildIsoRackSVG(pallet), /class="iso-brace"/);
+});
+
+test('resolveRackGeometry: a shelving zone treats Depth as sections (side by side), ignoring max_aisle; pallet keeps Depth as real racks', () => {
+  const shelving = resolveRackGeometry({ zone: 'A', max_aisle: 99, rack_style: 'shelving' }, { maxDepth: 6, maxLevel: 5, maxBin: 8 });
+  assert.equal(shelving.sectioned, true);
+  assert.equal(shelving.sections, 6);
+  assert.equal(shelving.binsPerSection, 8);
+  assert.equal(shelving.depthCount, 1); // one real physical row regardless of how many sections
+  assert.equal(shelving.bays, 6); // bays follow sections, not the configured max_aisle
+  assert.equal(shelving.binsPerLevel, 48); // 6 sections x 8 local bins, combined
+  assert.equal(shelving.totalDepth, shelving.rackD); // no depth stacking, however many sections
+
+  const pallet = resolveRackGeometry({ zone: 'B', max_aisle: 2 }, { maxDepth: 6, maxLevel: 5, maxBin: 8 });
+  assert.equal(pallet.sectioned, false);
+  assert.equal(pallet.sections, 6);
+  assert.equal(pallet.depthCount, 6); // real front-to-back racks, unchanged from before sectioning existed
+  assert.equal(pallet.bays, 2); // pallet keeps max_aisle as its own independent bay count
+  assert.equal(pallet.binsPerLevel, 8);
+});
+
+test('buildIsoRackSVG: a shelving zone draws every section\'s occupied bins, not just the first, and stays one row deep', () => {
+  const g = resolveRackGeometry({ zone: 'A', rack_style: 'shelving' }, { maxDepth: 3, maxLevel: 1, maxBin: 2 });
+  const svg = buildIsoRackSVG(g, {
+    interactive: true,
+    occupied: [{ depth: 1, level: 1, bin: 1 }, { depth: 3, level: 1, bin: 2 }], // section 1 AND section 3
+  });
+  assert.equal(count(svg, /class="iso-bin iso-bin-occupied iso-click"/g), 2); // both sections' occupied bins render, none silently dropped
+  assert.match(svg, /Section 1 · Level 1/);
+  assert.match(svg, /Section 3 · Level 1/);
+  assert.doesNotMatch(svg, /Rack \d/); // never uses the front/back-rack wording for a sectioned zone
 });
 
 test('buildIsoRackSVG: uprights are a fixed rack-blue, not the theme-following muted colour', () => {
@@ -218,7 +251,7 @@ test('every renderer stays finite over odd inputs', () => {
     [{ zone: 'Q', rack_height_cm: 40 }, { maxDepth: 1, maxLevel: 20, maxBin: 1 }],
   ];
   for (const [zone, bounds] of odd) {
-    const g = resolveRackGeometry(zone, bounds, { minBin: 3, minRows: 2 });
+    const g = resolveRackGeometry(zone, bounds, { minBin: 3, minRows: 2, minDepth: 2 });
     for (const v of [g.runLength, g.cellW, g.totalDepth, g.pitch, g.height, g.binH, g.binD]) assert.ok(Number.isFinite(v) && v > 0, JSON.stringify(g));
     const svg = buildIsoRackSVG(g, { highlight: { depth: g.depthCount, level: g.levels, bin: g.binsPerLevel, row: g.rows }, showDimensions: true, sampleBin: true, interactive: true });
     assert.doesNotMatch(svg, /NaN|Infinity|undefined/);
