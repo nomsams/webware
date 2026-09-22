@@ -8794,7 +8794,11 @@ th { background: #eee; }
         // Picture buttons and the gallery's own ⭐/✕ controls) — carrying imageFullUrl/imageThumbUrl/
         // photos over explicitly, since this function patches globalInventory by hand instead of
         // reloading from Supabase afterward, and a plain object replace would otherwise silently
-        // drop them from the item view.
+        // drop them from the item view. VismaQty/VismaSyncedAt (the Visma Sync baseline — see
+        // modules/visma-sync.js) are carried over the same way and for the same reason: this save
+        // never touches those columns, but a plain replace would still make the item's own "Visma
+        // stock" field disappear from view (falling back to "never synced") until the next full
+        // reload, even though the database still has the real baseline.
         const updated = {
             Manufacturer: fields.Manufacturer || 'None',
             BTKnumber: btk,
@@ -8814,7 +8818,9 @@ th { background: #eee; }
             images: existingItem.images || '',
             imageFullUrl: existingItem.imageFullUrl,
             imageThumbUrl: existingItem.imageThumbUrl,
-            photos: existingItem.photos || []
+            photos: existingItem.photos || [],
+            VismaQty: existingItem.VismaQty ?? null,
+            VismaSyncedAt: existingItem.VismaSyncedAt || null
         };
 
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {

@@ -235,14 +235,22 @@ export function planAuditImport(auditRows, items, { exportedAt = null } = {}) {
     const s = syncStateFor(item);
     const confirmed = parseQuantity(pick(row, AUDIT_QTY_KEYS));
     const beforeStock = parseQuantity(pick(row, ['before_stock']));
+    // `visma` starts null ("unknown") and is only ever set to a real number once the add-on has
+    // actually confirmed the save below. It must NOT default to `confirmed` (the CSV's own
+    // confirmed_quantity) here: that column is populated even for a row the add-on could not verify
+    // was saved, and vismaSyncChoiceOptions() offers "Record Visma = N" / "…and set our quantity to
+    // N" for any entry whose `visma` isn't null — recording an unconfirmed write as the new trusted
+    // baseline would be exactly the silent-overwrite this whole feature exists to prevent.
     const entry = {
       ...base, btk: item.BTKnumber, name: item['itemname(english)'] || '',
-      ours: s.current, baseline: s.baseline, visma: confirmed, beforeStock,
+      ours: s.current, baseline: s.baseline, visma: null, beforeStock,
       changes: {}, conflicts: [],
     };
 
     if (!AUDIT_SAVED.has(status)) {
-      // 'error', 'save_unconfirmed', anything unknown: the add-on could not confirm what Visma holds.
+      // 'error', 'save_unconfirmed', anything unknown: the add-on could not confirm what Visma
+      // holds. The CSV's own confirmed_quantity is shown for context (so a person deciding what to
+      // do can see what was attempted) but never as an actionable choice.
       entry.conflicts.push({ field: 'save', ours: String(s.current), theirs: confirmed === null ? '(unknown)' : String(confirmed), fill: false });
       entry.reason = status === 'save_unconfirmed'
         ? 'Save was clicked but the add-on could not confirm it — check this article in Visma before trusting either number'
@@ -252,6 +260,7 @@ export function planAuditImport(auditRows, items, { exportedAt = null } = {}) {
     }
     if (confirmed === null) { plan.ignored.push({ ...base, reason: 'no usable quantity in the audit row' }); return; }
 
+    entry.visma = confirmed;
     entry.changes.VismaQty = confirmed;
     entry.changes.VismaSyncedAt = text(row.timestamp) || exportedAt || null;
 

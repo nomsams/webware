@@ -108,6 +108,18 @@ test('an unconfirmed save never moves the baseline', () => {
   assert.match(plan.review[0].reason, /could not confirm/);
 });
 
+test('an unconfirmed save leaves `visma` null - its own confirmed_quantity is not a fact', () => {
+  // Regression: the add-on's confirmed_quantity is populated even when it could NOT verify the save,
+  // so it must never be exposed as if it were a known Visma value - the review UI (vismaSyncChoiceOptions
+  // in index.html) offers "Record Visma = N" / "set our quantity to N" for any entry whose `visma`
+  // isn't null, and recording an unconfirmed write as the trusted baseline would defeat the whole point.
+  for (const status of ['save_unconfirmed', 'error']) {
+    const plan = planAuditImport([audit('1MB', status, { confirmed_quantity: '7', before_stock: '5' })], [item('A', '1MB', 7, 5)]);
+    assert.equal(plan.review[0].visma, null, status);
+    assert.equal(plan.review[0].changes.VismaQty, undefined, status); // and never queued as a change either
+  }
+});
+
 test('statuses where Visma was not changed are ignored, with the reason kept', () => {
   const items = [item('A', '1MB', 7, 5)];
   for (const status of ['skipped', 'not_found', 'invalid', 'duplicate', 'not_processed']) {
