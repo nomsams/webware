@@ -27,6 +27,16 @@ test('matchKnownItem resolves ordinals, BTKs, and names case-insensitively', () 
   assert.equal(matchKnownItem('item 99', KNOWN_ITEMS), null);
 });
 
+test('matchKnownItem does not throw on a non-string reference (the model can emit a bare JSON number)', () => {
+  // Regression: a numeric-looking item number like "784.019" is just as likely to come back from the
+  // model as the JSON number 784.019 as the string "784.019" - this used to throw
+  // "reference.trim is not a function" before reference.trim() could ever run.
+  assert.doesNotThrow(() => matchKnownItem(784.019, KNOWN_ITEMS));
+  assert.equal(matchKnownItem(1, KNOWN_ITEMS).btk, 'BTK000001'); // the ordinal path still works numerically
+  assert.equal(matchKnownItem(null, KNOWN_ITEMS), null);
+  assert.equal(matchKnownItem(undefined, KNOWN_ITEMS), null);
+});
+
 test('bestCandidateMatch short-circuits on an exact BTK match', () => {
   const candidates = [{ btk: 'BTK000005', name: 'Something else' }, { btk: 'BTK000009', name: 'Blue Widget' }];
   assert.equal(bestCandidateMatch('BTK000009', candidates).name, 'Blue Widget');
@@ -41,6 +51,11 @@ test('bestCandidateMatch picks the closer name by word overlap, and ignores weak
 test('bestCandidateMatch returns null with no candidates', () => {
   assert.equal(bestCandidateMatch('anything', []), null);
   assert.equal(bestCandidateMatch('anything', null), null);
+});
+
+test('bestCandidateMatch does not throw on a non-string reference', () => {
+  const candidates = [{ btk: 'BTK000729W01', name: '784.019 VALVE SEAT' }];
+  assert.doesNotThrow(() => bestCandidateMatch(784.019, candidates));
 });
 
 test('parseJsonReply extracts JSON even when wrapped in prose or code fences', () => {
@@ -113,6 +128,79 @@ test('parseOrderRequest resolves item ordinals, defaults quantity to 1, and skip
   assert.equal(draft.recipient.address, null);
   assert.equal(draft.recipient.confidence, 'unknown');
   assert.equal(draft.from, null);
+});
+
+test('parseOrderRequest does not throw when the model returns numeric-looking references as bare JSON numbers, and resolves them by item number', async () => {
+  // Regression, reproducing a real report: "pack an order to besab maskin of 2x 784.019 and 2x of
+  // 784.020" failed to build the order, because:
+  //   1. The model returned {"reference": 784.019} (a valid JSON number - exactly what an item
+  //      number shaped like a decimal invites) instead of {"reference": "784.019"}, which crashed
+  //      matchKnownItem()/bestCandidateMatch() ("reference.trim is not a function") the moment
+  //      either tried to call .trim() on it, surfacing as a generic "Something went wrong" toast.
+  //   2. Even with that fixed, an item referenced by NUMBER (not name) has no word in common with
+  //      its own display name ("Valve Seat"), so bestCandidateMatch()'s plain word-overlap score
+  //      against the reference text "784.019" would be 0 and wrongly reject the correct item -
+  //      which is exactly why a caller's already-confident candidate (see index.html's
+  //      searchItemCandidates, mirrored below) can mark itself `confident: true` to skip that
+  //      generic re-check.
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: 784.019, quantity: 2 }, { reference: 784.02, quantity: 2 }],
+      recipientName: 'Besab Maskin',
+      recipientAddressHint: null,
+      needsAddressLookup: false,
+    }),
+  };
+  // Realistic shape: item numbers and display names share no words, exactly like the real catalog
+  // (e.g. itemnumber "784.019" / itemname_en "Valve Seat") - knownItems only carries {btk, name} (see
+  // aiHandlePackOrderRequest in index.html), so resolution has to go through searchItemCandidates.
+  const byItemnumber = { '784.019': { btk: 'BTK000729W01', name: 'Valve Seat' }, '784.02': { btk: 'BTK001047W01', name: 'Guide Ring' } };
+  const searchItemCandidates = async (reference) => {
+    const hit = byItemnumber[String(reference)];
+    return hit ? [{ ...hit, confident: true }] : []; // mirrors aiFuzzyFindItem's exact-itemnumber match
+  };
+
+  const draft = await parseOrderRequest(
+    fakeGroq,
+    'pack an order to besab maskin of 2x 784.019 and 2x of 784.020',
+    { knownItems: [], searchItemCandidates },
+  );
+
+  assert.equal(draft.items.length, 2);
+  assert.equal(draft.items[0].reference, '784.019'); // coerced to a real string, not left as a number
+  assert.equal(draft.items[0].btk, 'BTK000729W01');
+  assert.equal(draft.items[0].matchedName, 'Valve Seat'); // shown to the user as-is, never the bare reference
+  assert.equal(draft.items[0].quantity, 2);
+  assert.equal(draft.items[1].reference, '784.02'); // JSON numbers don't preserve a trailing zero
+  assert.equal(draft.items[1].btk, 'BTK001047W01');
+  assert.equal(draft.recipient.name, 'Besab Maskin');
+});
+
+test('a confident candidate skips the name-similarity re-check; an unmarked one still needs to pass it', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: '784.019', quantity: 1 }],
+      recipientName: null, recipientAddressHint: null, needsAddressLookup: false,
+    }),
+  };
+  // Same candidate, only the `confident` flag differs - isolates exactly what that flag controls.
+  const candidate = { btk: 'BTK000729W01', name: 'Valve Seat' };
+  const confident = await parseOrderRequest(fakeGroq, 'x', { searchItemCandidates: async () => [{ ...candidate, confident: true }] });
+  assert.equal(confident.items[0].btk, 'BTK000729W01');
+  const unmarked = await parseOrderRequest(fakeGroq, 'x', { searchItemCandidates: async () => [{ ...candidate }] });
+  assert.equal(unmarked.items[0].btk, null); // "784.019" vs "Valve Seat" scores 0 on plain word overlap
+});
+
+test('parseOrderRequest coerces a quantity the model sent as a string', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: 'item 1', quantity: '3' }],
+      recipientName: null, recipientAddressHint: null, needsAddressLookup: false,
+    }),
+  };
+  const draft = await parseOrderRequest(fakeGroq, 'plocka item 1 x3', { knownItems: KNOWN_ITEMS });
+  assert.equal(draft.items[0].quantity, 3);
+  assert.equal(typeof draft.items[0].quantity, 'number');
 });
 
 test('parseOrderRequest falls back to searchItemCandidates when a reference is not in knownItems', async () => {

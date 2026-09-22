@@ -12040,8 +12040,12 @@ Respond with ONLY the JSON object, nothing else.`;
     // ("Did you mean...?") rather than an assertion, so a fuzzy voice transcription still gets
     // somewhere useful instead of a dead end.
     function aiFuzzyFindItem(query) {
-        if (!query || !query.trim()) return null;
-        const q = query.trim().toLowerCase();
+        // Callers pass whatever the model's JSON reply put in `query`/`reference` — its declared
+        // schema says string, but a numeric-looking value (an item number like "784.019") is just as
+        // likely to arrive as a bare JSON number, which has no .trim(). Coerced here rather than
+        // trusting the model's own typing — see the matching fix and comment in order-parser.js.
+        const q = String(query ?? '').trim().toLowerCase();
+        if (!q) return null;
         const exactBtk = globalInventory.find(i => i.BTKnumber && i.BTKnumber.toLowerCase() === q);
         if (exactBtk) return { item: exactBtk, confident: true };
         let best = null, bestScore = 0;
@@ -12055,8 +12059,10 @@ Respond with ONLY the JSON object, nothing else.`;
     }
 
     function aiFuzzyFindKit(query) {
-        if (!query || !query.trim()) return null;
-        const q = query.trim().toLowerCase();
+        // Same reasoning as aiFuzzyFindItem() above — a kit number like "310" is just as likely to
+        // arrive from the model as the bare JSON number 310.
+        const q = String(query ?? '').trim().toLowerCase();
+        if (!q) return null;
         let best = null, bestScore = 0;
         globalKits.forEach(kit => {
             const fields = [kit.name, kit.kitnumber];
@@ -12301,7 +12307,12 @@ Respond with ONLY the JSON object, nothing else.`;
             const knownItems = globalInventory.map(i => ({ btk: i.BTKnumber, name: i['itemname(english)'] || i.BTKnumber }));
             const searchItemCandidates = async (reference) => {
                 const match = aiFuzzyFindItem(reference);
-                return match ? [{ btk: match.item.BTKnumber, name: match.item['itemname(english)'] || match.item.BTKnumber }] : [];
+                // `confident` (per order-parser.js's own doc comment) skips its generic reference-vs-name
+                // word-overlap re-check, which aiFuzzyFindItem's own multi-field match (itemnumber/2/3,
+                // manufacturer, BTK — not just the display name) already made redundant and would often
+                // wrongly fail: an item referenced by its NUMBER ("784.019") shares no word with its own
+                // display name ("Valve Seat"), so that generic check alone would reject a correct match.
+                return match ? [{ btk: match.item.BTKnumber, name: match.item['itemname(english)'] || match.item.BTKnumber, confident: match.confident }] : [];
             };
             const wh = getWarehouseMeta(currentWarehouseId);
             const draft = await window.parseOrderRequest(aiGetGroqClient(), text, {

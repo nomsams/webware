@@ -20,7 +20,11 @@
 //   2. Looks like a bare BTK (e.g. "BTK000012") — used as-is.
 //   3. searchItemCandidates(text), if provided — a caller-supplied function that queries the
 //      live items table *scoped to the current warehouse* for candidates matching the reference
-//      text, scored by bestCandidateMatch() to pick the closest one.
+//      text, scored by bestCandidateMatch() to pick the closest one. A candidate may carry
+//      `confident: true` to skip that name-similarity scoring and be used as-is — for a caller
+//      whose own search already matched confidently on a field bestCandidateMatch can't see (an
+//      item NUMBER rather than its name, say), where the plain reference-vs-name word overlap
+//      would otherwise often be zero and wrongly reject a correct match.
 //   4. Still nothing — if searchOtherWarehouses is provided, check whether the item exists in a
 //      *different* warehouse and attach it as `elsewhere` (informational only — never used as
 //      this item's btk).
@@ -70,7 +74,7 @@ const EXTRACTION_SYSTEM_PROMPT = `You extract structured pack-order data from fr
   "recipientAddressHint": string | null,
   "needsAddressLookup": boolean
 }
-"reference" is whatever the text used to identify an item (a BTK number, a name, or an ordinal like "item 1" — resolve ordinals against the numbered list of known items you're given, if one is provided). "quantity" defaults to 1 when the text doesn't say a number. "needsAddressLookup" is true when the text names a recipient but gives no address and asks (or implies) that one should be found.`;
+"reference" is whatever the text used to identify an item (a BTK number, a name, or an ordinal like "item 1" — resolve ordinals against the numbered list of known items you're given, if one is provided). Always write "reference" as a quoted JSON STRING copied verbatim from the text, even when it looks like a plain number — an item number such as "784.020" must stay the exact text "784.020", not the bare JSON number 784.02, which loses the trailing zero and stops it matching the real item. "quantity" is a JSON number, defaulting to 1 when the text doesn't say one. "needsAddressLookup" is true when the text names a recipient but gives no address and asks (or implies) that one should be found.`;
 
 export async function parseOrderRequest(groqClient, text, {
   knownItems = [],
@@ -122,30 +126,47 @@ export async function parseOrderRequest(groqClient, text, {
 }
 
 async function resolveItem(entry, knownItems, searchItemCandidates, searchOtherWarehouses) {
-  const quantity = entry.quantity && entry.quantity > 0 ? entry.quantity : 1;
+  // The extraction prompt declares {reference: string, quantity: number}, but the model's own typing
+  // isn't guaranteed — a numeric-looking reference like "784.019" is exactly as likely to come back as
+  // the bare JSON number 784.019 as the string "784.019" (and a quantity can just as easily arrive as
+  // a string). Coerced once here, at the one place every extracted item passes through, rather than
+  // trusting the model's declared types: matchKnownItem()/bestCandidateMatch() below both call
+  // reference.trim() and would otherwise throw on a non-string reference partway through resolution —
+  // which is exactly why looksLikeBtk() already guards with typeof reference === 'string' on its own.
+  const reference = entry && entry.reference != null ? String(entry.reference).trim() : '';
+  const rawQuantity = Number(entry && entry.quantity);
+  const quantity = Number.isFinite(rawQuantity) && rawQuantity > 0 ? rawQuantity : 1;
 
-  const known = matchKnownItem(entry.reference, knownItems);
-  if (known) return { ...entry, quantity, btk: known.btk, matchedName: known.name, elsewhere: null };
+  const known = matchKnownItem(reference, knownItems);
+  if (known) return { ...entry, reference, quantity, btk: known.btk, matchedName: known.name, elsewhere: null };
 
-  if (looksLikeBtk(entry.reference)) {
-    return { ...entry, quantity, btk: entry.reference.trim().toUpperCase(), matchedName: null, elsewhere: null };
+  if (looksLikeBtk(reference)) {
+    return { ...entry, reference, quantity, btk: reference.toUpperCase(), matchedName: null, elsewhere: null };
   }
 
   if (searchItemCandidates) {
-    const candidates = await searchItemCandidates(entry.reference);
-    const match = bestCandidateMatch(entry.reference, candidates);
-    if (match) return { ...entry, quantity, btk: match.btk, matchedName: match.name, elsewhere: null };
+    const candidates = await searchItemCandidates(reference);
+    // A candidate the caller marks `confident: true` skips bestCandidateMatch()'s generic
+    // name-similarity gate — it's still used untouched (real btk/name), just not re-scored. This
+    // matters for a caller whose own search already matched confidently on a field
+    // bestCandidateMatch can't see (an item NUMBER, not its name): "784.019" and its item's real
+    // name "Valve Seat" share no word at all, so the plain word-overlap score is 0 and a
+    // provably-correct single candidate would otherwise be discarded as "not similar enough".
+    // An unmarked candidate (the documented default shape, e.g. several loosely name-matched rows
+    // from a broad DB search) still goes through the normal disambiguation below, unchanged.
+    const match = candidates.find((c) => c.confident) || bestCandidateMatch(reference, candidates);
+    if (match) return { ...entry, reference, quantity, btk: match.btk, matchedName: match.name, elsewhere: null };
   }
 
   // Not found in this warehouse. Check whether it exists in another one — purely informational:
   // this order still belongs to one warehouse, so it's never used as the resolved btk.
   let elsewhere = null;
   if (searchOtherWarehouses) {
-    const otherCandidates = await searchOtherWarehouses(entry.reference);
-    elsewhere = bestCandidateMatch(entry.reference, otherCandidates);
+    const otherCandidates = await searchOtherWarehouses(reference);
+    elsewhere = bestCandidateMatch(reference, otherCandidates);
   }
 
-  return { ...entry, quantity, btk: null, matchedName: null, elsewhere };
+  return { ...entry, reference, quantity, btk: null, matchedName: null, elsewhere };
 }
 
 // Exported standalone so the "model replied with prose/code-fences around the JSON anyway" path
@@ -168,7 +189,7 @@ export function looksLikeBtk(reference) {
 // exact BTK or name (case-insensitive).
 export function matchKnownItem(reference, knownItems) {
   if (!reference || !knownItems.length) return null;
-  const ref = reference.trim().toLowerCase();
+  const ref = String(reference).trim().toLowerCase();
   const ordinal = ref.match(/^item\s*(\d+)$/) || ref.match(/^(\d+)$/);
   if (ordinal) return knownItems[Number(ordinal[1]) - 1] || null;
   return knownItems.find((it) => it.btk?.toLowerCase() === ref || it.name?.toLowerCase() === ref) || null;
@@ -179,7 +200,7 @@ export function matchKnownItem(reference, knownItems) {
 // no match at all — better to leave an item unresolved for the user to fix than guess wrong.
 export function bestCandidateMatch(reference, candidates) {
   if (!reference || !candidates || !candidates.length) return null;
-  const ref = reference.trim().toLowerCase();
+  const ref = String(reference).trim().toLowerCase();
   let best = null;
   let bestScore = 0;
   for (const candidate of candidates) {
