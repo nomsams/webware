@@ -305,6 +305,25 @@
         /* --- ISOMETRIC BIN VIEW + DIMENSIONS (see modules/iso-rack.js) --- */
         .iso-canvas { background: var(--border); border-radius: 12px; padding: 8px; margin-top: 0.5rem; }
         .iso-canvas svg { max-height: 460px; }
+
+        /* --- BIN LOCATOR HOVER PREVIEW (Bin Locator: hover a shelf/bin for a dense item preview) --- */
+        .bin-locator-hover-line { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 3999; }
+        .bin-locator-hover-line.hidden { display: none; }
+        .bin-locator-hover-line line { stroke: var(--primary); stroke-width: 1.5; }
+        .bin-locator-hover-line circle { fill: var(--primary); }
+        .bin-locator-hover-popover {
+            position: fixed; z-index: 4000; background: var(--card-bg); border: 1px solid var(--border);
+            border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,0.28); padding: 0.55rem 0.65rem;
+            width: 260px; max-height: 320px; overflow-y: auto; pointer-events: none;
+        }
+        .bin-locator-hover-popover.hidden { display: none; }
+        .bin-locator-hover-popover-title { font-weight: 700; font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 0.35rem; }
+        .bin-locator-hover-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.28rem 0; border-bottom: 1px solid var(--border); }
+        .bin-locator-hover-row:last-child { border-bottom: none; }
+        .bin-locator-hover-row-name { font-weight: 700; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bin-locator-hover-row-info { font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bin-locator-hover-row-qty { font-weight: 800; font-size: 0.78rem; color: var(--primary); flex-shrink: 0; }
+        .bin-locator-hover-more { font-size: 0.7rem; color: var(--text-muted); text-align: center; margin-top: 0.3rem; }
         .dim-group { margin-bottom: 0.9rem; }
         .dim-group h4 { margin: 0 0 0.35rem; font-size: 0.85rem; }
         .dim-group h4 span { color: var(--text-muted); font-weight: 400; font-size: 0.78rem; }
@@ -1788,8 +1807,20 @@
             </span>
         </div>
         <div class="warehouse-map" id="bin-locator-grid"></div>
-        <div class="iso-canvas hidden" id="bin-locator-iso" onclick="onBinLocatorIsoClick(event)"></div>
+        <div class="iso-canvas hidden" id="bin-locator-iso" onclick="onBinLocatorIsoClick(event)" onmouseover="onBinLocatorIsoHover(event)" onmouseleave="hideBinLocatorHover()"></div>
         <p id="bin-locator-grid-caption" style="color:var(--text-muted); font-size:0.82rem; margin-top:0.5rem;"></p>
+
+        <!-- Hover preview: hovering a shelf cell or bin (flat grid, iso rack, or the shelf strip
+             below) shows what's stored there without needing to click first — a floating card plus
+             a line pointing back at exactly what's being previewed. Fixed-position (viewport
+             coordinates), so it works the same over any of the three views without each needing its
+             own positioning context. Pure hover, so touch devices simply don't get it — click/tap
+             still does everything it always did. -->
+        <svg id="bin-locator-hover-line" class="bin-locator-hover-line hidden" aria-hidden="true">
+            <line id="bin-locator-hover-line-el" x1="0" y1="0" x2="0" y2="0"></line>
+            <circle id="bin-locator-hover-dot" r="4"></circle>
+        </svg>
+        <div id="bin-locator-hover-popover" class="bin-locator-hover-popover hidden"></div>
 
         <div id="bin-locator-detail" class="hidden" style="margin-top:1.5rem; border-top:1px solid var(--border); padding-top:1rem;">
             <h3 id="bin-locator-detail-title" style="margin-top:0;"></h3>
@@ -1897,7 +1928,7 @@
 
         <div class="setting-row">
             <label>📥 CSV Templates</label>
-            <p class="setting-desc" style="margin-bottom:0.5rem;">A blank CSV with the right column headers (and one filled-in example row) for each import, so there's no need to guess the expected format.</p>
+            <p class="setting-desc" style="margin-bottom:0.5rem;">A CSV with the right column headers for each import, so there's no need to guess the expected format. Items/Warehouses download a blank example row; Kits downloads the current warehouse's real item numbers as columns — and, if any kits already exist, their real quantities too — ready to edit and re-import.</p>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <button class="secondary" onclick="downloadCsvTemplate('items')" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📦 Items</button>
                 <button class="secondary" onclick="downloadCsvTemplate('kits')" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">🧰 Kits</button>
@@ -4728,6 +4759,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById(viewId).classList.remove('hidden');
         activeView = viewId;
         window.scrollTo({ top: 0, behavior: 'smooth' });
+        hideBinLocatorHover(); // a hover card left over from the Bin Locator shouldn't survive navigating away
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -5773,25 +5805,57 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         URL.revokeObjectURL(url);
     }
 
-    // Settings → "📥 CSV Templates" — a blank CSV with the exact headers each importer already
+    // Settings → "📥 CSV Templates" — a starter CSV with the exact headers each importer already
     // auto-recognizes (COLUMNS_B for items, so export -> edit -> re-import needs no column mapping
-    // either), plus one filled-in example row so the expected shape is obvious without having to
-    // ask. type: 'items' | 'kits' | 'warehouses'.
+    // either). type: 'items' | 'kits' | 'warehouses'.
     function downloadCsvTemplate(type) {
         if (type === 'items') {
             const example = {
                 Manufacturer: 'Bosch', BTKnumber: '', itemnumber: 'ABC123', 'itemname(english)': 'Grease sticks',
                 'itemname(swedish)': 'Fettstavar', itemnumber2: '', itemnumber3: '', Numberofitems: '25',
-                UnitType: 'kg', Inventorylocation: 'Shelf A1', MapPosition: 'A', LocationCode: 'A 1-1 1-1', Comments: '', images: ''
+                UnitType: 'kg', Inventorylocation: 'Shelf A1', MapPosition: 'A', LocationCode: 'A 1-1 1-1', Comments: '', Link: '', images: ''
             };
             downloadTextFile('items-template.csv', Papa.unparse([example], { columns: COLUMNS_B }), 'text/csv');
         } else if (type === 'kits') {
-            const example = { 'Spare-part-kit name': 'Example Kit', kitnumber: '', BTK000001: '2', BTK000002: '1' };
-            downloadTextFile('kits-template.csv', Papa.unparse([example]), 'text/csv');
+            downloadKitsCsvTemplate();
         } else if (type === 'warehouses') {
-            const example = { l: '4', name: 'Example Warehouse', address: 'Example Street 1, Example City' };
+            // 'l' matters here (a real, unused warehouse ID would just collide on import) — a
+            // plausible next one beats a hardcoded '4' that's either already taken or nowhere near
+            // what's actually in use once a warehouse or two has come and gone.
+            const nextId = String(Math.max(0, ...WAREHOUSES.map(w => parseInt(w.l, 10) || 0)) + 1);
+            const example = { l: nextId, name: 'Example Warehouse', address: 'Example Street 1, Example City' };
             downloadTextFile('warehouses-template.csv', Papa.unparse([example]), 'text/csv');
         }
+    }
+
+    // Kits CSV is a wide matrix — one column per real BTK, not a fixed column set like items/
+    // warehouses (parseKitsCSVString above treats every header besides the two kit-identity columns
+    // as an item column) — so a static example with placeholder BTK000001/BTK000002 columns needed
+    // manual find-and-replace against the real catalog before it was even usable: those numbers
+    // don't exist in any real warehouse. This builds the actual current shape instead: every item
+    // BTK actually in this warehouse as its own real column, and — when kits already exist — one row
+    // per kit with its real quantities already filled in, so downloading it doubles as "export what's
+    // here now, edit it, re-import" (beginKitsCSVImport already merges by kit name/number and only
+    // flags kits whose contents actually changed) as well as a correctly-columned blank starting
+    // point when there's nothing to export yet.
+    function downloadKitsCsvTemplate() {
+        if (!globalInventory.length) {
+            const example = { 'Spare-part-kit name': 'Example Kit', kitnumber: '', BTK000001: '2', BTK000002: '1' };
+            downloadTextFile('kits-template.csv', Papa.unparse([example]), 'text/csv');
+            return;
+        }
+        const btks = globalInventory.map(i => i.BTKnumber).slice().sort();
+        const blankRow = () => { const row = { 'Spare-part-kit name': '', kitnumber: '' }; btks.forEach(btk => { row[btk] = ''; }); return row; };
+        const rows = globalKits.length
+            ? globalKits.map(k => {
+                const row = blankRow();
+                row['Spare-part-kit name'] = k.name;
+                row.kitnumber = (k.kitnumber && k.kitnumber !== 'None') ? k.kitnumber : '';
+                Object.keys(k.items || {}).forEach(btk => { if (btk in row) row[btk] = String(k.items[btk]); });
+                return row;
+            })
+            : [{ ...blankRow(), 'Spare-part-kit name': 'Example Kit' }];
+        downloadTextFile('kits-template.csv', Papa.unparse(rows, { columns: ['Spare-part-kit name', 'kitnumber', ...btks] }), 'text/csv');
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -6583,7 +6647,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('zone-draw-mode').classList.toggle('hidden', mode !== 'draw');
         document.getElementById('zone-manual-mode').classList.toggle('hidden', mode !== 'manual');
         document.getElementById('zone-designer-hint').textContent = mode === 'draw'
-            ? "Drag empty space to draw a rack area — auto-labeled A, B, C… Width = how many bays long it is (just for the drawing); height = how many racks deep (1 = single row = Depth 1 on items, 2 = back-to-back = Depth 1 front / Depth 2 back). Drag its body to move it, drag an edge to resize it, double-click to edit its levels/bins, or select it and press Delete. Arrow keys nudge the selected area. Ctrl+Z / Ctrl+Shift+Z to undo/redo."
+            ? "Drag empty space to draw a rack area — auto-labeled A, B, C… Width = how many bays long it is (just for the drawing); height = how many racks deep (1 = single row = Depth 1 on items, 2 = back-to-back = Depth 1 front / Depth 2 back). Drag its body to move it, drag an edge to resize it, double-click to edit its levels/bins, or select it and press Delete. Arrow keys nudge the selected area, R rotates it 90°. Ctrl+Z / Ctrl+Shift+Z to undo/redo."
             : "Type rack area details directly. New rows get the next unused letter, but you can change it. Ctrl+Z / Ctrl+Shift+Z to undo/redo.";
         if (mode === 'draw') renderZoneDrawGrid(); else renderZoneManualRows();
     }
@@ -6811,7 +6875,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:0.75rem;">
                 <strong style="font-size:1.1rem;">Rack Area ${escapeHtml(z.zone)}</strong>
                 <span style="color:var(--text-muted); font-size:0.85rem;">${z.rack_style === 'shelving' ? `${z.max_rack || 1} section${(z.max_rack || 1) > 1 ? 's' : ''} wide` : `${z.max_aisle} bays wide × ${z.max_rack} racks deep${z.max_rack >= 2 ? ' (back-to-back)' : ''}`}</span>
-                ${readOnly ? '' : `<button class="secondary" onclick="deleteSelectedZone()" style="margin-left:auto; color:var(--danger); padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🗑️ Delete Zone</button>`}
+                ${readOnly ? '' : `<button class="secondary" onclick="rotateSelectedZone()" title="Rotate 90° (R) — swaps Bays and Depth" style="margin-left:auto; padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🔄 Rotate</button>
+                <button class="secondary" onclick="deleteSelectedZone()" style="color:var(--danger); padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🗑️ Delete Zone</button>`}
             </div>
             <label class="modal-label" for="zone-inspector-label">Label</label>
             <input type="text" id="zone-inspector-label" value="${escapeHtml(z.label || '')}" placeholder="e.g. Hydraulics section" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('label', this.value)">
@@ -6833,8 +6898,38 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             <div style="margin-top:0.75rem; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                 <button class="secondary" data-zone="${escapeHtml(z.zone)}" onclick="focusDimPanel(this.dataset.zone)" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.82rem;">📏 Rack, shelf &amp; bin dimensions…</button>
                 <span style="color:var(--text-muted); font-size:0.8rem;">${escapeHtml(dimShortSummary(z))}</span>
+            </div>
+            <div style="margin-top:0.9rem; padding-top:0.75rem; border-top:1px solid var(--border);">
+                <label class="modal-label" style="margin-top:0;">📷 Photos of this zone</label>
+                ${renderZoneInspectorPhotoGallery(z.zone)}
+                ${readOnly ? '' : `
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:0.5rem;">
+                    <input type="number" id="zone-inspector-photo-aisle" placeholder="Aisle" min="1" value="1" style="width:80px; margin:0;">
+                    <input type="number" id="zone-inspector-photo-rack" placeholder="Rack" min="1" value="1" style="width:80px; margin:0;">
+                    <button class="secondary" onclick="document.getElementById('zone-inspector-photo-file-input').click()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.82rem;">➕ Add Photo</button>
+                    <button class="secondary" onclick="document.getElementById('zone-inspector-photo-camera-input').click()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.82rem;">📷 Take Picture</button>
+                    <input type="file" id="zone-inspector-photo-file-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" class="hidden" onchange="handleZoneInspectorPhotoUpload(event)" aria-label="Upload zone photo">
+                    <input type="file" id="zone-inspector-photo-camera-input" accept="image/*" capture="environment" class="hidden" onchange="handleZoneInspectorPhotoUpload(event)" aria-label="Take zone photo">
+                </div>`}
             </div>`;
         renderDimPanel(true);
+    }
+
+    // A small view of the same warehouse_rack_images gallery below, filtered to this one zone —
+    // "add images of the zone straight away" means right here, while it's already selected, not a
+    // scroll down to the general Aisle/Rack Photos form and picking the zone from a dropdown again.
+    function renderZoneInspectorPhotoGallery(zone) {
+        const photos = globalRackImages.filter(img => img.zone === zone);
+        if (!photos.length) return `<p style="color:var(--text-muted); font-size:0.82rem; margin:0.35rem 0 0;">No photos of this zone yet.</p>`;
+        const readOnly = currentUserRole === 'viewer';
+        return `<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(90px, 1fr)); gap:8px; margin-top:0.5rem;">${photos.map(img => `
+            <div class="rack-image-card">
+                <img src="${escapeHtml(img.image_url)}" alt="Zone ${escapeHtml(img.zone)} Aisle ${img.aisle} Rack ${img.rack}" onclick="openLightbox(this.src)" style="cursor:pointer;">
+                <div class="rack-image-label">Aisle ${img.aisle} · Rack ${img.rack}${img.grid_overlay ? ' · <span title="Straightened">📐</span>' : ''}</div>
+                ${readOnly ? '' : `
+                <button class="rack-image-straighten" onclick="openRackWarpEditor(${img.id})" title="Straighten photo" aria-label="Straighten photo">📐</button>
+                <button class="rack-image-remove" onclick="removeRackImage(${img.id})" aria-label="Remove photo">✕</button>`}
+            </div>`).join('')}</div>`;
     }
 
     function updateSelectedZoneField(field, value) {
@@ -6869,6 +6964,23 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         renderZoneDrawGrid();
         renderZoneInspector();
         renderZoneManualRows();
+        pushZoneHistory(true);
+    }
+
+    // Swaps Bays (max_aisle) and Depth (max_rack) — turning e.g. a 6-wide × 1-deep footprint into a
+    // 1-wide × 6-deep one, same rectangle turned 90°. Same corner (grid_col/grid_row) stays put,
+    // just clamped back onto the grid now that the footprint's flipped — same clamp startRackAreaEdgeResize
+    // and nudgeSelectedZone already use for keeping a rack area on the board.
+    function rotateSelectedZone() {
+        if (currentUserRole !== 'admin') return;
+        const z = globalWarehouseZones.find(zz => zz.zone === selectedZoneLetter);
+        if (!z) return;
+        const w = z.max_aisle || 1, h = z.max_rack || 1;
+        z.max_aisle = h; z.max_rack = w;
+        z.grid_col = Math.max(0, Math.min(ZONE_GRID_COLS - z.max_aisle, z.grid_col ?? 0));
+        z.grid_row = Math.max(0, Math.min(ZONE_GRID_ROWS - z.max_rack, z.grid_row ?? 0));
+        renderZoneDrawGrid();
+        renderZoneInspector();
         pushZoneHistory(true);
     }
 
@@ -7152,6 +7264,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // mid-edit in the zone label field) instead of reverting or deleting the whole rack area.
     //   Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) — undo/redo, any mode.
     //   Delete / Backspace — delete the selected rack area, draw mode only.
+    //   R — rotate the selected rack area 90° (swap Bays/Depth), draw mode only.
     //   Arrow keys — nudge the selected rack area one cell, draw mode only.
     document.addEventListener('keydown', (e) => {
         if (activeView !== 'warehouse-view') return;
@@ -7167,8 +7280,16 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
         if (zoneDesignerMode !== 'draw' || !selectedZoneLetter || currentUserRole !== 'admin') return;
         if (key === 'delete' || key === 'backspace') { e.preventDefault(); deleteSelectedZone(); return; }
+        if (key === 'r') { e.preventDefault(); rotateSelectedZone(); return; }
         if (key.startsWith('arrow')) { e.preventDefault(); nudgeSelectedZone(key); }
     });
+
+    // A Bin Locator hover card is positioned from a getBoundingClientRect() snapshot taken when the
+    // hover started — scrolling (the page, or a scrollable container like the hover card or item
+    // list) invalidates that without the mouse ever actually leaving the hovered element, which
+    // would otherwise leave a stale card pointing at the wrong place. `true` (capture) catches a
+    // scroll inside any nested scrollable element too, not just the window itself.
+    window.addEventListener('scroll', () => hideBinLocatorHover(), true);
 
     function nudgeSelectedZone(key) {
         const z = globalWarehouseZones.find(zz => zz.zone === selectedZoneLetter);
@@ -7209,15 +7330,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             </div>`).join('');
     }
 
-    async function handleRackImageUpload(event) {
-        const file = event.target.files[0];
-        event.target.value = '';
-        if (!file) return;
-        const zone = document.getElementById('rack-image-zone').value;
-        const aisle = parseInt(document.getElementById('rack-image-aisle').value, 10);
-        const rack = parseInt(document.getElementById('rack-image-rack').value, 10);
-        if (!zone || !aisle || !rack) { showToast("Pick a zone and enter an aisle and rack number first.", "error"); return; }
-
+    // Core upload, shared by the general "Aisle / Rack Photos" form below and the Layout Designer's
+    // own inline "add a photo now" control on the selected zone (renderZoneInspector) — same
+    // upsert-by-zone/aisle/rack, same tokenized path, just two different places to trigger it from.
+    // Returns true/false so each caller can refresh its own view of the gallery afterward.
+    async function uploadRackImage(file, zone, aisle, rack) {
+        if (!zone || !aisle || !rack) { showToast("Pick a zone and enter an aisle and rack number first.", "error"); return false; }
         try {
             const bmp = await createImageBitmap(file);
             const blob = await drawToBlob(bmp, 1600, 0.85);
@@ -7238,12 +7356,36 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             if (oldPath && oldPath !== path) await sb.storage.from('rack-images').remove([oldPath]).catch(() => {});
             const idx = globalRackImages.findIndex(i => i.id === data.id);
             if (idx >= 0) globalRackImages[idx] = data; else globalRackImages.push(data);
-            renderRackImageGallery();
             showToast("Photo uploaded.", "success");
+            return true;
         } catch (e) {
             console.error("Rack image upload failed:", e);
             showToast("Could not upload photo: " + e.message, "error");
+            return false;
         }
+    }
+
+    async function handleRackImageUpload(event) {
+        const file = event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        const zone = document.getElementById('rack-image-zone').value;
+        const aisle = parseInt(document.getElementById('rack-image-aisle').value, 10);
+        const rack = parseInt(document.getElementById('rack-image-rack').value, 10);
+        if (await uploadRackImage(file, zone, aisle, rack)) { renderRackImageGallery(); renderZoneInspector(); }
+    }
+
+    // Zone Inspector's own quick-add (Layout Designer, draw mode): same upload, but the zone is
+    // already known — the currently selected rack area — so there's no zone dropdown to pick first,
+    // just Aisle/Rack numbers, matching the "add images of the zone straight away" ask: attach a
+    // photo right where you're already editing the area instead of scrolling down to the general form.
+    async function handleZoneInspectorPhotoUpload(event) {
+        const file = event.target.files[0];
+        event.target.value = '';
+        if (!file || !selectedZoneLetter) return;
+        const aisle = parseInt(document.getElementById('zone-inspector-photo-aisle').value, 10) || 1;
+        const rack = parseInt(document.getElementById('zone-inspector-photo-rack').value, 10) || 1;
+        if (await uploadRackImage(file, selectedZoneLetter, aisle, rack)) { renderZoneInspector(); renderRackImageGallery(); }
     }
 
     async function removeRackImage(id) {
@@ -7263,6 +7405,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             if (error) throw error;
             globalRackImages = globalRackImages.filter(i => i.id !== id);
             renderRackImageGallery();
+            renderZoneInspector();
             showToast("Photo removed.", "success");
         } catch (e) {
             console.error("Rack image removal failed:", e);
@@ -7526,6 +7669,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const idx = globalRackImages.findIndex(i => i.id === data.id);
             if (idx >= 0) globalRackImages[idx] = data;
             renderRackImageGallery();
+            renderZoneInspector();
             closeRackWarpModal();
             showToast("Straightened photo saved.", "success");
         } catch (e) {
@@ -9624,10 +9768,17 @@ th { background: #eee; }
         renderBinLocatorGrid();
     }
 
-    function itemsAtLocation(zone, depth, level) {
+    // bin/row are optional — omitted (or null), every item anywhere on that Depth×Level shelf
+    // matches, same as before; given, narrows to one specific bin (and, with row too, one specific
+    // Row within it) — used by the hover preview below to show exactly what's under the cursor,
+    // whether that's a whole shelf cell or one bin/Row drawn inside the isometric rack.
+    function itemsAtLocation(zone, depth, level, bin, row) {
         return globalInventory.filter(i => {
             const p = parseLocationCode(i.LocationCode);
-            return p && p.zone === zone && p.depth === depth && p.level === level;
+            if (!p || p.zone !== zone || p.depth !== depth || p.level !== level) return false;
+            if (bin != null && p.bin !== bin) return false;
+            if (row != null && p.binRow !== row) return false;
+            return true;
         });
     }
 
@@ -9673,6 +9824,88 @@ th { background: #eee; }
         return { background: `hsl(217, 85%, ${lightness}%)`, color: ratio > 0.42 ? '#fff' : '#0a2a5e' };
     }
 
+    // ── Bin Locator hover preview: a dense card of what's stored at a shelf/bin, plus a line back to
+    // exactly what's under the cursor — for the flat grid, the isometric rack, and the shelf strip
+    // alike (all three call showBinLocatorHover with their own anchor element and item list). ──
+    const BIN_LOCATOR_HOVER_MAX_ROWS = 6;
+    function binLocatorHoverRowsHtml(items) {
+        const shown = items.slice(0, BIN_LOCATOR_HOVER_MAX_ROWS);
+        const rows = shown.map(item => {
+            const thumb = item.imageThumbUrl
+                ? `<img src="${escapeHtml(item.imageThumbUrl)}" alt="" style="width:28px; height:28px; object-fit:cover; border-radius:5px; flex-shrink:0;">`
+                : `<div style="width:28px; height:28px; border-radius:5px; flex-shrink:0; background:var(--border); display:flex; align-items:center; justify-content:center; font-size:0.8rem;" aria-hidden="true">📦</div>`;
+            const num1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
+            const mfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
+            const info = [mfr, num1].filter(Boolean).join(' · ');
+            const qty = `${item.Numberofitems || '0'}${item.UnitType ? ' ' + item.UnitType : ''}`;
+            return `<div class="bin-locator-hover-row">
+                ${thumb}
+                <div style="min-width:0; flex:1;">
+                    <div class="bin-locator-hover-row-name">${escapeHtml(item['itemname(english)'] || item['itemname(swedish)'] || item.BTKnumber)}</div>
+                    ${info ? `<div class="bin-locator-hover-row-info">${escapeHtml(info)}</div>` : ''}
+                </div>
+                <div class="bin-locator-hover-row-qty">${escapeHtml(qty)}</div>
+            </div>`;
+        }).join('');
+        const more = items.length > BIN_LOCATOR_HOVER_MAX_ROWS ? `<div class="bin-locator-hover-more">+${items.length - BIN_LOCATOR_HOVER_MAX_ROWS} more</div>` : '';
+        return rows + more;
+    }
+
+    // anchorEl: the hovered DOM element (grid cell, shelf-strip cell, or an SVG bin/shelf shape in
+    // the isometric canvas) — its own screen position is the line's anchor point. Fixed-position
+    // (viewport coordinates) throughout, so the same code works for all three without needing a
+    // shared positioned-ancestor. Prefers drawing the card to the right of the anchor, flips to the
+    // left if that would run off-screen, and clamps vertically so it never runs off the top/bottom.
+    function showBinLocatorHover(anchorEl, items, titleText) {
+        if (!items || !items.length) { hideBinLocatorHover(); return; }
+        const popover = document.getElementById('bin-locator-hover-popover');
+        popover.innerHTML = `<div class="bin-locator-hover-popover-title">${escapeHtml(titleText)}</div>${binLocatorHoverRowsHtml(items)}`;
+        popover.classList.remove('hidden');
+
+        const rect = anchorEl.getBoundingClientRect();
+        const anchorX = rect.left + rect.width / 2, anchorY = rect.top + rect.height / 2;
+        const margin = 14, edge = 8;
+        const pw = popover.offsetWidth, ph = popover.offsetHeight;
+        let boxX = rect.right + margin, onRight = true;
+        if (boxX + pw > window.innerWidth - edge) { boxX = rect.left - margin - pw; onRight = false; }
+        boxX = Math.max(edge, boxX);
+        const boxY = Math.max(edge, Math.min(window.innerHeight - ph - edge, anchorY - ph / 2));
+        popover.style.left = boxX + 'px';
+        popover.style.top = boxY + 'px';
+
+        const lineX = onRight ? boxX : boxX + pw;
+        const lineY = Math.max(boxY + 12, Math.min(boxY + ph - 12, anchorY));
+        document.getElementById('bin-locator-hover-line-el').setAttribute('x1', anchorX);
+        document.getElementById('bin-locator-hover-line-el').setAttribute('y1', anchorY);
+        document.getElementById('bin-locator-hover-line-el').setAttribute('x2', lineX);
+        document.getElementById('bin-locator-hover-line-el').setAttribute('y2', lineY);
+        document.getElementById('bin-locator-hover-dot').setAttribute('cx', anchorX);
+        document.getElementById('bin-locator-hover-dot').setAttribute('cy', anchorY);
+        document.getElementById('bin-locator-hover-line').classList.remove('hidden');
+    }
+    function hideBinLocatorHover() {
+        document.getElementById('bin-locator-hover-popover').classList.add('hidden');
+        document.getElementById('bin-locator-hover-line').classList.add('hidden');
+    }
+    // The isometric canvas is one SVG string dropped in via innerHTML (buildIsoRackSVG), so its
+    // bins/shelves can't get their own per-element mouseenter handlers the way the flat grid's and
+    // shelf strip's plain <div> cells do below — delegate instead, exactly like onBinLocatorIsoClick
+    // already does for tapping. Hovering a specific bin (data-bin present) previews just that
+    // bin/Row; hovering the shelf board itself (data-depth/level only) previews the whole shelf,
+    // same as a flat grid cell.
+    function onBinLocatorIsoHover(e) {
+        const el = e.target.closest('[data-depth][data-level]');
+        if (!el) { hideBinLocatorHover(); return; }
+        const depth = parseInt(el.dataset.depth, 10), level = parseInt(el.dataset.level, 10);
+        const bin = el.dataset.bin ? parseInt(el.dataset.bin, 10) : null;
+        const row = el.dataset.row ? parseInt(el.dataset.row, 10) : null;
+        const items = itemsAtLocation(binLocatorZone, depth, level, bin, row);
+        if (!items.length) { hideBinLocatorHover(); return; }
+        const depthLabel = depthWord(binLocatorZone, depth);
+        const label = bin ? `${depthLabel} · Level ${level} · Bin ${bin}${row > 1 ? ` · Row ${row}` : ''}` : `${depthLabel} · Level ${level}`;
+        showBinLocatorHover(el, items, label);
+    }
+
     function renderBinLocatorGrid() {
         const grid = document.getElementById('bin-locator-grid');
         const caption = document.getElementById('bin-locator-grid-caption');
@@ -9710,6 +9943,10 @@ th { background: #eee; }
                     if (style) { cell.style.background = style.background; cell.style.color = style.color; }
                 }
                 cell.onclick = () => selectBinLocatorCell(depth, level);
+                if (count > 0) {
+                    cell.onmouseenter = () => showBinLocatorHover(cell, itemsAtLocation(binLocatorZone, depth, level), `${depthWord(binLocatorZone, depth)} · Level ${level}`);
+                    cell.onmouseleave = hideBinLocatorHover;
+                }
                 grid.appendChild(cell);
             }
         }
@@ -9751,6 +9988,10 @@ th { background: #eee; }
             // to, so instead light up exactly which rows below belong to this bin, clearing whichever
             // bin was lit before (never accumulating highlights across clicks).
             else if (itemsInBin.length > 1) cell.onclick = () => highlightBinLocatorBin(bin);
+            if (itemsInBin.length) {
+                cell.onmouseenter = () => showBinLocatorHover(cell, itemsInBin, `${depthLabel} · Level ${level} · Bin ${bin}`);
+                cell.onmouseleave = hideBinLocatorHover;
+            }
             shelf.appendChild(cell);
         }
         document.getElementById('bin-locator-shelf-note').textContent = bounds.maxBin
