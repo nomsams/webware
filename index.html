@@ -90,6 +90,18 @@
         .header-more-item:hover { background: var(--border); }
         [data-theme="dark"] .header-more-item:hover { background: #334155; }
 
+        /* Google-style account avatar: first letter of the signed-in name/email in a circle, with a
+           small role-colored corner badge (A/E/M/V) so "who am I and what can I do here" reads at a
+           glance without opening anything — full name/email/role sit in the click-to-open menu.
+           Supabase mode only (a static vault has no real account to show). */
+        .profile-avatar { position: relative; width: 34px; height: 34px; border-radius: 50%; border: none; background: var(--primary); color: #fff; font-size: 0.95rem; font-weight: 700; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; min-height: unset; }
+        .profile-avatar:hover { filter: brightness(1.1); transform: none; }
+        .profile-role-badge { position: absolute; bottom: -3px; right: -3px; width: 16px; height: 16px; border-radius: 50%; font-size: 0.58rem; font-weight: 800; display: flex; align-items: center; justify-content: center; color: #fff; border: 2px solid var(--card-bg); line-height: 1; }
+        .profile-role-badge.role-admin { background: var(--danger); }
+        .profile-role-badge.role-maintainer { background: #7c3aed; }
+        .profile-role-badge.role-editor { background: var(--success); }
+        .profile-role-badge.role-viewer { background: var(--text-muted); }
+
         .container { max-width: 800px; margin: 1rem auto; padding: 0 1rem; }
         .card { background: var(--card-bg); border-radius: 16px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); margin-bottom: 1rem; border: 1px solid var(--border); }
         .hidden { display: none !important; }
@@ -179,6 +191,11 @@
         .kit-row { padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1rem; cursor: pointer; transition: background 0.2s; }
         .kit-row:hover { background-color: var(--primary-light); }
         .kit-row:last-child { border-bottom: none; }
+        /* Bin Locator: tapping a shelf-strip bin that holds more than one item (stacked in different
+           Rows, so there's no single item to jump straight to) lights up exactly those rows here
+           instead — and the bin cell itself — so it's unambiguous which items that tap was about. */
+        .bin-locator-row-highlighted { background-color: var(--primary-light); box-shadow: inset 3px 0 0 var(--primary); }
+        .bin-locator-bin-selected { outline: 2px solid var(--primary); outline-offset: -2px; }
         .kit-info { flex-grow: 1; overflow: hidden; min-width: 0; }
         .kit-name { font-size: 1.05rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .kit-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
@@ -478,7 +495,7 @@
         #ai-fab {
             position: fixed; bottom: 20px; right: 20px; width: 56px; height: 56px; border-radius: 50%;
             background: var(--primary); color: #fff; border: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.35);
-            font-size: 1.5rem; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem; line-height: 1; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
             transition: transform 0.15s;
         }
         #ai-fab:hover { transform: scale(1.06); }
@@ -490,7 +507,7 @@
         #ai-fab-mic {
             position: fixed; bottom: 20px; right: 84px; width: 48px; height: 48px; border-radius: 50%;
             background: #6b7280; color: #fff; border: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.35);
-            font-size: 1.25rem; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
+            font-size: 1.25rem; line-height: 1; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
             transition: transform 0.15s;
         }
         #ai-fab-mic:hover { transform: scale(1.06); }
@@ -503,8 +520,8 @@
            appearing once the panel's already open like the mic does. */
         #ai-fab-ocr {
             position: fixed; bottom: 84px; right: 20px; width: 48px; height: 48px; border-radius: 50%;
-            background: #6b7280; color: #fff; border: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.35);
-            font-size: 1.25rem; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
+            background: #9ca3af; color: #fff; border: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.35);
+            font-size: 1.5rem; line-height: 1; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
             transition: transform 0.15s;
         }
         #ai-fab-ocr:hover { transform: scale(1.06); }
@@ -1276,18 +1293,27 @@
         <button class="icon-btn hidden" id="btn-pack-order" onclick="openPackOrderView()" aria-label="View Pack Order" title="Pack Order" style="position:relative;">
             📦<span id="pack-order-badge" class="badge-count">0</span>
         </button>
-        <button class="icon-btn" id="btn-scan" onclick="openBarcodeScanner('open')" aria-label="Scan Barcode or QR" title="Scan">
-            📷
-        </button>
         <div class="header-more-wrap">
             <button class="icon-btn" id="btn-header-more" onclick="toggleHeaderMoreMenu(event)" aria-label="More" aria-haspopup="true" title="More">
                 <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"></circle></svg>
             </button>
             <div class="header-more-menu hidden" id="header-more-menu">
+                <button class="header-more-item" id="btn-scan" onclick="closeHeaderMoreMenu(); openBarcodeScanner('open');">📷 Scan</button>
                 <button class="header-more-item" id="btn-inventering" onclick="closeHeaderMoreMenu(); openInventeringSetup();">📋 Stocktaking</button>
                 <button class="header-more-item hidden" id="btn-dashboard" onclick="closeHeaderMoreMenu(); openDashboardView();">📊 Dashboard</button>
-                <button class="header-more-item" onclick="closeHeaderMoreMenu(); toggleTheme();">🌙 Toggle Theme</button>
-                <button class="header-more-item" onclick="closeHeaderMoreMenu(); toggleConsole();">🖥️ Console</button>
+            </div>
+        </div>
+        <div class="header-more-wrap hidden" id="profile-avatar-wrap">
+            <button class="profile-avatar" id="btn-profile-avatar" onclick="toggleProfileMenu(event)" aria-label="Account" aria-haspopup="true" title="Account">
+                <span id="profile-avatar-letter">?</span>
+                <span id="profile-avatar-role-badge" class="profile-role-badge"></span>
+            </button>
+            <div class="header-more-menu hidden" id="profile-menu">
+                <div style="padding:0.4rem 0.7rem 0.6rem;">
+                    <div id="profile-menu-name" style="font-weight:700; font-size:0.92rem;"></div>
+                    <div id="profile-menu-email" style="font-size:0.78rem; color:var(--text-muted); word-break:break-all;"></div>
+                    <div id="profile-menu-role" style="font-size:0.78rem; margin-top:6px;"></div>
+                </div>
             </div>
         </div>
         <button class="icon-btn" onclick="toggleSettings()" aria-label="Open Settings" title="Settings">
@@ -1326,14 +1352,19 @@
         <div class="list-header">
             <h2 style="margin: 0;">Inventory</h2>
             <div class="list-header-actions" id="list-actions">
-                <button id="btn-add-item" onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">➕ Add Item</button>
-                <button class="secondary" id="btn-items-csv" onclick="openImportItemsModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Import Items</button>
-                <button class="secondary hidden" id="btn-visma-import" onclick="openVismaImportModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;" title="Import a Visma article export, matched against a physical inventory-count file">📥 Import from Visma</button>
-                <button class="secondary" id="btn-kits-csv" onclick="openImportKitsModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Kits CSV</button>
-                <button class="secondary" id="btn-warehouse-csv" onclick="openImportWarehousesModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Warehouses CSV</button>
+                <button id="btn-add-item" onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">✨ Create</button>
+                <div class="header-more-wrap">
+                    <button class="secondary" id="btn-import-menu" onclick="toggleImportMenu(event)" aria-haspopup="true" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Import</button>
+                    <div class="header-more-menu hidden" id="import-menu" style="left:0; right:auto;">
+                        <button class="header-more-item" id="btn-items-csv" onclick="closeImportMenu(); openImportItemsModal();">📥 Items CSV</button>
+                        <button class="header-more-item hidden" id="btn-visma-import" onclick="closeImportMenu(); openVismaImportModal();" title="Import a Visma article export, matched against a physical inventory-count file">📥 Import from Visma</button>
+                        <button class="header-more-item hidden" id="btn-batch-images" onclick="closeImportMenu(); triggerBatchImageUpload();">🖼️ Batch Images</button>
+                        <button class="header-more-item" id="btn-kits-csv" onclick="closeImportMenu(); openImportKitsModal();">🧰 Kits CSV</button>
+                        <button class="header-more-item" id="btn-warehouse-csv" onclick="closeImportMenu(); openImportWarehousesModal();">🏬 Warehouses CSV</button>
+                    </div>
+                </div>
                 <button class="secondary" id="btn-export-db" onclick="exportEncryptedDatabase()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">💾 Export</button>
                 <button class="secondary hidden" id="btn-export-csv" onclick="exportItemsCSV()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📤 Export CSV</button>
-                <button class="secondary hidden" id="btn-batch-images" onclick="triggerBatchImageUpload()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">🖼️ Batch Images</button>
             </div>
         </div>
 
@@ -1742,6 +1773,10 @@
         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:0.75rem;">
             <label for="bin-locator-zone-select" style="margin:0; font-size:0.85rem; color:var(--text-muted);">Zone:</label>
             <select id="bin-locator-zone-select" onchange="onBinLocatorZoneChange()" style="width:auto; margin:0; padding:6px 10px; font-size:0.85rem;"></select>
+            <label id="bin-locator-heatmap-toggle-wrap" style="display:flex; align-items:center; gap:6px; margin:0; font-size:0.85rem; color:var(--text-muted); cursor:pointer;">
+                <input type="checkbox" id="bin-locator-heatmap-toggle" onchange="onBinLocatorHeatmapChange()" style="width:auto; min-height:unset; margin:0;">
+                🔥 Heatmap
+            </label>
         </div>
         <div class="warehouse-map" id="bin-locator-grid"></div>
         <div class="iso-canvas hidden" id="bin-locator-iso" onclick="onBinLocatorIsoClick(event)"></div>
@@ -1798,6 +1833,20 @@
     <!-- View 5: Settings -->
     <section id="settings-view" class="card hidden">
         <h2 style="margin-bottom: 1.5rem;">App Settings</h2>
+
+        <div class="setting-row">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="dark-mode-enabled" onchange="onDarkModeSettingChange()" style="width:auto; min-height:unset; margin:0;">
+                🌙 Dark Mode
+            </label>
+            <p class="setting-desc">Per-device, applies immediately.</p>
+        </div>
+
+        <div class="setting-row">
+            <label>🖥️ Developer Console</label>
+            <p class="setting-desc">Captured <code>console.log</code>/<code>error</code>/<code>warn</code> output — useful for troubleshooting without your browser's own devtools.</p>
+            <button class="secondary" onclick="toggleConsole()">🖥️ Open Console</button>
+        </div>
 
         <div class="setting-row">
             <label for="qr-ecc">QR Code Error Correction</label>
@@ -2008,6 +2057,10 @@
     // real "less than zero on the shelf" fact, so it's more useful hidden from the everyday list
     // than shown; per-device only, same as staticWarehousesEnabled below.
     var hideNegativeQtyItems = localStorage.getItem('hideNegativeQtyItems') !== 'false';
+    // Off by default (unlike hideNegativeQtyItems above) — reaching zero stock is a completely normal,
+    // common state for a real item to be in, not a data problem, so hiding it isn't the right default;
+    // this is purely an opt-in "only show what's actually on the shelf" view. Per-device only.
+    var hideZeroQtyItems = localStorage.getItem('hideZeroQtyItems') === 'true';
     var globalManufacturers = []; // Supabase-mode only — global (not warehouse-scoped) entity list
     var currentManufacturerId = null;
     var selectedItemsQty = {}; // btk -> requested qty (set when selected from a kit's item list)
@@ -2087,6 +2140,8 @@
     window.SUPABASE_ANON_KEY = SUPABASE_ANON_KEY;
     window.getSupabaseAccessToken = async () => sb ? (await sb.auth.getSession()).data.session?.access_token : null;
     var currentUserRole = null; // 'viewer' | 'editor' | 'admin' — kept in memory only, never persisted
+    var currentUserEmail = null; // header profile avatar only — never persisted, cleared on logout
+    var currentUserDisplayName = null;
 
     // Item photos live in Supabase Storage now (one full + one thumbnail per item, flat filenames
     // keyed by BTK so re-uploading just overwrites in place). Free plan is 1GB — keep a 10% margin.
@@ -2176,19 +2231,35 @@
 
     // Header "⋯ More" — Stocktaking/Dashboard/Theme/Console live here instead of as their own
     // permanent header icons (see the .header-more-menu CSS comment for why: too many icons for a
-    // narrow phone screen, some becoming unreachable). Closes on an outside click/tap, same as any
-    // ordinary dropdown, and on Escape for keyboard users.
-    function toggleHeaderMoreMenu(e) {
+    // narrow phone screen, some becoming unreachable). Same dropdown shape backs the profile avatar's
+    // account menu and the item list's Import menu — one shared open/close/outside-click/Escape
+    // handling for all three instead of copy-pasting it per menu.
+    const DROPDOWN_MENUS = [
+        { btn: 'btn-header-more', menu: 'header-more-menu' },
+        { btn: 'btn-profile-avatar', menu: 'profile-menu' },
+        { btn: 'btn-import-menu', menu: 'import-menu' },
+    ];
+    function toggleDropdownMenu(menuId, e) {
         if (e) e.stopPropagation();
-        document.getElementById('header-more-menu').classList.toggle('hidden');
+        const isHidden = document.getElementById(menuId).classList.contains('hidden');
+        closeAllDropdownMenus();
+        if (isHidden) document.getElementById(menuId).classList.remove('hidden');
     }
+    function closeAllDropdownMenus() {
+        DROPDOWN_MENUS.forEach(({ menu }) => document.getElementById(menu)?.classList.add('hidden'));
+    }
+    function toggleHeaderMoreMenu(e) { toggleDropdownMenu('header-more-menu', e); }
     function closeHeaderMoreMenu() { document.getElementById('header-more-menu').classList.add('hidden'); }
+    function toggleProfileMenu(e) { toggleDropdownMenu('profile-menu', e); }
+    function toggleImportMenu(e) { toggleDropdownMenu('import-menu', e); }
+    function closeImportMenu() { document.getElementById('import-menu').classList.add('hidden'); }
     document.addEventListener('click', (e) => {
-        const menu = document.getElementById('header-more-menu');
-        const wrap = document.getElementById('btn-header-more');
-        if (menu && !menu.classList.contains('hidden') && !menu.contains(e.target) && e.target !== wrap && !wrap.contains(e.target)) closeHeaderMoreMenu();
+        DROPDOWN_MENUS.forEach(({ btn, menu }) => {
+            const menuEl = document.getElementById(menu), btnEl = document.getElementById(btn);
+            if (menuEl && !menuEl.classList.contains('hidden') && !menuEl.contains(e.target) && e.target !== btnEl && !btnEl?.contains(e.target)) menuEl.classList.add('hidden');
+        });
     });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeHeaderMoreMenu(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllDropdownMenus(); });
     function copyLogs(e)  { e.stopPropagation(); navigator.clipboard.writeText(logs.join('\n')).then(() => showToast("Logs copied!", "success")); }
     function clearLogs(e) { e.stopPropagation(); logs.length = 0; document.getElementById('console-output').innerHTML = ''; console.log("Console cleared."); }
 
@@ -3320,6 +3391,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const { error } = await sb.from('profiles').update({ display_name: val || null }).eq('id', userId);
         if (error) { showToast("Could not save display name: " + error.message, "error"); return; }
         delete displayNameCache[userId]; // next lookup (e.g. re-opening an item you just edited) picks up the change
+        currentUserDisplayName = val || null;
+        renderProfileAvatar();
     }
 
     // Returns the warehouse that was actually opened. That is `wid`, except with `fallbackToAccessible` (sign-in and
@@ -3343,6 +3416,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         currentActiveKey = 'supabase-session'; // sentinel so requireAuth() passes
         currentUserRole = role;
         currentProfileRole = profile.role;
+        currentUserEmail = user.email || null;
+        currentUserDisplayName = profile.display_name || null;
         await supabaseLoadWarehouseMeta(wid);
         await supabaseLoadAllWarehouses(); // so the switcher offers every Supabase warehouse, not just this one
         await supabaseLoadWarehouseZones(wid);
@@ -4627,6 +4702,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         updateMetaThemeColor(newTheme);
         console.log(`Theme set to ${newTheme}`);
     }
+    // Settings → 🌙 Dark Mode checkbox — same toggleTheme()/localStorage the old header shortcut used.
+    function onDarkModeSettingChange() {
+        const wantDark = document.getElementById('dark-mode-enabled').checked;
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        if (wantDark !== isDark) toggleTheme();
+    }
     function updateMetaThemeColor(theme) {
         document.getElementById('meta-theme-color').content = theme === 'dark' ? '#0b1120' : '#f8fafc';
     }
@@ -5763,6 +5844,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         filterList(false);
     }
 
+    function toggleHideZeroQty() {
+        hideZeroQtyItems = !hideZeroQtyItems;
+        localStorage.setItem('hideZeroQtyItems', String(hideZeroQtyItems));
+        filterList(false);
+    }
+
     function renderWarehouseMeta() {
         const meta = getWarehouseMeta(currentWarehouseId);
         document.getElementById('wh-meta-container').innerHTML =
@@ -5789,6 +5876,32 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('btn-batch-images').classList.toggle('hidden', !isSupa || currentUserRole === 'viewer');
         document.getElementById('btn-export-csv').classList.toggle('hidden', !isSupa);
         document.getElementById('seg-manufacturers').classList.toggle('hidden', !isSupa);
+        // The Import button itself only makes sense if at least one option inside its dropdown is
+        // actually visible (a Supabase viewer, for instance, has all three of its options hidden).
+        const anyImportOption = ['btn-items-csv', 'btn-visma-import', 'btn-batch-images', 'btn-kits-csv', 'btn-warehouse-csv']
+            .some(id => !document.getElementById(id).classList.contains('hidden'));
+        document.getElementById('btn-import-menu').classList.toggle('hidden', !anyImportOption);
+        renderProfileAvatar();
+    }
+
+    // Google-style header avatar: first letter of the signed-in display name (or email, if none is
+    // set) plus a role-colored corner badge — see the .profile-avatar CSS comment. Supabase mode
+    // only; a static/offline vault has no real account for this to describe.
+    function renderProfileAvatar() {
+        const wrap = document.getElementById('profile-avatar-wrap');
+        if (!wrap) return;
+        const isSupa = getWarehouseMeta(currentWarehouseId).mode === 'supabase';
+        if (!isSupa || !currentUserRole) { wrap.classList.add('hidden'); return; }
+        wrap.classList.remove('hidden');
+        const label = (currentUserDisplayName || (currentUserEmail ? currentUserEmail.split('@')[0] : '') || '?').trim();
+        document.getElementById('profile-avatar-letter').textContent = (label.charAt(0) || '?').toUpperCase();
+        const badge = document.getElementById('profile-avatar-role-badge');
+        badge.textContent = currentUserRole.charAt(0).toUpperCase();
+        badge.className = 'profile-role-badge role-' + currentUserRole;
+        document.getElementById('btn-profile-avatar').title = `${label} — ${currentUserRole}`;
+        document.getElementById('profile-menu-name').textContent = label;
+        document.getElementById('profile-menu-email').textContent = currentUserEmail || '';
+        document.getElementById('profile-menu-role').innerHTML = `Role: <strong style="text-transform:capitalize;">${escapeHtml(currentUserRole)}</strong>`;
     }
 
     // The selection, the pack-order pick list and a running stocktake belong to the warehouse they
@@ -5881,18 +5994,25 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         // Counted among what the current search/manufacturer filter already matches, so the note
         // always describes what's actually missing from *this* view, not the whole warehouse.
         const isNegative = item => (parseFloat(item.Numberofitems) || 0) < 0;
+        const isZero = item => (parseFloat(item.Numberofitems) || 0) === 0;
         const negativeCount = matching.filter(isNegative).length;
+        const zeroCount = matching.filter(isZero).length;
         let filtered = hideNegativeQtyItems ? matching.filter(item => !isNegative(item)) : matching;
+        if (hideZeroQtyItems) filtered = filtered.filter(item => !isZero(item));
         filtered = sortItems(filtered);
         currentlyVisibleIds = filtered.map(i => i.BTKnumber);
-        // The show/hide switch lives inline in this line rather than as its own toolbar control —
-        // it only appears when there's actually something negative to hide or show, and costs no
-        // extra room in the (already crowded) sort/filter row above.
+        // The show/hide switches live inline in this line rather than as their own toolbar controls —
+        // each only appears when there's actually something to hide or show, and costs no extra room
+        // in the (already crowded) sort/filter row above.
         const negWord = `negative-stock item${negativeCount === 1 ? '' : 's'}`;
         const negToggle = negativeCount
             ? ` · <button type="button" class="stats-link" onclick="toggleHideNegativeQty()">${hideNegativeQtyItems ? `${negativeCount} ${negWord} hidden — show` : `showing ${negativeCount} ${negWord} — hide`}</button>`
             : '';
-        document.getElementById('list-stats').innerHTML = `Showing ${filtered.length} of ${globalInventory.length} items${negToggle}`;
+        const zeroWord = `zero-stock item${zeroCount === 1 ? '' : 's'}`;
+        const zeroToggle = zeroCount
+            ? ` · <button type="button" class="stats-link" onclick="toggleHideZeroQty()">${hideZeroQtyItems ? `${zeroCount} ${zeroWord} hidden — show` : `showing ${zeroCount} ${zeroWord} — hide`}</button>`
+            : '';
+        document.getElementById('list-stats').innerHTML = `Showing ${filtered.length} of ${globalInventory.length} items${negToggle}${zeroToggle}`;
         renderList(filtered);
         syncSelectAllCheckbox();
     }
@@ -9407,6 +9527,8 @@ th { background: #eee; }
     var binLocatorZone = null;
     var binLocatorSelectedDepth = null;
     var binLocatorSelectedLevel = null;
+    var binLocatorSelectedBin = null; // which bin (on the currently selected shelf) is highlighted in the item list below
+    var binLocatorHeatmapEnabled = localStorage.getItem('bin-locator-heatmap') === '1';
 
     // ── Dashboard — optional (off by default, Settings → 📊 Dashboard), purely additive: doesn't
     // change the default landing view or any existing navigation, just adds a reachable summary.
@@ -9463,10 +9585,17 @@ th { background: #eee; }
         if (!binLocatorZone || !zones.includes(binLocatorZone)) binLocatorZone = zones[0];
         binLocatorSelectedDepth = null;
         binLocatorSelectedLevel = null;
+        binLocatorSelectedBin = null;
         switchView('bin-locator-view');
         const select = document.getElementById('bin-locator-zone-select');
         select.innerHTML = zones.map(z => `<option value="${escapeHtml(z)}" ${z === binLocatorZone ? 'selected' : ''}>Zone ${escapeHtml(z)}</option>`).join('');
+        document.getElementById('bin-locator-heatmap-toggle').checked = binLocatorHeatmapEnabled;
         document.getElementById('bin-locator-detail').classList.add('hidden');
+        renderBinLocatorGrid();
+    }
+    function onBinLocatorHeatmapChange() {
+        binLocatorHeatmapEnabled = document.getElementById('bin-locator-heatmap-toggle').checked;
+        localStorage.setItem('bin-locator-heatmap', binLocatorHeatmapEnabled ? '1' : '0');
         renderBinLocatorGrid();
     }
     function onBinLocatorZoneChange() {
@@ -9498,14 +9627,32 @@ th { background: #eee; }
         canvas.innerHTML = window.buildIsoRackSVG(geom, {
             interactive: true,
             occupied: here.map(p => ({ depth: p.depth, level: p.level, bin: p.bin, row: p.binRow })),
+            heatmap: binLocatorHeatmapEnabled,
             selected: binLocatorSelectedDepth ? { depth: binLocatorSelectedDepth, level: binLocatorSelectedLevel } : null,
             ariaLabel: `Isometric view of rack area ${zone}, bins holding items tinted blue`,
         });
-        caption.textContent = `Zone ${zone} — bins holding items are tinted blue; tap any shelf, or a bin on it, to see what's stored there.`;
+        caption.textContent = binLocatorHeatmapEnabled
+            ? `Zone ${zone} — brighter/deeper blue means more items stored there; tap any shelf, or a bin on it, to see what's stored there.`
+            : `Zone ${zone} — bins holding items are tinted blue; tap any shelf, or a bin on it, to see what's stored there.`;
     }
     function onBinLocatorIsoClick(e) {
         const el = e.target.closest('[data-depth][data-level]');
         if (el) selectBinLocatorCell(parseInt(el.dataset.depth, 10), parseInt(el.dataset.level, 10));
+    }
+
+    // A count-of-1 and a count-of-20 both just read as "has-items" in the plain view — the heatmap
+    // option makes that difference visible at a glance instead of needing to tap every cell to find
+    // the busiest shelf. Fixed hue (the app's own blue), lightness scaled by count relative to the
+    // busiest cell in this zone — light blue for barely-occupied, a solid, deep blue for the hottest
+    // spot. Never applied to the currently *selected* cell, which keeps its own strong --primary
+    // highlight. Same hue/curve as iso-rack.js's own heatmap fill, for the isometric view — kept as
+    // two small copies rather than a shared import since index.html's classic script and that ES
+    // module don't otherwise share code, and the formula is a one-liner.
+    function binHeatmapStyle(count, maxCount) {
+        if (!count || !maxCount) return null;
+        const ratio = Math.min(1, count / maxCount);
+        const lightness = 90 - ratio * 55; // 90% (light blue) at the low end down to 35% (solid blue) at the max
+        return { background: `hsl(217, 85%, ${lightness}%)`, color: ratio > 0.42 ? '#fff' : '#0a2a5e' };
     }
 
     function renderBinLocatorGrid() {
@@ -9524,24 +9671,37 @@ th { background: #eee; }
             return;
         }
         grid.style.gridTemplateColumns = `repeat(${bounds.maxDepth}, 1fr)`;
+        const counts = [];
+        for (let level = bounds.maxLevel; level >= 1; level--) {
+            for (let depth = 1; depth <= bounds.maxDepth; depth++) counts.push(itemsAtLocation(binLocatorZone, depth, level).length);
+        }
+        const maxCount = Math.max(0, ...counts);
+        let i = 0;
         for (let level = bounds.maxLevel; level >= 1; level--) {
             for (let depth = 1; depth <= bounds.maxDepth; depth++) {
-                const count = itemsAtLocation(binLocatorZone, depth, level).length;
+                const count = counts[i++];
                 const isSelected = binLocatorSelectedDepth === depth && binLocatorSelectedLevel === level;
                 const cell = document.createElement('div');
                 cell.className = 'map-cell clickable' + (isSelected ? ' active' : '') + (count > 0 && !isSelected ? ' has-items' : '');
                 cell.title = `${depthWord(binLocatorZone, depth)} · Level ${level}` + (count ? ` — ${count} item(s)` : ' — empty');
                 cell.innerText = count > 0 ? String(count) : '';
+                if (binLocatorHeatmapEnabled && !isSelected) {
+                    const style = binHeatmapStyle(count, maxCount);
+                    if (style) { cell.style.background = style.background; cell.style.color = style.color; }
+                }
                 cell.onclick = () => selectBinLocatorCell(depth, level);
                 grid.appendChild(cell);
             }
         }
-        caption.textContent = `Zone ${binLocatorZone} — each cell is one shelf (${isShelvingZone(binLocatorZone) ? 'Section' : 'Rack'} × Level); the number is how many items are stored there.`;
+        caption.textContent = binLocatorHeatmapEnabled
+            ? `Zone ${binLocatorZone} — each cell is one shelf; brighter/deeper blue means more items stored there (busiest: ${maxCount}).`
+            : `Zone ${binLocatorZone} — each cell is one shelf (${isShelvingZone(binLocatorZone) ? 'Section' : 'Rack'} × Level); the number is how many items are stored there.`;
     }
 
     function selectBinLocatorCell(depth, level) {
         binLocatorSelectedDepth = depth;
         binLocatorSelectedLevel = level;
+        binLocatorSelectedBin = null; // a fresh shelf — any bin highlight from the last one no longer applies
         renderBinLocatorGrid();
         renderBinLocatorShelf(depth, level);
     }
@@ -9561,13 +9721,16 @@ th { background: #eee; }
         for (let bin = 1; bin <= width; bin++) {
             const itemsInBin = itemsHere.filter(i => (parseLocationCode(i.LocationCode) || {}).bin === bin);
             const cell = document.createElement('div');
-            cell.className = 'map-cell' + (itemsInBin.length ? ' active clickable' : '');
+            cell.className = 'map-cell' + (itemsInBin.length ? ' active clickable' : '') + (bin === binLocatorSelectedBin ? ' bin-locator-bin-selected' : '');
             cell.title = itemsInBin.length
                 ? itemsInBin.map(i => i['itemname(english)'] || i['itemname(swedish)'] || i.BTKnumber).join(', ')
                 : `Bin ${bin} — empty`;
             cell.innerText = itemsInBin.length ? String(bin) : '';
             if (itemsInBin.length === 1) cell.onclick = () => openItem(itemsInBin[0].BTKnumber, { type: 'global' });
-            else if (itemsInBin.length > 1) cell.onclick = () => document.getElementById(`bin-locator-row-${bin}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // More than one item shares this bin (stacked in different Rows) — no single item to jump
+            // to, so instead light up exactly which rows below belong to this bin, clearing whichever
+            // bin was lit before (never accumulating highlights across clicks).
+            else if (itemsInBin.length > 1) cell.onclick = () => highlightBinLocatorBin(bin);
             shelf.appendChild(cell);
         }
         document.getElementById('bin-locator-shelf-note').textContent = bounds.maxBin
@@ -9581,11 +9744,18 @@ th { background: #eee; }
             const sorted = itemsHere.slice().sort((a, b) => compareLocationCode(a.LocationCode, b.LocationCode));
             listEl.innerHTML = sorted.map(item => {
                 const p = parseLocationCode(item.LocationCode);
+                const bin = p ? p.bin : 0;
                 const num1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
                 const num2 = (item.itemnumber2 && item.itemnumber2 !== 'None') ? item.itemnumber2 : '';
                 const nums = [num1, num2].filter(Boolean).join(' · ');
                 const mfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
-                return `<div class="kit-row" id="bin-locator-row-${p ? p.bin : 0}" data-locator-btk="${escapeHtml(item.BTKnumber)}" role="button" tabindex="0">
+                // data-bin, not id — several rows legitimately share the same bin (stacked in
+                // different Rows), and an id can never be reused across elements.
+                const thumb = item.imageThumbUrl
+                    ? `<img src="${escapeHtml(item.imageThumbUrl)}" alt="" style="width:48px; height:48px; object-fit:cover; border-radius:6px; flex-shrink:0;">`
+                    : `<div style="width:48px; height:48px; border-radius:6px; flex-shrink:0; background:var(--border); display:flex; align-items:center; justify-content:center; font-size:1.3rem;" aria-hidden="true">📦</div>`;
+                return `<div class="kit-row${bin === binLocatorSelectedBin ? ' bin-locator-row-highlighted' : ''}" data-bin="${bin}" data-locator-btk="${escapeHtml(item.BTKnumber)}" role="button" tabindex="0">
+                    ${thumb}
                     <div class="kit-info">
                         <div class="item-title" style="font-size:1.05rem;font-weight:800;">${escapeHtml(item['itemname(english)'] || item['itemname(swedish)'] || 'Unnamed')}</div>
                         ${nums ? `<div class="item-sub" style="font-weight:700;color:var(--text-main);">${escapeHtml(nums)}</div>` : ''}
@@ -9600,6 +9770,21 @@ th { background: #eee; }
             });
         }
         document.getElementById('bin-locator-detail').classList.remove('hidden');
+    }
+
+    // Lights up every list row (and the shelf-strip cell) for one multi-item bin, replacing whatever
+    // was lit before — never stacking highlights from successive clicks, so it always shows exactly
+    // "these are the items at the bin you just tapped."
+    function highlightBinLocatorBin(bin) {
+        binLocatorSelectedBin = bin;
+        document.querySelectorAll('#bin-locator-shelf .map-cell').forEach(el => el.classList.remove('bin-locator-bin-selected'));
+        const shelfCells = [...document.getElementById('bin-locator-shelf').children];
+        shelfCells[bin - 1]?.classList.add('bin-locator-bin-selected');
+        const listEl = document.getElementById('bin-locator-items-list');
+        listEl.querySelectorAll('.kit-row').forEach(el => el.classList.remove('bin-locator-row-highlighted'));
+        const rows = [...listEl.querySelectorAll(`[data-bin="${bin}"]`)];
+        rows.forEach(el => el.classList.add('bin-locator-row-highlighted'));
+        rows[0]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -11574,6 +11759,8 @@ ${css}
     //  SETTINGS (toggle fix with previousView tracking)
     // ════════════════════════════════════════════════════════════════════════
     function initSettings() {
+        document.getElementById('dark-mode-enabled').checked = document.documentElement.getAttribute('data-theme') === 'dark';
+
         const savedEcc = localStorage.getItem('qr-ecc');
         if (savedEcc) { document.getElementById('qr-ecc').value = savedEcc; updateQREccVar(savedEcc); }
 
@@ -11694,6 +11881,8 @@ ${css}
         localStorage.removeItem(LS_DRAFT);
         currentUserRole = null;
         currentProfileRole = null;
+        currentUserEmail = null;
+        currentUserDisplayName = null;
         if (sb) { try { await sb.auth.signOut(); } catch (e) { console.error("Supabase sign-out failed:", e); } }
         window.location.href = window.location.pathname;
     }

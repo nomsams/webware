@@ -263,7 +263,11 @@ node --test modules/tests/*.test.js
     (`opts.highlight`) — one **solid blue** box with a coordinates pill, painted at its true position
     in painter's order plus an opaque-ish overlay copy — reads through a rack standing in front of
     it, in both styles.
-    `opts.occupied` tints bins that hold items (the Bin Locator), `opts.selected` outlines a shelf,
+    `opts.occupied` tints bins that hold items (the Bin Locator), one flat `--primary`-derived tint
+    regardless of how many; `opts.heatmap` (off by default) instead scales each occupied bin's own
+    fill by its count relative to the busiest bin in the rack — light blue barely-occupied, solid
+    deep blue at the busiest — via an inline `style=` override rather than a fixed CSS class, since
+    the color itself is now data-dependent, not just on/off. `opts.selected` outlines a shelf,
     `opts.interactive` adds the `data-*` hooks, `opts.showDimensions` / `opts.sampleBin` add the
     measurement callouts and a sample bin for the dimensions panel. Empty-bin outlines are dropped
     past ~2500 bins so a huge rack stays cheap; occupied/selected bins never are.
@@ -278,9 +282,10 @@ node --test modules/tests/*.test.js
   draws (beam/foot-guard for pallet, board/brace for shelving — and never the other style's), a
   shelving zone's sections resolving side by side while ignoring `max_aisle` and a pallet zone's
   Depth staying real racks, a sectioned zone drawing every section's occupied bins rather than just
-  the first, label escaping, occupied/selected/interactive markup, dimension callouts, and "every
-  renderer stays finite over odd inputs"). SQL for the sizes it reads is
-  `supabase/schema_zone_dimensions.sql`.
+  the first, heatmap fill scaling with an occupied bin's count in both the sectioned and
+  non-sectioned draw paths (and staying off by default), label escaping, occupied/selected/interactive
+  markup, dimension callouts, and "every renderer stays finite over odd inputs"). SQL for the sizes
+  it reads is `supabase/schema_zone_dimensions.sql`.
 - **`json-extract.js`** — **wired in**: reads JSON objects out of free-form model output. Used by
   `order-parser.js` and `delivery-note-parser.js` for their replies and, as
   `window.extractJsonObjects`, by the AI assistant to read which action a reply asks for. Replaces

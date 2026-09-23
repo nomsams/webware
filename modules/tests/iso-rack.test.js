@@ -204,6 +204,26 @@ test('buildIsoRackSVG tints occupied bins, outlines a selected shelf, and marks 
   assert.doesNotMatch(buildIsoRackSVG(g, {}), /data-depth/);
 });
 
+test('buildIsoRackSVG heatmap: an occupied bin\'s fill scales with its count relative to the busiest bin, off by default', () => {
+  const g = resolveRackGeometry({ zone: 'B' }, { maxDepth: 1, maxLevel: 1, maxBin: 3 });
+  const occupied = [{ depth: 1, level: 1, bin: 1, count: 1 }, { depth: 1, level: 1, bin: 2, count: 5 }];
+  assert.doesNotMatch(buildIsoRackSVG(g, { occupied }), /hsl\(217/); // off by default — flat .iso-bin-occupied tint only
+
+  const svg = buildIsoRackSVG(g, { occupied, heatmap: true });
+  const lightnesses = [...svg.matchAll(/style="fill:hsl\(217,85%,([\d.]+)%\)/g)].map((m) => Number(m[1]));
+  assert.equal(lightnesses.length, 2);
+  assert.ok(Math.min(...lightnesses) < Math.max(...lightnesses)); // the busier bin (count 5) is visibly darker/more saturated than the quieter one (count 1)
+});
+
+test('buildIsoRackSVG heatmap also colours occupied bins in a sectioned (shelving) rack', () => {
+  const g = resolveRackGeometry({ zone: 'A', rack_style: 'shelving' }, { maxDepth: 2, maxLevel: 1, maxBin: 2 });
+  const svg = buildIsoRackSVG(g, {
+    occupied: [{ depth: 1, level: 1, bin: 1, count: 1 }, { depth: 2, level: 1, bin: 1, count: 4 }],
+    heatmap: true,
+  });
+  assert.equal(count(svg, /style="fill:hsl\(217,85%,/g), 2); // both sections' occupied bins get heatmap fills, same as the non-sectioned path
+});
+
 test('buildIsoRackSVG stays cheap on a huge rack: empty-bin outlines are dropped, occupied bins are not', () => {
   const g = resolveRackGeometry({ zone: 'A' }, { maxDepth: 4, maxLevel: 10, maxBin: 100 });
   const svg = buildIsoRackSVG(g, { occupied: [{ depth: 2, level: 4, bin: 50 }] });

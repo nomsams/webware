@@ -262,13 +262,15 @@ function occupiedMap(list) {
 // opts: {
 //   highlight: { depth, level, bin, row?, label? }   the one bin to find — drawn solid blue with a coordinates label
 //   occupied:  [{ depth, level, bin, row?, count? }] bins holding something — tinted (Bin Locator)
+//   heatmap: false — with occupied bins given a count, colours each by how busy it is relative to
+//     the busiest bin in this rack (light blue -> solid blue) instead of one flat tint for any count
 //   selected:  { depth, level }                      a whole shelf outlined (Bin Locator)
 //   showDimensions: draw L / D / H (and shelf clear-height) callouts; sampleBin: draw a blue reference bin
 //   interactive: bins/boards carry data-depth/level/bin/row and a pointer cursor; ariaLabel
 // }
 export function buildIsoRackSVG(geom, opts = {}) {
   const g = geom;
-  const { highlight = null, occupied = [], selected = null, showDimensions = false, sampleBin = false, interactive = false } = opts;
+  const { highlight = null, occupied = [], selected = null, showDimensions = false, sampleBin = false, interactive = false, heatmap = false } = opts;
   const L = g.runLength, Dt = g.totalDepth, H = g.height;
 
   // base font size in scene units, from the size of the whole rack
@@ -285,6 +287,18 @@ export function buildIsoRackSVG(geom, opts = {}) {
   const drawEmptyBins = totalBins <= MAX_DRAWN_BINS;
   const dataAttrs = (d, l, b, r) => (interactive ? ` data-depth="${d}" data-level="${l}"${b ? ` data-bin="${b}"` : ''}${r ? ` data-row="${r}"` : ''}` : '');
   const codeFor = (d, l, b, r) => formatLocationCode(g.zone, d, l, b, r);
+  // opts.heatmap: an occupied bin's own fill scales with its count relative to the busiest bin in
+  // this rack — light blue for barely-occupied, solid deep blue for the busiest — instead of every
+  // occupied bin getting the same flat .iso-bin-occupied tint. Same hue/curve as index.html's own
+  // flat-grid heatmap (binHeatmapStyle), kept as separate small copies since this module and that
+  // classic script don't otherwise share code.
+  const maxOccCount = heatmap ? Math.max(0, ...occ.values()) : 0;
+  const heatmapAttrs = (count) => {
+    if (!heatmap || !count || !maxOccCount) return '';
+    const ratio = Math.min(1, count / maxOccCount);
+    const lightness = 82 - ratio * 47; // 82% (light blue) down to 35% (solid blue) at the busiest
+    return ` style="fill:hsl(217,85%,${lightness}%);fill-opacity:.85;stroke:hsl(217,70%,30%);stroke-opacity:.8"`;
+  };
 
   S.poly('iso-floor', [[0, 0, 0], [L, 0, 0], [L, Dt, 0], [0, Dt, 0]]);
 
@@ -362,7 +376,7 @@ export function buildIsoRackSVG(geom, opts = {}) {
               const x0 = sx0 + (b - 1) * g.cellW, x1 = x0 + g.cellW;
               const ry0 = y0 + (r - 1) * g.binD, ry1 = ry0 + g.binD;
               const title = interactive || count ? `${codeFor(d, l, b, r)}${count ? ` — ${count} item${count > 1 ? 's' : ''}` : ''}` : '';
-              S.poly(`iso-bin${count ? ' iso-bin-occupied' : ''}${interactive ? ' iso-click' : ''}`, [[x0, ry0, zt], [x1, ry0, zt], [x1, ry1, zt], [x0, ry1, zt]], dataAttrs(d, l, b, r), title);
+              S.poly(`iso-bin${count ? ' iso-bin-occupied' : ''}${interactive ? ' iso-click' : ''}`, [[x0, ry0, zt], [x1, ry0, zt], [x1, ry1, zt], [x0, ry1, zt]], dataAttrs(d, l, b, r) + heatmapAttrs(count), title);
             }
             if (hlSpec && !hl && hlSpec.d === d && hlSpec.l === l && hlSpec.b === b && hlSpec.r === r) drawBlueBin(hlSpec);
           }
@@ -395,7 +409,7 @@ export function buildIsoRackSVG(geom, opts = {}) {
               const x0 = (b - 1) * g.cellW, x1 = b * g.cellW;
               const ry0 = y0 + (r - 1) * g.binD, ry1 = ry0 + g.binD;
               const title = interactive || count ? `${codeFor(d, l, b, r)}${count ? ` — ${count} item${count > 1 ? 's' : ''}` : ''}` : '';
-              S.poly(`iso-bin${count ? ' iso-bin-occupied' : ''}${interactive ? ' iso-click' : ''}`, [[x0, ry0, zt], [x1, ry0, zt], [x1, ry1, zt], [x0, ry1, zt]], dataAttrs(d, l, b, r), title);
+              S.poly(`iso-bin${count ? ' iso-bin-occupied' : ''}${interactive ? ' iso-click' : ''}`, [[x0, ry0, zt], [x1, ry0, zt], [x1, ry1, zt], [x0, ry1, zt]], dataAttrs(d, l, b, r) + heatmapAttrs(count), title);
             }
             if (hlSpec && !hl && hlSpec.d === d && hlSpec.l === l && hlSpec.b === b && hlSpec.r === r) drawBlueBin(hlSpec);
           }
