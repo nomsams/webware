@@ -12033,12 +12033,16 @@ ${css}
         if (/not authenticated|sign in/i.test(msg)) return "Please sign in first.";
         if (/429|rate limit/i.test(msg)) return "The assistant is busy right now — try again in a moment.";
         if (/no groq api key|no AI key/i.test(msg)) return aiNoKeyMessage();
-        // The model's reply didn't come back as usable JSON at all (order-parser.js/json-extract.js) —
-        // most often the model ran out of its reply budget mid-answer (its own reasoning ate into the
+        // The model's reply didn't come back as usable JSON at all — order-parser.js/json-extract.js
+        // say so as "did not contain json"/"missing items array", groq-client.js's own chat() as
+        // "unexpected response shape", and aiHandleUtterance's own router right below as "unexpected
+        // reply shape" (checked here too, not just its near-namesake, since it's a completely
+        // separate throw a few dozen lines down and easy for the two to quietly drift apart again).
+        // Most often the model ran out of its reply budget mid-answer (its own reasoning ate into the
         // token limit before it got to the actual JSON), which reads as every request failing the
         // same way regardless of wording. Retrying often just works since token usage varies call to
         // call; simplifying the request lowers how much the model needs to reason through.
-        if (/did not contain json|missing items array|unexpected response shape/i.test(msg)) {
+        if (/did not contain json|missing items array|unexpected (reply|response) shape/i.test(msg)) {
             return "The assistant's reply got cut off before it finished — try again, or ask for fewer items at once.";
         }
         // groq-client's own safeJson() fallback for a non-JSON HTTP response (a gateway error page,
@@ -12281,6 +12285,13 @@ Respond with ONLY the JSON object, nothing else.`;
             const raw = await aiGetGroqClient().chat({
                 model: getAiModel(),
                 reasoningEffort: getAiReasoningEffort(),
+                // This is the FIRST call for every single message — a reasoning model can burn
+                // through groq-client's own default budget on reasoning alone before ever reaching
+                // the small JSON action object this actually needs, exactly like order-parser.js's
+                // own extraction call could (see its own comment on maxTokens): reasoning fails
+                // silently here, before parseOrderRequest/etc. ever run, and every kind of request —
+                // not just pack orders — reads as failing identically regardless of wording.
+                maxTokens: 8192,
                 messages: [
                     { role: 'system', content: AI_SYSTEM_PROMPT },
                     ...history,
