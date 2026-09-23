@@ -11910,7 +11910,12 @@ ${css}
         if (opening) {
             localStorage.setItem('ai-assistant-seen', '1');
             document.getElementById('ai-fab-badge')?.classList.add('hidden');
-            if (!aiAssistantReady) {
+            // !aiHasApiKey alongside !aiAssistantReady: a `false` result the first time the panel
+            // opened can just be a stale transient failure (see aiChatHandlePhotoSelected's own
+            // comment on this) — without this, a bad first check would show the wrong "no key"
+            // welcome message once and then, on every later open, no welcome message at all, ever
+            // re-checking whether a key showed up since.
+            if (!aiAssistantReady || !aiHasApiKey) {
                 aiAssistantReady = true;
                 await aiRefreshKeyStatus();
                 aiAppendMessage('system', aiHasApiKey
@@ -12155,7 +12160,13 @@ ${css}
         event.target.value = ''; // allow re-selecting/re-shooting the same photo later
         if (!file) return;
         await aiEnsurePanelOpen();
-        if (aiHasApiKey === null) await aiRefreshKeyStatus();
+        // !aiHasApiKey, not === null: a `false` here can just be a stale result from an earlier
+        // transient failure (a network blip, or this check running before the session was fully
+        // ready) rather than a genuine "no key" — caching only the CONFIRMED-true case means a real
+        // key still gets found on the very next attempt, instead of staying wrongly stuck at "no
+        // key" for the rest of the session until something else (e.g. opening Settings, which always
+        // re-checks) happens to fix the cached value. Same pattern at every aiHasApiKey check below.
+        if (!aiHasApiKey) await aiRefreshKeyStatus();
         if (!aiHasApiKey) { aiAppendMessage('system', aiNoKeyMessage()); return; }
 
         const input = document.getElementById('ai-chat-input');
@@ -12259,7 +12270,7 @@ Respond with ONLY the JSON object, nothing else.`;
         document.getElementById('ai-suggestions')?.remove();
         const history = aiRecentHistoryMessages(3); // captured before this turn's own message below
         aiAppendMessage('user', text);
-        if (aiHasApiKey === null) await aiRefreshKeyStatus();
+        if (!aiHasApiKey) await aiRefreshKeyStatus();
         if (!aiHasApiKey) {
             aiAppendMessage('system', aiNoKeyMessage());
             return;
@@ -12831,7 +12842,7 @@ Respond with ONLY the JSON object, nothing else.`;
         await aiEnsurePanelOpen();
         aiAppendMessage('user', `📝 Scanned text:\n${rawText}`);
         let finalText = rawText;
-        if (aiHasApiKey === null) await aiRefreshKeyStatus();
+        if (!aiHasApiKey) await aiRefreshKeyStatus();
         if (!aiHasApiKey) {
             // No cleanup without a key, but item-matching below needs no LLM call at all — still
             // worth running against the raw scan rather than giving up entirely.
@@ -12936,7 +12947,7 @@ Respond with ONLY the JSON object, nothing else.`;
             aiAppendMessage('system', "You don't have permission to update stock in this warehouse.");
             return;
         }
-        if (aiHasApiKey === null) await aiRefreshKeyStatus();
+        if (!aiHasApiKey) await aiRefreshKeyStatus();
         if (!aiHasApiKey) { aiAppendMessage('system', aiNoKeyMessage()); return; }
         const thinking = aiAppendMessage('system', 'Reading the delivery note…');
         let draft;
