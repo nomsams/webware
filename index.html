@@ -309,21 +309,27 @@
         /* --- BIN LOCATOR HOVER PREVIEW (Bin Locator: hover a shelf/bin for a dense item preview) --- */
         .bin-locator-hover-line { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 3999; }
         .bin-locator-hover-line.hidden { display: none; }
-        .bin-locator-hover-line line { stroke: var(--primary); stroke-width: 1.5; }
-        .bin-locator-hover-line circle { fill: var(--primary); }
+        .bin-locator-hover-line line { stroke: var(--danger); stroke-width: 3; stroke-linecap: round; }
+        .bin-locator-hover-line circle { fill: var(--danger); }
         .bin-locator-hover-popover {
             position: fixed; z-index: 4000; background: var(--card-bg); border: 1px solid var(--border);
             border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,0.28); padding: 0.55rem 0.65rem;
-            width: 260px; max-height: 320px; overflow-y: auto; pointer-events: none;
+            width: 260px; max-height: 320px; overflow-y: auto;
         }
         .bin-locator-hover-popover.hidden { display: none; }
-        .bin-locator-hover-popover-title { font-weight: 700; font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 0.35rem; }
-        .bin-locator-hover-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.28rem 0; border-bottom: 1px solid var(--border); }
+        .bin-locator-hover-popover-title { font-weight: 700; font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 0.35rem; position: sticky; top: 0; background: var(--card-bg); }
+        .bin-locator-hover-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.28rem 0; border-bottom: 1px solid var(--border); cursor: pointer; border-radius: 6px; }
         .bin-locator-hover-row:last-child { border-bottom: none; }
+        .bin-locator-hover-row:hover { background: var(--primary-light); }
         .bin-locator-hover-row-name { font-weight: 700; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .bin-locator-hover-row-info { font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .bin-locator-hover-row-qty { font-weight: 800; font-size: 0.78rem; color: var(--primary); flex-shrink: 0; }
-        .bin-locator-hover-more { font-size: 0.7rem; color: var(--text-muted); text-align: center; margin-top: 0.3rem; }
+        .bin-locator-touchpad-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; margin-top: 1rem; }
+        .bin-locator-touchpad-wrap.hidden { display: none; }
+        .bin-locator-touchpad { width: 160px; height: 160px; border-radius: 50%; background: var(--border); border: 2px solid var(--primary); position: relative; touch-action: none; }
+        .bin-locator-touchpad-dot { width: 22px; height: 22px; border-radius: 50%; background: var(--primary); position: absolute; top: 50%; left: 50%; margin: -11px 0 0 -11px; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: background 0.15s; }
+        .bin-locator-touchpad-dot.active { background: var(--danger); }
+        .bin-locator-touchpad-hint { font-size: 0.78rem; color: var(--text-muted); text-align: center; max-width: 260px; }
         .dim-group { margin-bottom: 0.9rem; }
         .dim-group h4 { margin: 0 0 0.35rem; font-size: 0.85rem; }
         .dim-group h4 span { color: var(--text-muted); font-weight: 400; font-size: 0.78rem; }
@@ -1805,22 +1811,42 @@
                 <button class="secondary" id="btn-bin-locator-flat" onclick="setBinLocatorIsoView(false)" style="padding:0.25rem 0.6rem; min-height:auto; font-size:0.78rem;">▦ Flat</button>
                 <button class="secondary" id="btn-bin-locator-iso" onclick="setBinLocatorIsoView(true)" style="padding:0.25rem 0.6rem; min-height:auto; font-size:0.78rem;">🧊 3D</button>
             </span>
+            <label id="bin-locator-touchpad-toggle-wrap" style="display:flex; align-items:center; gap:6px; margin:0; font-size:0.85rem; color:var(--text-muted); cursor:pointer;">
+                <input type="checkbox" id="bin-locator-touchpad-toggle" onchange="onBinLocatorTouchpadChange()" style="width:auto; min-height:unset; margin:0;">
+                👆 Touch Preview
+            </label>
         </div>
         <div class="warehouse-map" id="bin-locator-grid"></div>
-        <div class="iso-canvas hidden" id="bin-locator-iso" onclick="onBinLocatorIsoClick(event)" onmouseover="onBinLocatorIsoHover(event)" onmouseleave="hideBinLocatorHover()"></div>
+        <div class="iso-canvas hidden" id="bin-locator-iso" onclick="onBinLocatorIsoClick(event)" onmouseover="onBinLocatorIsoHover(event)" onmouseleave="hideBinLocatorHoverSoon()"></div>
         <p id="bin-locator-grid-caption" style="color:var(--text-muted); font-size:0.82rem; margin-top:0.5rem;"></p>
+
+        <!-- Optional (off by default) touch-friendly stand-in for hover, since a finger dragged
+             straight over the rack would cover the very cell it's previewing — a separate circular
+             pad off to the side maps 1:1 onto whichever rack view is showing (flat or 3D), so the
+             preview updates as you drag without your finger ever blocking the picture. -->
+        <div id="bin-locator-touchpad-wrap" class="bin-locator-touchpad-wrap hidden">
+            <div id="bin-locator-touchpad" class="bin-locator-touchpad"
+                 ontouchstart="onBinLocatorTouchpadMove(event)" ontouchmove="onBinLocatorTouchpadMove(event)" ontouchend="onBinLocatorTouchpadEnd(event)"
+                 onmousedown="onBinLocatorTouchpadMove(event)">
+                <div id="bin-locator-touchpad-dot" class="bin-locator-touchpad-dot"></div>
+            </div>
+            <p class="bin-locator-touchpad-hint">Drag inside the circle — it maps onto the rack above, so your finger previews a bin without covering it.</p>
+        </div>
 
         <!-- Hover preview: hovering a shelf cell or bin (flat grid, iso rack, or the shelf strip
              below) shows what's stored there without needing to click first — a floating card plus
              a line pointing back at exactly what's being previewed. Fixed-position (viewport
              coordinates), so it works the same over any of the three views without each needing its
-             own positioning context. Pure hover, so touch devices simply don't get it — click/tap
-             still does everything it always did. -->
+             own positioning context. Corner-anchored to whichever of the rack's own container's
+             top-right/bottom-left corners sits farther from the hovered point, so the card itself
+             never lands on top of the rack it's describing. Driven by real mouse hover, or by the
+             touchpad above on a touch device — either way, tapping/clicking a row inside it jumps to
+             that item (see backToBinLocator()); plain click/tap on the rack itself is unchanged. -->
         <svg id="bin-locator-hover-line" class="bin-locator-hover-line hidden" aria-hidden="true">
             <line id="bin-locator-hover-line-el" x1="0" y1="0" x2="0" y2="0"></line>
             <circle id="bin-locator-hover-dot" r="4"></circle>
         </svg>
-        <div id="bin-locator-hover-popover" class="bin-locator-hover-popover hidden"></div>
+        <div id="bin-locator-hover-popover" class="bin-locator-hover-popover hidden" onmouseenter="cancelBinLocatorHoverHide()" onmouseleave="hideBinLocatorHoverSoon()"></div>
 
         <div id="bin-locator-detail" class="hidden" style="margin-top:1.5rem; border-top:1px solid var(--border); padding-top:1rem;">
             <h3 id="bin-locator-detail-title" style="margin-top:0;"></h3>
@@ -9232,9 +9258,21 @@ th { background: #eee; }
             openPackOrderView();
         } else if (navigationContext && navigationContext.type === 'inventering') {
             openInventeringView();
+        } else if (navigationContext && navigationContext.type === 'bin-locator') {
+            backToBinLocator();
         } else {
             showListView('items');
         }
+    }
+
+    // An item opened from the Bin Locator (a shelf-strip bin/list row, or a hover-card row) returns
+    // here instead of the plain item list — same zone and, if a shelf was open, the same shelf strip,
+    // re-rendered rather than reset so an edit made on the item page (a quantity change, say) shows
+    // up immediately.
+    function backToBinLocator() {
+        switchView('bin-locator-view');
+        renderBinLocatorGrid();
+        if (binLocatorSelectedDepth != null && binLocatorSelectedLevel != null) renderBinLocatorShelf(binLocatorSelectedDepth, binLocatorSelectedLevel);
     }
 
     function nextInKit() {
@@ -9825,54 +9863,66 @@ th { background: #eee; }
     }
 
     // ── Bin Locator hover preview: a dense card of what's stored at a shelf/bin, plus a line back to
-    // exactly what's under the cursor — for the flat grid, the isometric rack, and the shelf strip
-    // alike (all three call showBinLocatorHover with their own anchor element and item list). ──
-    const BIN_LOCATOR_HOVER_MAX_ROWS = 6;
+    // exactly what's under the cursor — for the flat grid, the isometric rack, the shelf strip, and
+    // the touch pad below alike (all four call showBinLocatorHover with their own anchor element and
+    // item list). Every row renders (the popover's own max-height/overflow-y scrolls the rest into
+    // view — nothing is truncated with a "+N more" stub that can't actually be reached), and each
+    // row jumps straight to that item on click/tap.
     function binLocatorHoverRowsHtml(items) {
-        const shown = items.slice(0, BIN_LOCATOR_HOVER_MAX_ROWS);
-        const rows = shown.map(item => {
+        return items.map(item => {
             const thumb = item.imageThumbUrl
-                ? `<img src="${escapeHtml(item.imageThumbUrl)}" alt="" style="width:28px; height:28px; object-fit:cover; border-radius:5px; flex-shrink:0;">`
-                : `<div style="width:28px; height:28px; border-radius:5px; flex-shrink:0; background:var(--border); display:flex; align-items:center; justify-content:center; font-size:0.8rem;" aria-hidden="true">📦</div>`;
+                ? `<img src="${escapeHtml(item.imageThumbUrl)}" alt="" style="width:28px; height:28px; object-fit:cover; border-radius:5px; flex-shrink:0; pointer-events:none;">`
+                : `<div style="width:28px; height:28px; border-radius:5px; flex-shrink:0; background:var(--border); display:flex; align-items:center; justify-content:center; font-size:0.8rem; pointer-events:none;" aria-hidden="true">📦</div>`;
             const num1 = (item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
             const mfr = (item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
             const info = [mfr, num1].filter(Boolean).join(' · ');
             const qty = `${item.Numberofitems || '0'}${item.UnitType ? ' ' + item.UnitType : ''}`;
-            return `<div class="bin-locator-hover-row">
+            return `<div class="bin-locator-hover-row" data-hover-btk="${escapeHtml(item.BTKnumber)}" role="button" tabindex="0">
                 ${thumb}
-                <div style="min-width:0; flex:1;">
+                <div style="min-width:0; flex:1; pointer-events:none;">
                     <div class="bin-locator-hover-row-name">${escapeHtml(item['itemname(english)'] || item['itemname(swedish)'] || item.BTKnumber)}</div>
                     ${info ? `<div class="bin-locator-hover-row-info">${escapeHtml(info)}</div>` : ''}
                 </div>
-                <div class="bin-locator-hover-row-qty">${escapeHtml(qty)}</div>
+                <div class="bin-locator-hover-row-qty" style="pointer-events:none;">${escapeHtml(qty)}</div>
             </div>`;
         }).join('');
-        const more = items.length > BIN_LOCATOR_HOVER_MAX_ROWS ? `<div class="bin-locator-hover-more">+${items.length - BIN_LOCATOR_HOVER_MAX_ROWS} more</div>` : '';
-        return rows + more;
     }
 
     // anchorEl: the hovered DOM element (grid cell, shelf-strip cell, or an SVG bin/shelf shape in
-    // the isometric canvas) — its own screen position is the line's anchor point. Fixed-position
-    // (viewport coordinates) throughout, so the same code works for all three without needing a
-    // shared positioned-ancestor. Prefers drawing the card to the right of the anchor, flips to the
-    // left if that would run off-screen, and clamps vertically so it never runs off the top/bottom.
-    function showBinLocatorHover(anchorEl, items, titleText) {
+    // the isometric canvas) — its own screen position is the line's anchor point. containerEl: the
+    // rack view it belongs to (#bin-locator-grid / #bin-locator-iso / #bin-locator-shelf) — the card
+    // is placed at whichever of ITS OWN top-right or bottom-left corner sits farther from the
+    // anchor, so the card lands clear of the rack instead of on top of it, then clamped into the
+    // viewport in case that corner is off-screen. Fixed-position (viewport coordinates) throughout,
+    // so the same code works for all three views without needing a shared positioned ancestor.
+    function showBinLocatorHover(anchorEl, items, titleText, containerEl) {
         if (!items || !items.length) { hideBinLocatorHover(); return; }
+        cancelBinLocatorHoverHide();
         const popover = document.getElementById('bin-locator-hover-popover');
         popover.innerHTML = `<div class="bin-locator-hover-popover-title">${escapeHtml(titleText)}</div>${binLocatorHoverRowsHtml(items)}`;
+        popover.querySelectorAll('[data-hover-btk]').forEach(row => {
+            row.onclick = () => { hideBinLocatorHover(); openItem(row.dataset.hoverBtk, { type: 'bin-locator' }); };
+        });
         popover.classList.remove('hidden');
 
-        const rect = anchorEl.getBoundingClientRect();
-        const anchorX = rect.left + rect.width / 2, anchorY = rect.top + rect.height / 2;
-        const margin = 14, edge = 8;
+        const aRect = anchorEl.getBoundingClientRect();
+        const cRect = (containerEl || anchorEl).getBoundingClientRect();
+        const anchorX = aRect.left + aRect.width / 2, anchorY = aRect.top + aRect.height / 2;
+        const edge = 8, gap = 10;
         const pw = popover.offsetWidth, ph = popover.offsetHeight;
-        let boxX = rect.right + margin, onRight = true;
-        if (boxX + pw > window.innerWidth - edge) { boxX = rect.left - margin - pw; onRight = false; }
-        boxX = Math.max(edge, boxX);
-        const boxY = Math.max(edge, Math.min(window.innerHeight - ph - edge, anchorY - ph / 2));
+        // Only these two corners, as requested — always clear of the rack on both axes, whichever
+        // one the hovered point is farthest from.
+        const topRight = { x: cRect.right, y: cRect.top, dist: Math.hypot(cRect.right - anchorX, cRect.top - anchorY) };
+        const bottomLeft = { x: cRect.left, y: cRect.bottom, dist: Math.hypot(cRect.left - anchorX, cRect.bottom - anchorY) };
+        const useTopRight = topRight.dist >= bottomLeft.dist;
+        let boxX = useTopRight ? topRight.x + gap : bottomLeft.x - gap - pw;
+        let boxY = useTopRight ? topRight.y : bottomLeft.y - ph;
+        boxX = Math.max(edge, Math.min(window.innerWidth - pw - edge, boxX));
+        boxY = Math.max(edge, Math.min(window.innerHeight - ph - edge, boxY));
         popover.style.left = boxX + 'px';
         popover.style.top = boxY + 'px';
 
+        const onRight = boxX > anchorX;
         const lineX = onRight ? boxX : boxX + pw;
         const lineY = Math.max(boxY + 12, Math.min(boxY + ph - 12, anchorY));
         document.getElementById('bin-locator-hover-line-el').setAttribute('x1', anchorX);
@@ -9884,15 +9934,24 @@ th { background: #eee; }
         document.getElementById('bin-locator-hover-line').classList.remove('hidden');
     }
     function hideBinLocatorHover() {
+        clearTimeout(binLocatorHoverHideTimer);
         document.getElementById('bin-locator-hover-popover').classList.add('hidden');
         document.getElementById('bin-locator-hover-line').classList.add('hidden');
     }
+    // A short grace period before actually hiding — without it, moving the mouse from the hovered
+    // cell toward the popover (to click an item in it) crosses empty space first and the card would
+    // vanish before the pointer ever reaches it. The popover's own onmouseenter cancels this; a real
+    // mouseleave from the popover, or hovering a different cell, lets it run.
+    var binLocatorHoverHideTimer = null;
+    function hideBinLocatorHoverSoon() { binLocatorHoverHideTimer = setTimeout(hideBinLocatorHover, 200); }
+    function cancelBinLocatorHoverHide() { clearTimeout(binLocatorHoverHideTimer); }
     // The isometric canvas is one SVG string dropped in via innerHTML (buildIsoRackSVG), so its
     // bins/shelves can't get their own per-element mouseenter handlers the way the flat grid's and
     // shelf strip's plain <div> cells do below — delegate instead, exactly like onBinLocatorIsoClick
     // already does for tapping. Hovering a specific bin (data-bin present) previews just that
     // bin/Row; hovering the shelf board itself (data-depth/level only) previews the whole shelf,
-    // same as a flat grid cell.
+    // same as a flat grid cell. Also the touch pad's own virtual-hover target (see
+    // onBinLocatorTouchpadMove) when the isometric view is what's showing.
     function onBinLocatorIsoHover(e) {
         const el = e.target.closest('[data-depth][data-level]');
         if (!el) { hideBinLocatorHover(); return; }
@@ -9903,7 +9962,56 @@ th { background: #eee; }
         if (!items.length) { hideBinLocatorHover(); return; }
         const depthLabel = depthWord(binLocatorZone, depth);
         const label = bin ? `${depthLabel} · Level ${level} · Bin ${bin}${row > 1 ? ` · Row ${row}` : ''}` : `${depthLabel} · Level ${level}`;
-        showBinLocatorHover(el, items, label);
+        showBinLocatorHover(el, items, label, document.getElementById('bin-locator-iso'));
+    }
+
+    // ── Touch pad: an indirect stand-in for hover on touch devices (off by default, "👆 Touch
+    // Preview" checkbox) — dragging inside the circle maps proportionally onto whichever rack view
+    // is currently showing and re-uses the exact same per-cell hover already wired up below
+    // (cell.onmouseenter) or onBinLocatorIsoHover, via document.elementFromPoint at the mapped
+    // screen position, rather than duplicating the "what's at this spot" lookup a third time. ──
+    function onBinLocatorTouchpadChange() {
+        const on = document.getElementById('bin-locator-touchpad-toggle').checked;
+        document.getElementById('bin-locator-touchpad-wrap').classList.toggle('hidden', !on);
+        if (!on) hideBinLocatorHover();
+    }
+    function binLocatorActiveRackContainer() {
+        const isoOn = isoBinViewEnabled && typeof window.buildIsoRackSVG === 'function';
+        return document.getElementById(isoOn ? 'bin-locator-iso' : 'bin-locator-grid');
+    }
+    function onBinLocatorTouchpadMove(e) {
+        e.preventDefault();
+        const pad = document.getElementById('bin-locator-touchpad');
+        const rect = pad.getBoundingClientRect();
+        const point = e.touches && e.touches[0] ? e.touches[0] : e;
+        const r = rect.width / 2;
+        const cx = rect.left + r, cy = rect.top + r;
+        let dx = point.clientX - cx, dy = point.clientY - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > r) { dx = dx / dist * r; dy = dy / dist * r; }
+
+        const dot = document.getElementById('bin-locator-touchpad-dot');
+        dot.style.transform = `translate(${dx}px, ${dy}px)`;
+        dot.classList.add('active');
+
+        const container = binLocatorActiveRackContainer();
+        const cRect = container.getBoundingClientRect();
+        if (!cRect.width || !cRect.height) return;
+        const nx = (dx / r + 1) / 2, ny = (dy / r + 1) / 2; // -1..1 -> 0..1
+        const targetX = cRect.left + cRect.width * nx;
+        const targetY = cRect.top + cRect.height * ny;
+        const el = document.elementFromPoint(targetX, targetY);
+        if (!el) { hideBinLocatorHover(); return; }
+        if (container.id === 'bin-locator-iso') { onBinLocatorIsoHover({ target: el }); return; }
+        const cell = el.closest('.map-cell');
+        if (cell && typeof cell.onmouseenter === 'function') cell.onmouseenter(); else hideBinLocatorHover();
+    }
+    function onBinLocatorTouchpadEnd() {
+        // Lifting the finger doesn't hide the card — there's no mouse to "leave" with on touch, and
+        // the whole point of dragging here instead of on the rack itself is to then be able to tap
+        // an item in the now-still card without it disappearing first.
+        document.getElementById('bin-locator-touchpad-dot').style.transform = '';
+        document.getElementById('bin-locator-touchpad-dot').classList.remove('active');
     }
 
     function renderBinLocatorGrid() {
@@ -9944,8 +10052,8 @@ th { background: #eee; }
                 }
                 cell.onclick = () => selectBinLocatorCell(depth, level);
                 if (count > 0) {
-                    cell.onmouseenter = () => showBinLocatorHover(cell, itemsAtLocation(binLocatorZone, depth, level), `${depthWord(binLocatorZone, depth)} · Level ${level}`);
-                    cell.onmouseleave = hideBinLocatorHover;
+                    cell.onmouseenter = () => showBinLocatorHover(cell, itemsAtLocation(binLocatorZone, depth, level), `${depthWord(binLocatorZone, depth)} · Level ${level}`, grid);
+                    cell.onmouseleave = hideBinLocatorHoverSoon;
                 }
                 grid.appendChild(cell);
             }
@@ -9983,14 +10091,14 @@ th { background: #eee; }
                 ? itemsInBin.map(i => i['itemname(english)'] || i['itemname(swedish)'] || i.BTKnumber).join(', ')
                 : `Bin ${bin} — empty`;
             cell.innerText = itemsInBin.length ? String(bin) : '';
-            if (itemsInBin.length === 1) cell.onclick = () => openItem(itemsInBin[0].BTKnumber, { type: 'global' });
+            if (itemsInBin.length === 1) cell.onclick = () => openItem(itemsInBin[0].BTKnumber, { type: 'bin-locator' });
             // More than one item shares this bin (stacked in different Rows) — no single item to jump
             // to, so instead light up exactly which rows below belong to this bin, clearing whichever
             // bin was lit before (never accumulating highlights across clicks).
             else if (itemsInBin.length > 1) cell.onclick = () => highlightBinLocatorBin(bin);
             if (itemsInBin.length) {
-                cell.onmouseenter = () => showBinLocatorHover(cell, itemsInBin, `${depthLabel} · Level ${level} · Bin ${bin}`);
-                cell.onmouseleave = hideBinLocatorHover;
+                cell.onmouseenter = () => showBinLocatorHover(cell, itemsInBin, `${depthLabel} · Level ${level} · Bin ${bin}`, shelf);
+                cell.onmouseleave = hideBinLocatorHoverSoon;
             }
             shelf.appendChild(cell);
         }
@@ -10026,7 +10134,7 @@ th { background: #eee; }
             }).join('');
             listEl.querySelectorAll('[data-locator-btk]').forEach(el => {
                 const btk = el.dataset.locatorBtk;
-                el.onclick = () => openItem(btk, { type: 'global' });
+                el.onclick = () => openItem(btk, { type: 'bin-locator' });
                 el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } };
             });
         }
