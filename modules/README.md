@@ -250,6 +250,12 @@ node --test modules/tests/*.test.js
     side-by-side sections a bin is in, not a second physical row, so `bays`/`binsPerLevel` fold the
     section count in and `depthCount` (real front-to-back rows) is always 1; a `'pallet'` zone keeps
     Depth as real racks (`sectioned: false`, `depthCount` = the configured/observed depth).
+    `rows` (a shelf's recorded/default row capacity, from `rack_depth_cm`/`bin_depth_cm`) is
+    deliberately **not** widened by `extra.minRows` — a genuinely uniform physical spec shouldn't
+    shrink because one bin somewhere happens to hold more than the rest. A separate
+    `maxRowsAnywhere` folds `extra.minRows` in instead, purely so the scene's own bounds account
+    for whatever the deepest real stack anywhere in the rack needs; `buildIsoRackSVG` below is what
+    actually decides, bin by bin, how many rows *that* bin draws.
   - `buildIsoRackSVG(geom, opts)` — one rack area, drawn to match `geom.style`: **pallet racking**
     gets a thick orange beam at each level (`iso-beam-top/front/side` — no solid deck, since a pallet
     sits directly on the beams) and yellow corner guards at floor level on the nearest rack
@@ -263,8 +269,13 @@ node --test modules/tests/*.test.js
     (`opts.highlight`) — one **solid blue** box with a coordinates pill, painted at its true position
     in painter's order plus an opaque-ish overlay copy — reads through a rack standing in front of
     it, in both styles.
-    `opts.occupied` tints bins that hold items (the Bin Locator), one flat `--primary`-derived tint
-    regardless of how many; `opts.heatmap` (off by default) instead scales each occupied bin's own
+    How deep any one bin is actually *drawn* is decided per bin, not shared across the whole shelf:
+    `opts.occupied`'s own Row values feed a `binRowsAt(depth,level,bin)` lookup (defaulting to
+    `geom.rows` where nothing's recorded there), and a bin with several items stacked front-to-back
+    is sliced thinner right at that position while its neighbors on the same shelf keep the normal,
+    full depth — not the whole shelf shrinking to match whichever bin anywhere happens to be busiest.
+    `opts.occupied` also tints bins that hold items (the Bin Locator), one flat `--primary`-derived
+    tint regardless of how many; `opts.heatmap` (off by default) instead scales each occupied bin's own
     fill by its count relative to the busiest bin in the rack — light blue barely-occupied, solid
     deep blue at the busiest — via an inline `style=` override rather than a fixed CSS class, since
     the color itself is now data-dependent, not just on/off. `opts.selected` outlines a shelf,
@@ -284,8 +295,9 @@ node --test modules/tests/*.test.js
   Depth staying real racks, a sectioned zone drawing every section's occupied bins rather than just
   the first, heatmap fill scaling with an occupied bin's count in both the sectioned and
   non-sectioned draw paths (and staying off by default), label escaping, occupied/selected/interactive
-  markup, dimension callouts, and "every renderer stays finite over odd inputs"). SQL for the sizes
-  it reads is `supabase/schema_zone_dimensions.sql`.
+  markup, dimension callouts, a deeply-stacked bin slicing thinner without shrinking a
+  lightly-stacked neighbor on the same shelf, and "every renderer stays finite over odd inputs").
+  SQL for the sizes it reads is `supabase/schema_zone_dimensions.sql`.
 - **`json-extract.js`** — **wired in**: reads JSON objects out of free-form model output. Used by
   `order-parser.js` and `delivery-note-parser.js` for their replies and, as
   `window.extractJsonObjects`, by the AI assistant to read which action a reply asks for. Replaces

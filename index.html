@@ -1782,6 +1782,10 @@
                 <input type="checkbox" id="bin-locator-heatmap-toggle" onchange="onBinLocatorHeatmapChange()" style="width:auto; min-height:unset; margin:0;">
                 🔥 Heatmap
             </label>
+            <span class="segmented-mini" id="bin-locator-view-mode-toggle">
+                <button class="secondary" id="btn-bin-locator-flat" onclick="setBinLocatorIsoView(false)" style="padding:0.25rem 0.6rem; min-height:auto; font-size:0.78rem;">▦ Flat</button>
+                <button class="secondary" id="btn-bin-locator-iso" onclick="setBinLocatorIsoView(true)" style="padding:0.25rem 0.6rem; min-height:auto; font-size:0.78rem;">🧊 3D</button>
+            </span>
         </div>
         <div class="warehouse-map" id="bin-locator-grid"></div>
         <div class="iso-canvas hidden" id="bin-locator-iso" onclick="onBinLocatorIsoClick(event)"></div>
@@ -9602,6 +9606,16 @@ th { background: #eee; }
         localStorage.setItem('bin-locator-heatmap', binLocatorHeatmapEnabled ? '1' : '0');
         renderBinLocatorGrid();
     }
+    // Same underlying setting Settings → "🧊 Isometric bin locator" has — this is just a quicker way
+    // to flip it without leaving the Bin Locator, not a separate per-view state. Keeps the Settings
+    // checkbox in sync too, so either place always reflects the same live value.
+    function setBinLocatorIsoView(iso) {
+        isoBinViewEnabled = iso;
+        localStorage.setItem('iso-bin-view', iso ? '1' : '0');
+        const settingsCheckbox = document.getElementById('iso-bin-view-enabled');
+        if (settingsCheckbox) settingsCheckbox.checked = iso;
+        renderBinLocatorGrid();
+    }
     function onBinLocatorZoneChange() {
         binLocatorZone = document.getElementById('bin-locator-zone-select').value;
         binLocatorSelectedDepth = null;
@@ -9664,6 +9678,8 @@ th { background: #eee; }
         const caption = document.getElementById('bin-locator-grid-caption');
         const bounds = getZoneBounds(binLocatorZone);
         const isoOn = isoBinViewEnabled && typeof window.buildIsoRackSVG === 'function';
+        document.getElementById('btn-bin-locator-flat').classList.toggle('active', !isoOn);
+        document.getElementById('btn-bin-locator-iso').classList.toggle('active', isoOn);
         const isoCanvas = document.getElementById('bin-locator-iso');
         isoCanvas.classList.toggle('hidden', !isoOn);
         grid.classList.toggle('hidden', isoOn);
@@ -12087,8 +12103,14 @@ ${css}
         if (!sb) { aiHasApiKey = false; return false; }
         try {
             const { data, error } = await sb.rpc('has_llm_api_key');
+            // Logged rather than silently swallowed: a shared key can be genuinely configured (the
+            // Settings page confirms it, has_llm_api_key() itself returns true when queried directly)
+            // while this particular call still fails for a reason worth seeing — an expired session
+            // token, a network hiccup, anything RPC-shaped — console.error is also captured into
+            // Settings → 🖥️ Console, so it's visible without needing the browser's own devtools.
+            if (error) console.error("AI key status check failed:", error);
             aiHasApiKey = !error && !!data;
-        } catch (e) { aiHasApiKey = false; }
+        } catch (e) { console.error("AI key status check threw:", e); aiHasApiKey = false; }
         return aiHasApiKey;
     }
 

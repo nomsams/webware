@@ -69,7 +69,12 @@ test('resolveRackGeometry treats the older shelf width as the bay width, and spl
 test('resolveRackGeometry widens to fit a bin, Row, or Rack beyond the configured size, and ignores junk dimensions', () => {
   const wide = resolveRackGeometry({ zone: 'A' }, { maxDepth: 1, maxLevel: 1, maxBin: 4 }, { minBin: 9, minRows: 3, minDepth: 5 });
   assert.equal(wide.binsPerLevel, 9);
-  assert.equal(wide.rows, 3);
+  // rows itself stays the shelf's own recorded/default capacity (1 here — nothing was recorded) and
+  // is NOT widened by minRows — see buildIsoRackSVG's own per-bin binRowsAt(), which is what widens
+  // a specific busy bin now, not this shelf-wide default. maxRowsAnywhere is the one minRows widens,
+  // purely as an upper bound for the scene's own MAX_DRAWN_BINS estimate.
+  assert.equal(wide.rows, 1);
+  assert.equal(wide.maxRowsAnywhere, 3);
   assert.equal(wide.depthCount, 5); // an item actually recorded at Rack 5 is never silently dropped just because the zone's own configured max_rack says less
   const junk = resolveRackGeometry({ zone: 'A', rack_width_cm: 'abc', rack_depth_cm: -5, shelf_height_cm: NaN, bin_width_cm: 0 }, { maxDepth: 1, maxLevel: 1, maxBin: 2 });
   assert.equal(junk.recorded.rackW, null);
@@ -202,6 +207,29 @@ test('buildIsoRackSVG tints occupied bins, outlines a selected shelf, and marks 
   assert.match(svg, /data-depth="1" data-level="1" data-bin="2" data-row="1"/);
   assert.ok(svg.includes('B 1-1 2-1 — 3 items'));
   assert.doesNotMatch(buildIsoRackSVG(g, {}), /data-depth/);
+});
+
+test('buildIsoRackSVG: a bin stacked several rows deep is sliced thinner right there, without shrinking a lightly-stacked neighbor on the same shelf', () => {
+  const g = resolveRackGeometry({ zone: 'A' }, { maxDepth: 1, maxLevel: 1, maxBin: 2 }, { minRows: 4 });
+  const occupied = [];
+  for (let row = 1; row <= 4; row++) occupied.push({ depth: 1, level: 1, bin: 1, row }); // bin 1: 4 deep
+  occupied.push({ depth: 1, level: 1, bin: 2, row: 1 }); // bin 2, same shelf: just 1
+  const svg = buildIsoRackSVG(g, { occupied, interactive: true });
+  // bin 1 draws 4 row-slices of its own; bin 2 draws only 1 - it is not also forced into quarters
+  // just because bin 1, elsewhere on the same shelf, needed that many rows.
+  assert.equal(count(svg, /data-bin="1" data-row="\d+"/g), 4);
+  assert.equal(count(svg, /data-bin="2" data-row="\d+"/g), 1);
+});
+
+test('buildIsoRackSVG sectioned: the same per-bin depth-slicing applies within each section', () => {
+  const g = resolveRackGeometry({ zone: 'A', rack_style: 'shelving' }, { maxDepth: 2, maxLevel: 1, maxBin: 2 }, { minRows: 3 });
+  const occupied = [
+    { depth: 1, level: 1, bin: 1, row: 1 }, { depth: 1, level: 1, bin: 1, row: 2 }, { depth: 1, level: 1, bin: 1, row: 3 },
+    { depth: 1, level: 1, bin: 2, row: 1 },
+  ];
+  const svg = buildIsoRackSVG(g, { occupied, interactive: true });
+  assert.equal(count(svg, /data-depth="1" data-level="1" data-bin="1" data-row="\d+"/g), 3);
+  assert.equal(count(svg, /data-depth="1" data-level="1" data-bin="2" data-row="\d+"/g), 1);
 });
 
 test('buildIsoRackSVG heatmap: an occupied bin\'s fill scales with its count relative to the busiest bin, off by default', () => {

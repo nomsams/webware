@@ -102,8 +102,17 @@ export function resolveRackGeometry(zone, bounds, extra = {}) {
   const cellW = runLength / binsPerLevel;
 
   const rackDRec = rec.rackD || rec.shelfD;
-  const rows = clamp(1, MAX_ROWS_PER_SHELF, Math.max(Math.floor(extra.minRows || 1),
-    (rec.binD && rackDRec) ? Math.floor(rackDRec / rec.binD) : 1));
+  // The shelf's own recorded capacity (rack depth / bin depth) — a genuine physical spec, uniform
+  // across every bin on this shelf, since a shelf is normally built with same-sized bin slots.
+  // Deliberately NOT widened by how many rows any one bin actually happens to hold right now — see
+  // buildIsoRackSVG's own per-bin row count, which widens a bin past this default only when THAT
+  // bin specifically needs it (real items stacked deeper than the recorded slot), rather than
+  // slicing every bin on the shelf as thin as the single busiest one anywhere in the whole rack.
+  const rows = clamp(1, MAX_ROWS_PER_SHELF, (rec.binD && rackDRec) ? Math.floor(rackDRec / rec.binD) : 1);
+  // How far the scene's own bounds (MAX_DRAWN_BINS below) need to account for, given a real item
+  // recorded deeper than that default capacity — the same "widen so nothing's cut off, never shrink
+  // everything else to match" idea minBin/minDepth already use elsewhere in this function.
+  const maxRowsAnywhere = clamp(1, MAX_ROWS_PER_SHELF, Math.max(rows, Math.floor(extra.minRows || 1)));
   const rackD = rackDRec || (rec.binD ? rec.binD * rows : ISO_DEFAULTS.rackD);
   const gap = ISO_DEFAULTS.gap;
   const totalDepth = depthCount * rackD + (depthCount - 1) * gap;
@@ -126,7 +135,7 @@ export function resolveRackGeometry(zone, bounds, extra = {}) {
   const binDrawD = rec.binD ? Math.min(rec.binD, binD) : binD;
 
   return {
-    zone: z.zone || '', style, sectioned, sections, binsPerSection, bays, depthCount, levels, binsPerLevel, rows,
+    zone: z.zone || '', style, sectioned, sections, binsPerSection, bays, depthCount, levels, binsPerLevel, rows, maxRowsAnywhere,
     bayW, runLength, cellW, rackD, gap, totalDepth, boardT, clear, pitch, height, binH,
     binD, binDrawW, binDrawD,
     recorded: rec,
@@ -283,10 +292,22 @@ export function buildIsoRackSVG(geom, opts = {}) {
   const sceneMinX = Math.min(...corners.map((c) => c[0])), sceneMaxX = Math.max(...corners.map((c) => c[0]));
 
   const occ = occupiedMap(occupied);
-  const totalBins = g.depthCount * g.levels * g.rows * g.binsPerLevel;
+  const totalBins = g.depthCount * g.levels * g.maxRowsAnywhere * g.binsPerLevel;
   const drawEmptyBins = totalBins <= MAX_DRAWN_BINS;
   const dataAttrs = (d, l, b, r) => (interactive ? ` data-depth="${d}" data-level="${l}"${b ? ` data-bin="${b}"` : ''}${r ? ` data-row="${r}"` : ''}` : '');
   const codeFor = (d, l, b, r) => formatLocationCode(g.zone, d, l, b, r);
+  // How many rows are actually stacked at THIS specific (depth, level, bin) position — not the
+  // worst case anywhere in the rack. A bin with 7 real items stacked deep divides into 7ths at its
+  // own position; a bin right next to it with only 1 item keeps the shelf's normal, full depth
+  // (g.rows — the recorded capacity, or 1 with nothing recorded) rather than the whole shelf being
+  // sliced as thin as whichever bin happens to be busiest anywhere in the rack.
+  const rowsAt = new Map();
+  (occupied || []).forEach((o) => {
+    const key = `${o.depth}|${o.level}|${o.bin}`;
+    rowsAt.set(key, Math.max(rowsAt.get(key) || 1, o.row || 1));
+  });
+  const binRowsAt = (d, l, b) => clamp(1, MAX_ROWS_PER_SHELF, Math.max(g.rows, rowsAt.get(`${d}|${l}|${b}`) || 1));
+  const binDepthAt = (d, l, b) => g.rackD / binRowsAt(d, l, b);
   // opts.heatmap: an occupied bin's own fill scales with its count relative to the busiest bin in
   // this rack — light blue for barely-occupied, solid deep blue for the busiest — instead of every
   // occupied bin getting the same flat .iso-bin-occupied tint. Same hue/curve as index.html's own
@@ -316,16 +337,23 @@ export function buildIsoRackSVG(geom, opts = {}) {
   let hl = null;
   const drawBlueBin = (spec) => {
     const { d, l, b, r } = spec;
+    // Same per-bin row count as the main draw loop below, widened to at least `r` in case this
+    // exact bin isn't in `occupied` at all — the item's own Bin Location Map only ever passes its
+    // own `highlight`, never the rest of the shelf's occupancy, so binRowsAt() alone would fall back
+    // to the shelf's plain default and could cut a deeply-stacked Row off entirely.
+    const thisRows = clamp(1, MAX_ROWS_PER_SHELF, Math.max(binRowsAt(d, l, b), r));
+    const thisBinD = g.rackD / thisRows;
     // Sectioned: d is which section, offsetting x instead of y — there is only ever one real y (the
     // single physical row), with just Row making the small front-to-back offset within it.
     const cx0 = g.sectioned ? (d - 1) * g.bayW + (b - 1) * g.cellW : (b - 1) * g.cellW;
     const cx1 = cx0 + g.cellW;
-    const cy0 = g.sectioned ? (r - 1) * g.binD : (d - 1) * (g.rackD + g.gap) + (r - 1) * g.binD;
-    const cy1 = cy0 + g.binD;
+    const cy0 = g.sectioned ? (r - 1) * thisBinD : (d - 1) * (g.rackD + g.gap) + (r - 1) * thisBinD;
+    const cy1 = cy0 + thisBinD;
     const z0 = (l - 1) * g.pitch + g.boardT, z1 = z0 + g.binH;
     // the recorded bin size, centred in its cell — and never smaller than a readable blob, however big the rack is
     const fit = (c0, c1, size) => { const c = (c0 + c1) / 2, w = Math.max(size, minSize); return [c - w / 2, c + w / 2]; };
-    const [bx0, bx1] = fit(cx0, cx1, g.binDrawW), [by0, by1] = fit(cy0, cy1, g.binDrawD);
+    const thisBinDrawD = g.recorded.binD ? Math.min(g.recorded.binD, thisBinD) : thisBinD;
+    const [bx0, bx1] = fit(cx0, cx1, g.binDrawW), [by0, by1] = fit(cy0, cy1, thisBinDrawD);
     const bz1 = Math.max(z1, z0 + minSize);
     S.els.push('<g class="iso-hl">');
     S.box('iso-hl-front', 'iso-hl-side', 'iso-hl-top', bx0, by0, z0, bx1, by1, bz1, interactive ? ` data-depth="${d}" data-level="${l}" data-bin="${b}" data-row="${r}"` : '');
@@ -369,12 +397,18 @@ export function buildIsoRackSVG(geom, opts = {}) {
         S.poly(`${topCls}${isSel ? ' iso-shelf-selected' : ''}${interactive ? ' iso-click' : ''}`, [[sx0, y0, zt], [sx1, y0, zt], [sx1, y1, zt], [sx0, y1, zt]], dataAttrs(d, l), isSel || !interactive ? '' : `Section ${d} · Level ${l}`);
         S.poly(frontCls, [[sx0, y0, zb], [sx1, y0, zb], [sx1, y0, zt], [sx0, y0, zt]]);
         if (d === g.sections) S.poly(sideCls, [[sx1, y0, zb], [sx1, y1, zb], [sx1, y1, zt], [sx1, y0, zt]]);
-        for (let r = g.rows; r >= 1; r--) {
-          for (let b = 1; b <= g.binsPerSection; b++) {
+        // Bin outer, Row inner (not the other way around): each bin's own row count depends on what's
+        // actually stacked at THAT bin — see binRowsAt() — so the depth a Row slice gets drawn at
+        // (ry0/ry1) has to be recomputed per bin, not shared across the whole shelf. Bins never
+        // occlude each other (disjoint x ranges, same y range), so this order is still exactly as
+        // correct for painter's-algorithm purposes as the old Row-outer one was.
+        for (let b = 1; b <= g.binsPerSection; b++) {
+          const thisRows = binRowsAt(d, l, b), thisBinD = binDepthAt(d, l, b);
+          for (let r = thisRows; r >= 1; r--) {
             const count = occ.get(`${d}|${l}|${b}|${r}`) || 0;
             if (count || drawEmptyBins) {
               const x0 = sx0 + (b - 1) * g.cellW, x1 = x0 + g.cellW;
-              const ry0 = y0 + (r - 1) * g.binD, ry1 = ry0 + g.binD;
+              const ry0 = y0 + (r - 1) * thisBinD, ry1 = ry0 + thisBinD;
               const title = interactive || count ? `${codeFor(d, l, b, r)}${count ? ` — ${count} item${count > 1 ? 's' : ''}` : ''}` : '';
               S.poly(`iso-bin${count ? ' iso-bin-occupied' : ''}${interactive ? ' iso-click' : ''}`, [[x0, ry0, zt], [x1, ry0, zt], [x1, ry1, zt], [x0, ry1, zt]], dataAttrs(d, l, b, r) + heatmapAttrs(count), title);
             }
@@ -402,12 +436,16 @@ export function buildIsoRackSVG(geom, opts = {}) {
         S.poly(`${topCls}${isSel ? ' iso-shelf-selected' : ''}${interactive ? ' iso-click' : ''}`, [[0, y0, zt], [L, y0, zt], [L, y1, zt], [0, y1, zt]], dataAttrs(d, l), isSel || !interactive ? '' : `Rack ${d} · Level ${l}`);
         S.poly(frontCls, [[0, y0, zb], [L, y0, zb], [L, y0, zt], [0, y0, zt]]);
         S.poly(sideCls, [[L, y0, zb], [L, y1, zb], [L, y1, zt], [L, y0, zt]]);
-        for (let r = g.rows; r >= 1; r--) {
-          for (let b = 1; b <= g.binsPerLevel; b++) {
+        // Bin outer, Row inner — same reasoning as the sectioned rack's own loop above: each bin's
+        // row count (and so the depth a Row slice draws at) depends on what's actually stacked at
+        // THAT bin, not shared uniformly across the whole shelf.
+        for (let b = 1; b <= g.binsPerLevel; b++) {
+          const thisRows = binRowsAt(d, l, b), thisBinD = binDepthAt(d, l, b);
+          for (let r = thisRows; r >= 1; r--) {
             const count = occ.get(`${d}|${l}|${b}|${r}`) || 0;
             if (count || drawEmptyBins) {
               const x0 = (b - 1) * g.cellW, x1 = b * g.cellW;
-              const ry0 = y0 + (r - 1) * g.binD, ry1 = ry0 + g.binD;
+              const ry0 = y0 + (r - 1) * thisBinD, ry1 = ry0 + thisBinD;
               const title = interactive || count ? `${codeFor(d, l, b, r)}${count ? ` — ${count} item${count > 1 ? 's' : ''}` : ''}` : '';
               S.poly(`iso-bin${count ? ' iso-bin-occupied' : ''}${interactive ? ' iso-click' : ''}`, [[x0, ry0, zt], [x1, ry0, zt], [x1, ry1, zt], [x0, ry1, zt]], dataAttrs(d, l, b, r) + heatmapAttrs(count), title);
             }
