@@ -1826,11 +1826,11 @@
              preview updates as you drag without your finger ever blocking the picture. -->
         <div id="bin-locator-touchpad-wrap" class="bin-locator-touchpad-wrap hidden">
             <div id="bin-locator-touchpad" class="bin-locator-touchpad"
-                 ontouchstart="onBinLocatorTouchpadMove(event)" ontouchmove="onBinLocatorTouchpadMove(event)" ontouchend="onBinLocatorTouchpadEnd(event)"
-                 onmousedown="onBinLocatorTouchpadMove(event)">
+                 ontouchstart="onBinLocatorTouchpadTouchMove(event)" ontouchmove="onBinLocatorTouchpadTouchMove(event)" ontouchend="onBinLocatorTouchpadEnd(event)"
+                 onmousedown="onBinLocatorTouchpadMouseDown(event)">
                 <div id="bin-locator-touchpad-dot" class="bin-locator-touchpad-dot"></div>
             </div>
-            <p class="bin-locator-touchpad-hint">Drag inside the circle — it maps onto the rack above, so your finger previews a bin without covering it.</p>
+            <p class="bin-locator-touchpad-hint">Drag inside the circle — the dot shows exactly where you are and stays put when you let go; it maps onto the rack above, so your finger previews a bin without covering it.</p>
         </div>
 
         <!-- Hover preview: hovering a shelf cell or bin (flat grid, iso rack, or the shelf strip
@@ -9979,8 +9979,13 @@ th { background: #eee; }
         const isoOn = isoBinViewEnabled && typeof window.buildIsoRackSVG === 'function';
         return document.getElementById(isoOn ? 'bin-locator-iso' : 'bin-locator-grid');
     }
-    function onBinLocatorTouchpadMove(e) {
-        e.preventDefault();
+    // Moves the dot to wherever the finger/pointer is right now (clamped to the circle) and maps
+    // that same spot onto the rack. Shared by the touch path (ontouchstart/ontouchmove, which keep
+    // firing on the pad itself no matter where within it the finger drifts) and the mouse path
+    // (mousedown + window-level mousemove/mouseup below — a single mousedown alone only ever fires
+    // once, so a held-down drag needs the window listeners to keep tracking it, same pattern as the
+    // Layout Designer's own drag handlers use).
+    function updateBinLocatorTouchpad(e) {
         const pad = document.getElementById('bin-locator-touchpad');
         const rect = pad.getBoundingClientRect();
         const point = e.touches && e.touches[0] ? e.touches[0] : e;
@@ -10006,11 +10011,22 @@ th { background: #eee; }
         const cell = el.closest('.map-cell');
         if (cell && typeof cell.onmouseenter === 'function') cell.onmouseenter(); else hideBinLocatorHover();
     }
+    function onBinLocatorTouchpadTouchMove(e) { e.preventDefault(); updateBinLocatorTouchpad(e); }
+    function onBinLocatorTouchpadMouseDown(e) {
+        e.preventDefault();
+        updateBinLocatorTouchpad(e);
+        window.addEventListener('mousemove', updateBinLocatorTouchpad);
+        window.addEventListener('mouseup', onBinLocatorTouchpadMouseUp);
+    }
+    function onBinLocatorTouchpadMouseUp() {
+        window.removeEventListener('mousemove', updateBinLocatorTouchpad);
+        window.removeEventListener('mouseup', onBinLocatorTouchpadMouseUp);
+        document.getElementById('bin-locator-touchpad-dot').classList.remove('active');
+    }
     function onBinLocatorTouchpadEnd() {
-        // Lifting the finger doesn't hide the card — there's no mouse to "leave" with on touch, and
-        // the whole point of dragging here instead of on the rack itself is to then be able to tap
-        // an item in the now-still card without it disappearing first.
-        document.getElementById('bin-locator-touchpad-dot').style.transform = '';
+        // The dot deliberately stays exactly where the last drag left it, and the card stays open —
+        // its whole job is showing "where we are right now," not springing back to the centre the
+        // instant the finger lifts. It only moves again on the next drag.
         document.getElementById('bin-locator-touchpad-dot').classList.remove('active');
     }
 
