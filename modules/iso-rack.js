@@ -487,8 +487,19 @@ export function buildIsoRackSVG(geom, opts = {}) {
   return finish(S, opts.ariaLabel || `Isometric view of rack area ${g.zone}`, interactive ? 'iso-interactive' : '');
 }
 
+// A zone's floor-plan footprint in grid cells — swapped from its own max_aisle (Bays)/max_rack
+// (Depth) when grid_rotated is set (schema_zone_grid_rotated.sql), matching the Layout Designer's
+// own 2D editor exactly: rotating only changes which way the SAME rack is installed on the floor,
+// never its own physical Bays x Depth spec (a rack that's 3 bays long stays 3 bays long, whichever
+// way it's turned) — resolveRackGeometry above still reads max_aisle/max_rack directly and is
+// completely unaffected by this flag, since the rack's own 3D shape never depends on floor facing.
+function zoneFloorDims(z) {
+  const aisle = z.max_aisle || 1, rack = z.max_rack || 1;
+  return z.grid_rotated ? { w: rack, d: aisle } : { w: aisle, d: rack };
+}
+
 // ── warehouse floor: every rack area as a translucent block on the floor grid ─────────────────
-// zones: warehouse_zones rows (grid_col/grid_row/max_aisle/max_rack + the dimension columns).
+// zones: warehouse_zones rows (grid_col/grid_row/max_aisle/max_rack/grid_rotated + the dimension columns).
 // opts: { selectedZone, highlight: { zone, depth, level, bin, row?, label? }, cellCm = 120, interactive, ariaLabel }
 export function buildIsoFloorSVG(zones, opts = {}) {
   const placed = (zones || []).filter((z) => Number.isFinite(z.grid_col) && Number.isFinite(z.grid_row));
@@ -498,8 +509,8 @@ export function buildIsoFloorSVG(zones, opts = {}) {
 
   const geoms = new Map();
   placed.forEach((z) => geoms.set(z.zone, resolveRackGeometry(z, { maxDepth: z.max_rack || 1, maxLevel: z.max_level || 1, maxBin: z.max_bin || 1 })));
-  const minCol = Math.min(...placed.map((z) => z.grid_col)) - 1, maxCol = Math.max(...placed.map((z) => z.grid_col + (z.max_aisle || 1))) + 1;
-  const minRow = Math.min(...placed.map((z) => z.grid_row)) - 1, maxRow = Math.max(...placed.map((z) => z.grid_row + (z.max_rack || 1))) + 1;
+  const minCol = Math.min(...placed.map((z) => z.grid_col)) - 1, maxCol = Math.max(...placed.map((z) => z.grid_col + zoneFloorDims(z).w)) + 1;
+  const minRow = Math.min(...placed.map((z) => z.grid_row)) - 1, maxRow = Math.max(...placed.map((z) => z.grid_row + zoneFloorDims(z).d)) + 1;
   const tallest = Math.max(...[...geoms.values()].map((g) => g.height));
 
   const X0 = minCol * cell, X1 = maxCol * cell, Y0 = minRow * cell, Y1 = maxRow * cell;
@@ -522,11 +533,22 @@ export function buildIsoFloorSVG(zones, opts = {}) {
     const z = placed.find((p) => p.zone === highlight.zone);
     const g = geoms.get(highlight.zone);
     const N = Math.max(g.binsPerLevel, highlight.bin || 1);
-    const zw = (z.max_aisle || 1) * cell;
-    const bx0 = z.grid_col * cell + ((highlight.bin - 1) / N) * zw, bx1 = z.grid_col * cell + (highlight.bin / N) * zw;
     const perRack = cell; // each rack occupies one grid cell deep on the floor plan
-    const by0 = z.grid_row * cell + (highlight.depth - 1) * perRack + (((highlight.row || 1) - 1) / g.rows) * perRack;
-    const by1 = by0 + perRack / g.rows;
+    // Normally the bin index runs along floor X (the zone's own Bays run) and depth/Row along floor
+    // Y; rotated 90°, those two swap floor axes right along with the footprint block itself below,
+    // so the marker still lands at the bin's real spot instead of the un-rotated position.
+    const binAxisLen = (z.max_aisle || 1) * cell;
+    const bin0 = ((highlight.bin - 1) / N) * binAxisLen, bin1 = (highlight.bin / N) * binAxisLen;
+    const depth0 = (highlight.depth - 1) * perRack + (((highlight.row || 1) - 1) / g.rows) * perRack;
+    const depth1 = depth0 + perRack / g.rows;
+    let bx0, bx1, by0, by1;
+    if (z.grid_rotated) {
+      by0 = z.grid_row * cell + bin0; by1 = z.grid_row * cell + bin1;
+      bx0 = z.grid_col * cell + depth0; bx1 = z.grid_col * cell + depth1;
+    } else {
+      bx0 = z.grid_col * cell + bin0; bx1 = z.grid_col * cell + bin1;
+      by0 = z.grid_row * cell + depth0; by1 = z.grid_row * cell + depth1;
+    }
     const z0 = (highlight.level - 1) * g.pitch + g.boardT, z1 = z0 + g.binH;
     const min = fs * 1.1;
     const grow = (a0, a1) => (a1 - a0 >= min ? [a0, a1] : [(a0 + a1) / 2 - min / 2, (a0 + a1) / 2 + min / 2]);
@@ -535,11 +557,12 @@ export function buildIsoFloorSVG(zones, opts = {}) {
   }
 
   // far to near: smaller x and larger y are farther from the viewer
-  const ordered = placed.slice().sort((a, b) => ((a.grid_col + (a.max_aisle || 1) / 2) - (a.grid_row + (a.max_rack || 1) / 2)) - ((b.grid_col + (b.max_aisle || 1) / 2) - (b.grid_row + (b.max_rack || 1) / 2)));
+  const ordered = placed.slice().sort((a, b) => ((a.grid_col + zoneFloorDims(a).w / 2) - (a.grid_row + zoneFloorDims(a).d / 2)) - ((b.grid_col + zoneFloorDims(b).w / 2) - (b.grid_row + zoneFloorDims(b).d / 2)));
   ordered.forEach((z) => {
     const g = geoms.get(z.zone);
-    const x0 = z.grid_col * cell, x1 = (z.grid_col + (z.max_aisle || 1)) * cell;
-    const y0 = z.grid_row * cell, y1 = (z.grid_row + (z.max_rack || 1)) * cell;
+    const dims = zoneFloorDims(z);
+    const x0 = z.grid_col * cell, x1 = (z.grid_col + dims.w) * cell;
+    const y0 = z.grid_row * cell, y1 = (z.grid_row + dims.d) * cell;
     const sel = z.zone === selectedZone ? ' iso-zone-selected' : '';
     const attrs = interactive ? ` data-zone="${esc(z.zone)}"` : '';
     S.els.push(`<g class="${interactive ? 'iso-click' : ''}"${attrs}>`);

@@ -292,6 +292,32 @@ test('buildIsoFloorSVG returns nothing when no zone is placed, otherwise blocks 
   assert.doesNotMatch(svg, /NaN|Infinity|undefined/);
 });
 
+test('buildIsoFloorSVG: a rotated zone swaps its floor footprint, never its own Bays/Depth spec', () => {
+  const cos30 = Math.cos(Math.PI / 6), sin30 = 0.5;
+  const P = (x, y, z) => [(x + y) * cos30, (x - y) * sin30 - z];
+  const f1 = (n) => Math.round(n * 10) / 10;
+  const fmtPts = (pts) => pts.map((p) => `${f1(p[0])},${f1(p[1])}`).join(' ');
+  const cell = 120;
+
+  const zoneFlat = { zone: 'A', grid_col: 0, grid_row: 0, max_aisle: 8, max_rack: 1, max_level: 1, max_bin: 1 };
+  const zoneRot = { ...zoneFlat, grid_rotated: true };
+  // Same geometry either way — max_rack (not grid_rotated) is what resolveRackGeometry's own height
+  // comes from, and rotation never touches max_rack, so this is valid for both cases below.
+  const g = resolveRackGeometry(zoneFlat, { maxDepth: 1, maxLevel: 1, maxBin: 1 });
+  const topFacePts = (w, d) => [[0, 0, g.height], [w * cell, 0, g.height], [w * cell, d * cell, g.height], [0, d * cell, g.height]].map(([x, y, z]) => P(x, y, z));
+
+  const svgFlat = buildIsoFloorSVG([zoneFlat]);
+  const svgRot = buildIsoFloorSVG([zoneRot]);
+
+  // An 8-bays-wide x 1-deep rack's own floor-plan top face; rotated 90°, the SAME rack (still 8 x 1
+  // — max_aisle/max_rack themselves are never touched by rotation) draws its top face 1 wide x 8
+  // deep instead — the drawn footprint turned, not the rack's own physical spec.
+  assert.ok(svgFlat.includes(fmtPts(topFacePts(8, 1))), 'un-rotated: footprint is 8 wide x 1 deep');
+  assert.ok(svgRot.includes(fmtPts(topFacePts(1, 8))), 'rotated: footprint is 1 wide x 8 deep instead');
+  assert.equal(zoneRot.max_aisle, 8);
+  assert.equal(zoneRot.max_rack, 1);
+});
+
 test('every renderer stays finite over odd inputs', () => {
   const odd = [
     [null, null], [{}, {}], [{ zone: 'A', max_aisle: 0, max_rack: 0 }, { maxDepth: 0, maxLevel: 0, maxBin: 0 }],

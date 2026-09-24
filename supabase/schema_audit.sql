@@ -138,5 +138,8 @@ from (
   union all
   select 41, 'schema_zone_rack_style.sql', 'warehouse_zones.rack_style column',
     exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'warehouse_zones' and column_name = 'rack_style')
+  union all
+  select 42, 'schema_zone_grid_rotated.sql', 'warehouse_zones.grid_rotated column',
+    exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'warehouse_zones' and column_name = 'grid_rotated')
 ) t
 order by t.n;

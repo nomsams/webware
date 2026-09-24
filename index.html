@@ -61,7 +61,7 @@
         /* --- LAYOUT & HEADER --- */
         header { display: flex; justify-content: space-between; align-items: center; padding: 0.65rem 1rem; background: var(--card-bg); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
         .logo-container { display: flex; align-items: center; gap: 10px; }
-        .logo-container img { height: 36px; max-width: 130px; object-fit: contain; border-radius: 6px; }
+        .logo-container img { height: 42px; max-width: 150px; object-fit: contain; border-radius: 6px; }
         .header-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
         .icon-btn { background: none; border: none; font-size: 1.25rem; cursor: pointer; color: var(--text-main); padding: 6px; border-radius: 50%; transition: background 0.2s; min-width: 38px; min-height: 38px; display: flex; align-items: center; justify-content: center; }
         .badge-count { position: absolute; top: 2px; right: 2px; background: var(--danger); color: white; font-size: 0.62rem; font-weight: 700; border-radius: 50%; min-width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; padding: 0 3px; line-height: 1; }
@@ -1581,6 +1581,7 @@
             <span class="hidden" id="zone-undo-redo-wrap" style="display:flex; gap:4px;">
                 <button class="secondary" id="btn-zone-undo" onclick="undoZoneChange()" title="Undo (Ctrl+Z)" style="padding:0.35rem 0.6rem; min-height:auto; font-size:0.95rem;">↶</button>
                 <button class="secondary" id="btn-zone-redo" onclick="redoZoneChange()" title="Redo (Ctrl+Shift+Z)" style="padding:0.35rem 0.6rem; min-height:auto; font-size:0.95rem;">↷</button>
+                <button class="secondary hidden" id="btn-zone-rotate" onclick="rotateSelectedZone()" title="Rotate the selected rack area 90° (R) — only changes which way it's drawn on the floor, never its Bays/Depth" disabled style="padding:0.35rem 0.6rem; min-height:auto; font-size:0.95rem;">🔄</button>
             </span>
             <button class="secondary hidden" id="btn-save-zone-layout" onclick="saveZoneLayout()" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem; margin-left:auto;">💾 Save Layout</button>
         </div>
@@ -6707,6 +6708,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             ? "Drag empty space to draw a rack area — auto-labeled A, B, C… Width = how many bays long it is (just for the drawing); height = how many racks deep (1 = single row = Depth 1 on items, 2 = back-to-back = Depth 1 front / Depth 2 back). Drag its body to move it, drag an edge to resize it, double-click to edit its levels/bins, or select it and press Delete. Arrow keys nudge the selected area, R rotates it 90°. Ctrl+Z / Ctrl+Shift+Z to undo/redo."
             : "Type rack area details directly. New rows get the next unused letter, but you can change it. Ctrl+Z / Ctrl+Shift+Z to undo/redo.";
         if (mode === 'draw') renderZoneDrawGrid(); else renderZoneManualRows();
+        updateRotateZoneButton();
     }
 
     // Next unused letter in sequence: A..Z, then AA, AB... (extremely unlikely to matter beyond
@@ -6724,6 +6726,17 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         return 'Z' + Date.now(); // absurd fallback, never realistically reached
     }
 
+    // The 2D floor-plan block's own drawn width/height, in grid cells — swapped from the rack's real
+    // Bays (max_aisle) / Depth (max_rack) only when the zone is flagged grid_rotated. Rotating a
+    // rack area changes which way it's installed on the floor, never the rack's own physical spec:
+    // a rack that's 3 bays long and 1 deep stays 3 bays long and 1 deep whichever way it's turned —
+    // every OTHER use of max_aisle/max_rack (the 3D rack shape, bin codes, dimensions) reads them
+    // directly and is completely unaffected by this flag. See rotateSelectedZone().
+    function zoneGridDims(z) {
+        const aisle = z.max_aisle || 1, rack = z.max_rack || 1;
+        return z.grid_rotated ? { w: rack, h: aisle } : { w: aisle, h: rack };
+    }
+
     function renderZoneDrawGrid() {
         const grid = document.getElementById('zone-draw-grid');
         grid.style.width = (ZONE_GRID_COLS * ZONE_CELL_SIZE) + 'px';
@@ -6734,13 +6747,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             if (z.grid_col == null || z.grid_row == null) return; // manually-added zone, not yet placed
             const block = document.createElement('div');
             block.className = 'zone-block' + (z.zone === selectedZoneLetter ? ' selected' : '');
+            const dims = zoneGridDims(z);
             block.style.left = (z.grid_col * ZONE_CELL_SIZE) + 'px';
             block.style.top = (z.grid_row * ZONE_CELL_SIZE) + 'px';
-            block.style.width = ((z.max_aisle || 1) * ZONE_CELL_SIZE) + 'px';
-            block.style.height = ((z.max_rack || 1) * ZONE_CELL_SIZE) + 'px';
+            block.style.width = (dims.w * ZONE_CELL_SIZE) + 'px';
+            block.style.height = (dims.h * ZONE_CELL_SIZE) + 'px';
             const sizeTxt = zoneSizeLabel(z);
-            block.innerHTML = `<div style="text-align:center; line-height:1.15; pointer-events:none;">${escapeHtml(z.zone)}${sizeTxt && (z.max_aisle || 1) >= 3 ? `<span class="zone-size">${escapeHtml(sizeTxt)}</span>` : ''}</div>`;
-            block.title = `Rack Area ${z.zone}${z.label ? ' — ' + z.label : ''} (${z.max_aisle || 1} bays wide × ${z.max_rack || 1} racks deep${sizeTxt ? ', about ' + sizeTxt : ''}) — drag to move, double-click to edit`;
+            block.innerHTML = `<div style="text-align:center; line-height:1.15; pointer-events:none;">${escapeHtml(z.zone)}${sizeTxt && dims.w >= 3 ? `<span class="zone-size">${escapeHtml(sizeTxt)}</span>` : ''}</div>`;
+            block.title = `Rack Area ${z.zone}${z.label ? ' — ' + z.label : ''} (${z.max_aisle || 1} bays wide × ${z.max_rack || 1} racks deep${z.grid_rotated ? ', drawn rotated 90° on the floor' : ''}${sizeTxt ? ', about ' + sizeTxt : ''}) — click to select, drag to move, double-click to edit`;
             block.ondblclick = (e) => { e.stopPropagation(); selectZoneBlock(z.zone); };
             if (currentUserRole === 'admin') {
                 block.onmousedown = (e) => {
@@ -6760,6 +6774,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                     strip.onmousedown = (e) => startRackAreaEdgeResize(e, z.zone, edge, block);
                     block.appendChild(strip);
                 });
+            } else {
+                // No drag-to-move for a read-only viewer, so there's nothing else to tell a plain
+                // click apart from a drag with — select it immediately, same as onZoneBlockDragEnd
+                // does for admins once it knows a mousedown->mouseup pair never actually moved.
+                block.onclick = () => selectZoneBlock(z.zone);
             }
             grid.appendChild(block);
         });
@@ -6837,7 +6856,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!zoneDragMove.moved) return;
         const z = globalWarehouseZones.find(zz => zz.zone === zoneDragMove.zone);
         if (!z) return;
-        const w = z.max_aisle || 1, h = z.max_rack || 1;
+        const { w, h } = zoneGridDims(z);
         const col = Math.max(0, Math.min(ZONE_GRID_COLS - w, zoneDragMove.origCol + Math.round(dx / ZONE_CELL_SIZE)));
         const row = Math.max(0, Math.min(ZONE_GRID_ROWS - h, zoneDragMove.origRow + Math.round(dy / ZONE_CELL_SIZE)));
         zoneDragMove.pendingCol = col; zoneDragMove.pendingRow = row;
@@ -6856,13 +6875,16 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             if (z) { z.grid_col = pendingCol; z.grid_row = pendingRow; }
             renderZoneDrawGrid(); // clean re-render — re-normalizes the DOM and reattaches handlers
             pushZoneHistory(true);
+        } else {
+            // No movement at all — a plain click. Select it right away instead of requiring a
+            // second, separate double-click just to see/edit what was just clicked on.
+            selectZoneBlock(zone);
         }
-        // No movement at all (just a click) — leave it as-is; double-click is what opens the editor.
     }
 
     // Dragging one of a block's 4 edge strips resizes it from that side — dragging the right (e)
-    // or bottom (s) edge only changes max_aisle/max_rack; dragging the left (w) or top (n) edge
-    // moves grid_col/grid_row too, since the *opposite* edge is the one that has to stay put.
+    // or bottom (s) edge only changes the dimension drawn there; dragging the left (w) or top (n)
+    // edge moves grid_col/grid_row too, since the *opposite* edge is the one that has to stay put.
     // Live-updates the block's own inline style during the drag (like the move-drag above), with
     // a clean re-render once on drop.
     function startRackAreaEdgeResize(startEvent, zone, edge, block) {
@@ -6871,6 +6893,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const z0 = globalWarehouseZones.find(zz => zz.zone === zone);
         if (!z0) return;
         const orig = { col: z0.grid_col, row: z0.grid_row, aisle: z0.max_aisle || 1, rack: z0.max_rack || 1 };
+        // e/w edges always resize the block's drawn WIDTH; n/s always its drawn HEIGHT — same as
+        // zoneGridDims always draws width from one field and height from the other. WHICH real
+        // field (Bays/max_aisle vs Depth/max_rack) that width/height maps to flips with the zone's
+        // own rotation; the fields' own meaning never does (see zoneGridDims/rotateSelectedZone).
+        const widthField = z0.grid_rotated ? 'rack' : 'aisle';
+        const heightField = z0.grid_rotated ? 'aisle' : 'rack';
         const startX = startEvent.clientX, startY = startEvent.clientY;
         let moved = false;
         let pending = { ...orig };
@@ -6883,29 +6911,30 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             const rowDelta = Math.round(dy / ZONE_CELL_SIZE);
             pending = { ...orig };
             if (edge === 'e') {
-                pending.aisle = Math.max(1, Math.min(ZONE_GRID_COLS - orig.col, orig.aisle + colDelta));
+                pending[widthField] = Math.max(1, Math.min(ZONE_GRID_COLS - orig.col, orig[widthField] + colDelta));
             } else if (edge === 'w') {
-                const newCol = Math.max(0, Math.min(orig.col + orig.aisle - 1, orig.col + colDelta));
-                pending.col = newCol; pending.aisle = orig.aisle + (orig.col - newCol);
+                const newCol = Math.max(0, Math.min(orig.col + orig[widthField] - 1, orig.col + colDelta));
+                pending.col = newCol; pending[widthField] = orig[widthField] + (orig.col - newCol);
             } else if (edge === 's') {
-                pending.rack = Math.max(1, Math.min(ZONE_GRID_ROWS - orig.row, orig.rack + rowDelta));
+                pending[heightField] = Math.max(1, Math.min(ZONE_GRID_ROWS - orig.row, orig[heightField] + rowDelta));
             } else if (edge === 'n') {
-                const newRow = Math.max(0, Math.min(orig.row + orig.rack - 1, orig.row + rowDelta));
-                pending.row = newRow; pending.rack = orig.rack + (orig.row - newRow);
+                const newRow = Math.max(0, Math.min(orig.row + orig[heightField] - 1, orig.row + rowDelta));
+                pending.row = newRow; pending[heightField] = orig[heightField] + (orig.row - newRow);
             }
             block.style.left = (pending.col * ZONE_CELL_SIZE) + 'px';
             block.style.top = (pending.row * ZONE_CELL_SIZE) + 'px';
-            block.style.width = (pending.aisle * ZONE_CELL_SIZE) + 'px';
-            block.style.height = (pending.rack * ZONE_CELL_SIZE) + 'px';
+            block.style.width = (pending[widthField] * ZONE_CELL_SIZE) + 'px';
+            block.style.height = (pending[heightField] * ZONE_CELL_SIZE) + 'px';
         };
         const up = () => {
             window.removeEventListener('mousemove', move);
             window.removeEventListener('mouseup', up);
             if (moved) {
                 const z = globalWarehouseZones.find(zz => zz.zone === zone);
-                // Whichever edge you dragged sets that dimension directly — e/w -> max_aisle, n/s
-                // -> max_rack, no swapping (see finishZoneDraw's comment for why the old
-                // longer-side-is-always-Bays rule broke a shelving zone's Depth-as-sections shape).
+                // Whichever edge you dragged sets that dimension directly (no swapping — see
+                // finishZoneDraw's comment for why the old longer-side-is-always-Bays rule broke a
+                // shelving zone's Depth-as-sections shape); grid_rotated only decided which real
+                // field (aisle/rack) that edge meant, above.
                 if (z) { z.grid_col = pending.col; z.grid_row = pending.row; z.max_aisle = pending.aisle; z.max_rack = pending.rack; }
                 renderZoneDrawGrid();
                 if (selectedZoneLetter === zone) renderZoneInspector();
@@ -6925,15 +6954,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function renderZoneInspector() {
         const box = document.getElementById('zone-inspector');
         const z = globalWarehouseZones.find(z => z.zone === selectedZoneLetter);
-        if (!z) { box.classList.add('hidden'); box.innerHTML = ''; renderDimPanel(true); return; }
+        if (!z) { box.classList.add('hidden'); box.innerHTML = ''; renderDimPanel(true); updateRotateZoneButton(); return; }
         box.classList.remove('hidden');
         const readOnly = currentUserRole !== 'admin';
         box.innerHTML = `
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:0.75rem;">
                 <strong style="font-size:1.1rem;">Rack Area ${escapeHtml(z.zone)}</strong>
-                <span style="color:var(--text-muted); font-size:0.85rem;">${z.rack_style === 'shelving' ? `${z.max_rack || 1} section${(z.max_rack || 1) > 1 ? 's' : ''} wide` : `${z.max_aisle} bays wide × ${z.max_rack} racks deep${z.max_rack >= 2 ? ' (back-to-back)' : ''}`}</span>
-                ${readOnly ? '' : `<button class="secondary" onclick="rotateSelectedZone()" title="Rotate 90° (R) — swaps Bays and Depth" style="margin-left:auto; padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🔄 Rotate</button>
-                <button class="secondary" onclick="deleteSelectedZone()" style="color:var(--danger); padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🗑️ Delete Zone</button>`}
+                <span style="color:var(--text-muted); font-size:0.85rem;">${z.rack_style === 'shelving' ? `${z.max_rack || 1} section${(z.max_rack || 1) > 1 ? 's' : ''} wide` : `${z.max_aisle} bays wide × ${z.max_rack} racks deep${z.max_rack >= 2 ? ' (back-to-back)' : ''}`}${z.grid_rotated ? ' · drawn rotated 90° on the floor' : ''}</span>
+                ${readOnly ? '' : `<button class="secondary" onclick="deleteSelectedZone()" style="margin-left:auto; color:var(--danger); padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">🗑️ Delete Zone</button>`}
             </div>
             <label class="modal-label" for="zone-inspector-label">Label</label>
             <input type="text" id="zone-inspector-label" value="${escapeHtml(z.label || '')}" placeholder="e.g. Hydraulics section" ${readOnly ? 'disabled' : ''} oninput="updateSelectedZoneField('label', this.value)">
@@ -6970,6 +6998,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                 </div>`}
             </div>`;
         renderDimPanel(true);
+        updateRotateZoneButton();
     }
 
     // A small view of the same warehouse_rack_images gallery below, filtered to this one zone —
@@ -7024,18 +7053,22 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         pushZoneHistory(true);
     }
 
-    // Swaps Bays (max_aisle) and Depth (max_rack) — turning e.g. a 6-wide × 1-deep footprint into a
-    // 1-wide × 6-deep one, same rectangle turned 90°. Same corner (grid_col/grid_row) stays put,
-    // just clamped back onto the grid now that the footprint's flipped — same clamp startRackAreaEdgeResize
+    // Flips grid_rotated — turning e.g. a 6-wide × 1-deep footprint into a 1-wide × 6-deep one on
+    // the floor plan, same rectangle turned 90°. Deliberately does NOT touch max_aisle/max_rack
+    // themselves: a rack that's physically 6 bays long and 1 deep is still 6 bays long and 1 deep
+    // wherever it's installed, and swapping those numbers used to silently reshape the rack itself
+    // (a different bay count per level, a different real Depth on every item's bin code) just
+    // because it was spun around on the map. Same corner (grid_col/grid_row) stays put, just clamped
+    // back onto the grid now that the drawn footprint's flipped — same clamp startRackAreaEdgeResize
     // and nudgeSelectedZone already use for keeping a rack area on the board.
     function rotateSelectedZone() {
         if (currentUserRole !== 'admin') return;
         const z = globalWarehouseZones.find(zz => zz.zone === selectedZoneLetter);
         if (!z) return;
-        const w = z.max_aisle || 1, h = z.max_rack || 1;
-        z.max_aisle = h; z.max_rack = w;
-        z.grid_col = Math.max(0, Math.min(ZONE_GRID_COLS - z.max_aisle, z.grid_col ?? 0));
-        z.grid_row = Math.max(0, Math.min(ZONE_GRID_ROWS - z.max_rack, z.grid_row ?? 0));
+        z.grid_rotated = !z.grid_rotated;
+        const { w, h } = zoneGridDims(z);
+        z.grid_col = Math.max(0, Math.min(ZONE_GRID_COLS - w, z.grid_col ?? 0));
+        z.grid_row = Math.max(0, Math.min(ZONE_GRID_ROWS - h, z.grid_row ?? 0));
         renderZoneDrawGrid();
         renderZoneInspector();
         pushZoneHistory(true);
@@ -7100,10 +7133,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // (schema_zone_rack_style.sql — 'pallet' open beam racking vs 'shelving' boltless shelving,
     // purely how the isometric view draws this zone). Shelf height means the CLEAR height of one
     // level (top of a shelf board to the underside of the next), not the height of the whole rack.
+    // grid_rotated (schema_zone_grid_rotated.sql) is newer still — whether this rack area is drawn
+    // turned 90° on the 2D floor plan / floor overview, purely a drawing orientation; never touches
+    // max_aisle/max_rack themselves (see rotateSelectedZone()).
     // Bundled as one "new columns" group below on purpose: whichever of these migrations hasn't
     // been run yet, saveZoneLayout()'s fallback drops the same lot and says so, rather than needing
     // to tell apart which specific migration is missing.
-    const ZONE_NEW_DIM_COLUMNS = ['rack_width_cm', 'rack_depth_cm', 'rack_height_cm', 'shelf_depth_cm', 'bin_width_cm', 'bin_depth_cm', 'bin_height_cm', 'rack_style'];
+    const ZONE_NEW_DIM_COLUMNS = ['rack_width_cm', 'rack_depth_cm', 'rack_height_cm', 'shelf_depth_cm', 'bin_width_cm', 'bin_depth_cm', 'bin_height_cm', 'rack_style', 'grid_rotated'];
     const DIM_GROUPS = [
         { title: 'Rack', hint: 'the whole shelving frame', fields: [['rack_width_cm', 'Width (one bay)', '120'], ['rack_depth_cm', 'Depth', '60'], ['rack_height_cm', 'Height', '250']] },
         { title: 'Shelf', hint: 'one level of it', fields: [['shelf_width_cm', 'Width', '120'], ['shelf_depth_cm', 'Depth', '60'], ['shelf_height_cm', 'Clear height', '45']] },
@@ -7314,6 +7350,17 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!undoBtn) return;
         undoBtn.disabled = zoneHistoryIndex <= 0;
         document.getElementById('btn-zone-redo').disabled = zoneHistoryIndex >= zoneHistory.length - 1;
+    }
+
+    // Kept up near Undo/Redo rather than down in the per-zone inspector panel — same "acts on
+    // whatever's currently selected" idea as Delete/arrow-key-nudge, so it doesn't need scrolling
+    // down to find once something's selected. Rotation only means anything in Draw mode (Manual
+    // mode has no grid to draw an orientation on), and only once something's actually selected.
+    function updateRotateZoneButton() {
+        const btn = document.getElementById('btn-zone-rotate');
+        if (!btn) return;
+        btn.classList.toggle('hidden', currentUserRole !== 'admin' || zoneDesignerMode !== 'draw');
+        btn.disabled = !selectedZoneLetter;
     }
 
     // Layout Designer keyboard shortcuts — scoped to warehouse-view and skipped while focus is in
