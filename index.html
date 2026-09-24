@@ -117,7 +117,7 @@
         .seg-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1px; white-space: nowrap; }
 
         /* --- FORMS & BUTTONS --- */
-        input[type="password"], input[type="text"], input[type="email"], textarea, select {
+        input[type="password"], input[type="text"], input[type="email"], input[type="number"], input[type="url"], textarea, select {
             width: 100%; padding: 0.85rem 1rem; border: 1.5px solid var(--border); border-radius: 12px;
             margin-bottom: 1rem; font-size: 1rem; background: var(--card-bg); color: var(--text-main);
             transition: border-color 0.2s, box-shadow 0.2s; min-height: 48px;
@@ -154,7 +154,9 @@
         /* --- LIST VIEW & SELECTION --- */
         .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px; }
         .list-header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-        .list-stats { font-size: 0.85rem; color: var(--text-muted); font-weight: 500; margin-bottom: 0.5rem; }
+        .list-stats { font-size: 0.85rem; color: var(--text-muted); font-weight: 500; margin-bottom: 0.5rem; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; }
+        .list-stats-filter { display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
+        .list-stats-filter input { width: auto; min-height: unset; margin: 0; }
         /* A plain inline text link inside the stats line — resets the global button styling
            (blue fill, padding, min-height) so it reads as text, not as another toolbar button. */
         .stats-link { background: none; border: none; box-shadow: none; padding: 0; margin: 0; min-height: 0; width: auto; border-radius: 0; font: inherit; color: var(--primary); text-decoration: underline; cursor: pointer; }
@@ -326,8 +328,8 @@
         .bin-locator-hover-row-qty { font-weight: 800; font-size: 0.78rem; color: var(--primary); flex-shrink: 0; }
         .bin-locator-touchpad-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; margin-top: 1rem; }
         .bin-locator-touchpad-wrap.hidden { display: none; }
-        .bin-locator-touchpad { width: 160px; height: 160px; border-radius: 50%; background: var(--border); border: 2px solid var(--primary); position: relative; touch-action: none; }
-        .bin-locator-touchpad-dot { width: 22px; height: 22px; border-radius: 50%; background: var(--primary); position: absolute; top: 50%; left: 50%; margin: -11px 0 0 -11px; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: background 0.15s; }
+        .bin-locator-touchpad { width: 108px; height: 108px; border-radius: 50%; background: var(--border); border: 2px solid var(--primary); position: relative; touch-action: none; }
+        .bin-locator-touchpad-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--primary); position: absolute; top: 50%; left: 50%; margin: -8px 0 0 -8px; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: background 0.15s; }
         .bin-locator-touchpad-dot.active { background: var(--danger); }
         .bin-locator-touchpad-hint { font-size: 0.78rem; color: var(--text-muted); text-align: center; max-width: 260px; }
         .dim-group { margin-bottom: 0.9rem; }
@@ -337,6 +339,24 @@
         .dim-row label { font-size: 0.72rem; color: var(--text-muted); margin: 0; display: block; }
         .dim-row input { margin: 2px 0 0; padding: 6px 8px; min-height: unset; font-size: 0.85rem; width: 100%; }
         .zone-block .zone-size { display: block; font-size: 0.58rem; font-weight: 500; opacity: 0.9; }
+        /* Shown once, the first time anyone on this device reaches a Bin Location Code field — an
+           inline worked example instead of relying on someone noticing the small ℹ️ button. Dismissed
+           permanently (any copy of it, add-item or quick-edit alike) via dismissLocationCodeHint(). */
+        .location-code-hint { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; background: var(--primary-light); border: 1px solid var(--primary); border-radius: 8px; padding: 0.55rem 0.7rem; font-size: 0.8rem; color: var(--text-main); margin: -0.4rem 0 0.7rem; }
+        .location-code-hint.hidden { display: none; }
+        .location-code-hint code { background: var(--card-bg); padding: 1px 6px; border-radius: 4px; font-size: 0.82rem; }
+        .location-code-hint-dismiss { margin-left: auto; flex-shrink: 0; padding: 0.25rem 0.65rem; min-height: unset; font-size: 0.75rem; }
+        /* Settings groups (Appearance / Inventory / Admin Tools / AI Assistant / Advanced) — same
+           small-caps muted heading style the Warehouse page already uses for its own sections, so
+           everyday toggles read as separate from rarely-touched/technical ones instead of one long
+           undifferentiated list. */
+        .settings-section-heading { color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin: 1.75rem 0 0.75rem; padding-top: 1.25rem; border-top: 1px solid var(--border); }
+        .settings-section-heading.first { margin-top: 0; padding-top: 0; border-top: none; }
+        .settings-advanced summary { cursor: pointer; list-style: none; }
+        .settings-advanced summary::-webkit-details-marker { display: none; }
+        .settings-advanced summary .settings-section-heading { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 0; }
+        .settings-advanced summary .settings-section-heading::before { content: '▸'; font-size: 0.7rem; transition: transform 0.15s; }
+        .settings-advanced[open] summary .settings-section-heading::before { transform: rotate(90deg); }
         .segmented-mini { display: inline-flex; gap: 6px; }
         .segmented-mini button.active { background: var(--primary); color: white; }
 
@@ -1042,10 +1062,14 @@
             <button type="button" class="secondary" onclick="showLocationCodeInfo()" title="How this code works" aria-label="Explain bin location codes" style="min-height:22px; min-width:22px; width:22px; height:22px; padding:0; border-radius:50%; font-size:0.75rem;">ℹ️</button>
         </label>
         <p id="ai-loc-no-areas-hint" class="hidden" style="color:var(--text-muted); font-size:0.78rem; margin:-0.5rem 0 0.5rem;">No rack areas defined yet for this warehouse (set them up on the Warehouse page) — type a code by hand below.</p>
+        <div id="ai-loc-hint" class="location-code-hint hidden">
+            💡 <span><strong>Example:</strong> <code>A 3-3 1-1</code> = Zone A, Depth 3, Level 3, Bin 1, Row 1. Pick from the dropdowns below, or type it directly.</span>
+            <button type="button" class="secondary location-code-hint-dismiss" onclick="dismissLocationCodeHint()">Got it</button>
+        </div>
         <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
-            <select id="ai-loc-zone" onchange="onLocationZoneChange('ai')" style="width:auto; flex:1; min-width:80px; margin:0;"><option value="">Zone…</option></select>
-            <select id="ai-loc-depth" onchange="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:90px; margin:0;"><option value="">Depth…</option></select>
-            <select id="ai-loc-level" onchange="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:80px; margin:0;"><option value="">Level…</option></select>
+            <select id="ai-loc-zone" onchange="onLocationZoneChange('ai')" style="width:auto; flex:1; min-width:100px; margin:0;"><option value="">Zone…</option></select>
+            <select id="ai-loc-depth" onchange="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:110px; margin:0;"><option value="">Depth…</option></select>
+            <select id="ai-loc-level" onchange="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:100px; margin:0;"><option value="">Level…</option></select>
             <input type="number" id="ai-loc-bin" placeholder="Bin" min="1" oninput="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:70px; margin:0;">
             <input type="number" id="ai-loc-binrow" placeholder="Row (deep)" min="1" title="How many bins back from the front of the shelf — leave blank if it's the front-most (or only) bin" oninput="syncLocationCodeFromPicker('ai')" style="width:auto; flex:1; min-width:70px; margin:0;">
         </div>
@@ -1382,7 +1406,7 @@
         <div class="list-header">
             <h2 style="margin: 0;">Inventory</h2>
             <div class="list-header-actions" id="list-actions">
-                <button id="btn-add-item" onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">✨ Create</button>
+                <button id="btn-add-item" onclick="openAddItemModal()" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">+ Add</button>
                 <div class="header-more-wrap">
                     <button class="secondary" id="btn-import-menu" onclick="toggleImportMenu(event)" aria-haspopup="true" style="padding: 0.5rem 1rem; min-height: 38px; font-size: 0.9rem;">📥 Import</button>
                     <div class="header-more-menu hidden" id="import-menu" style="left:0; right:auto;">
@@ -1805,7 +1829,7 @@
             <select id="bin-locator-zone-select" onchange="onBinLocatorZoneChange()" style="width:auto; margin:0; padding:6px 10px; font-size:0.85rem;"></select>
             <label id="bin-locator-heatmap-toggle-wrap" style="display:flex; align-items:center; gap:6px; margin:0; font-size:0.85rem; color:var(--text-muted); cursor:pointer;">
                 <input type="checkbox" id="bin-locator-heatmap-toggle" onchange="onBinLocatorHeatmapChange()" style="width:auto; min-height:unset; margin:0;">
-                🔥 Heatmap
+                Heatmap
             </label>
             <span class="segmented-mini" id="bin-locator-view-mode-toggle">
                 <button class="secondary" id="btn-bin-locator-flat" onclick="setBinLocatorIsoView(false)" style="padding:0.25rem 0.6rem; min-height:auto; font-size:0.78rem;">▦ Flat</button>
@@ -1813,7 +1837,7 @@
             </span>
             <label id="bin-locator-touchpad-toggle-wrap" style="display:flex; align-items:center; gap:6px; margin:0; font-size:0.85rem; color:var(--text-muted); cursor:pointer;">
                 <input type="checkbox" id="bin-locator-touchpad-toggle" onchange="onBinLocatorTouchpadChange()" style="width:auto; min-height:unset; margin:0;">
-                👆 Touch Preview
+                Touch Preview
             </label>
         </div>
         <div class="warehouse-map" id="bin-locator-grid"></div>
@@ -1900,6 +1924,7 @@
     <section id="settings-view" class="card hidden">
         <h2 style="margin-bottom: 1.5rem;">App Settings</h2>
 
+        <div class="settings-section-heading first">Appearance</div>
         <div class="setting-row">
             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
                 <input type="checkbox" id="dark-mode-enabled" onchange="onDarkModeSettingChange()" style="width:auto; min-height:unset; margin:0;">
@@ -1908,22 +1933,7 @@
             <p class="setting-desc">Per-device, applies immediately.</p>
         </div>
 
-        <div class="setting-row">
-            <label>🖥️ Developer Console</label>
-            <p class="setting-desc">Captured <code>console.log</code>/<code>error</code>/<code>warn</code> output — useful for troubleshooting without your browser's own devtools.</p>
-            <button class="secondary" onclick="toggleConsole()">🖥️ Open Console</button>
-        </div>
-
-        <div class="setting-row">
-            <label for="qr-ecc">QR Code Error Correction</label>
-            <select id="qr-ecc">
-                <option value="L">Level L — Low (fewest dots, best for tiny 28mm labels)</option>
-                <option value="M" selected>Level M — Medium (default)</option>
-                <option value="Q">Level Q — Quartile</option>
-            </select>
-            <p class="setting-desc">Lower ECC makes QR modules larger — critical for thermal micro-labels so scanners can read them reliably. (Level H removed.)</p>
-        </div>
-
+        <div class="settings-section-heading">Inventory</div>
         <div class="setting-row">
             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
                 <input type="checkbox" id="lowstock-enabled" onchange="onLowStockSettingChange()" style="width:auto; min-height:unset; margin:0;">
@@ -1949,7 +1959,7 @@
                 <input type="checkbox" id="iso-bin-view-enabled" onchange="onIsoBinViewSettingChange()" style="width:auto; min-height:unset; margin:0;">
                 🧊 Isometric bin locator
             </label>
-            <p class="setting-desc">Off by default. When on, an item's Bin Location Map and the Bin Locator are drawn as an isometric 3D rack instead of the flat Depth × Level grid: the rack is semi-transparent and the bin you're looking for is a solid blue box labelled with its coordinates (with a 🏭 floor view showing where the rack area sits in the warehouse). Rack, shelf and bin sizes entered on the Warehouse page make it to scale.</p>
+            <p class="setting-desc">On by default. When on, an item's Bin Location Map and the Bin Locator are drawn as an isometric 3D rack instead of the flat Depth × Level grid: the rack is semi-transparent and the bin you're looking for is a solid blue box labelled with its coordinates (with a 🏭 floor view showing where the rack area sits in the warehouse). Rack, shelf and bin sizes entered on the Warehouse page make it to scale.</p>
         </div>
 
         <div class="setting-row">
@@ -1977,14 +1987,18 @@
             <p class="setting-desc">Shown as "Last updated by" on items you edit. Leave blank to just use your email's username.</p>
         </div>
 
-        <button class="secondary full-width hidden" id="btn-manage-users" onclick="openManageUsersModal()" style="margin-bottom:1rem;">👥 Manage Users</button>
-        <button class="secondary full-width hidden" id="btn-manage-warehouses" onclick="openManageWarehousesModal()" style="margin-bottom:1rem;">🏬 Manage Warehouses</button>
-        <button class="secondary full-width hidden" id="btn-activity-log" onclick="openActivityLogModal()" style="margin-bottom:1rem;">📜 Activity Log</button>
-        <button class="secondary full-width hidden" id="btn-backorder-report" onclick="openBackorderReportModal()" style="margin-bottom:1rem;">📋 Backorder Report</button>
-        <button class="secondary full-width hidden" id="btn-pack-order-history" onclick="openPackOrderHistoryModal()" style="margin-bottom:1rem;">🧾 Pack Order History</button>
-        <button class="secondary full-width hidden" id="btn-unassigned-images" onclick="openUnassignedImagesModal()" style="margin-bottom:1rem;">🗄️ Unassigned Images</button>
-        <button class="secondary full-width hidden" id="btn-visma-sync" onclick="openVismaSyncModal()" style="margin-bottom:1rem;">🔄 Visma Sync</button>
+        <div id="settings-admin-tools-section">
+            <div class="settings-section-heading">Admin Tools</div>
+            <button class="secondary full-width hidden" id="btn-manage-users" onclick="openManageUsersModal()" style="margin-bottom:1rem;">👥 Manage Users</button>
+            <button class="secondary full-width hidden" id="btn-manage-warehouses" onclick="openManageWarehousesModal()" style="margin-bottom:1rem;">🏬 Manage Warehouses</button>
+            <button class="secondary full-width hidden" id="btn-activity-log" onclick="openActivityLogModal()" style="margin-bottom:1rem;">📜 Activity Log</button>
+            <button class="secondary full-width hidden" id="btn-backorder-report" onclick="openBackorderReportModal()" style="margin-bottom:1rem;">📋 Backorder Report</button>
+            <button class="secondary full-width hidden" id="btn-pack-order-history" onclick="openPackOrderHistoryModal()" style="margin-bottom:1rem;">🧾 Pack Order History</button>
+            <button class="secondary full-width hidden" id="btn-unassigned-images" onclick="openUnassignedImagesModal()" style="margin-bottom:1rem;">🗄️ Unassigned Images</button>
+            <button class="secondary full-width hidden" id="btn-visma-sync" onclick="openVismaSyncModal()" style="margin-bottom:1rem;">🔄 Visma Sync</button>
+        </div>
 
+        <div class="settings-section-heading">AI Assistant</div>
         <div class="setting-row">
             <label>🔑 Your Personal Groq API Key (optional)</label>
             <p class="setting-desc" id="personal-groq-key-status-text">Checking…</p>
@@ -2036,8 +2050,27 @@
             <p class="setting-desc">Off by default. When webware's own CORS-proxy function isn't deployed or has an outage, the AI Assistant's web search normally just fails, rather than silently sending your search query to someone else's server — either the shared proxy on the app author's other Supabase project, or a public third-party one (corsproxy.io / allorigins.win) — that could see it in the clear. Turn this on only if you'd rather have search keep working than avoid that exposure — this is a per-device setting.</p>
         </div>
 
-        <button class="full-width" onclick="saveSettings()">Save Configuration</button>
-        <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out & Clear Session</button>
+        <details class="settings-advanced">
+            <summary><div class="settings-section-heading">Advanced</div></summary>
+            <div class="setting-row">
+                <label>🖥️ Developer Console</label>
+                <p class="setting-desc">Captured <code>console.log</code>/<code>error</code>/<code>warn</code> output — useful for troubleshooting without your browser's own devtools.</p>
+                <button class="secondary" onclick="toggleConsole()">🖥️ Open Console</button>
+            </div>
+
+            <div class="setting-row">
+                <label for="qr-ecc">QR Code Error Correction</label>
+                <select id="qr-ecc">
+                    <option value="L">Level L — Low (fewest dots, best for tiny 28mm labels)</option>
+                    <option value="M" selected>Level M — Medium (default)</option>
+                    <option value="Q">Level Q — Quartile</option>
+                </select>
+                <p class="setting-desc">Lower ECC makes QR modules larger — critical for thermal micro-labels so scanners can read them reliably. (Level H removed.)</p>
+            </div>
+        </details>
+
+        <button class="full-width" onclick="saveSettings()" style="margin-top:1.5rem;">Save Configuration</button>
+        <button class="secondary full-width" onclick="clearSession()" style="margin-top: 1rem; color: var(--danger);">Log Out &amp; Clear Session</button>
     </section>
 
     <!-- Floating Action Bar — global, not tied to any one view, since items can now be selected
@@ -2114,7 +2147,7 @@
     var lowStockEnabled = false; // off by default — opt-in via Settings
     var lowStockThreshold = 5;
     var dashboardEnabled = false; // off by default — opt-in via Settings
-    var isoBinViewEnabled = false; // off by default — opt-in via Settings; draws the bin map / Bin Locator as an isometric rack (modules/iso-rack.js)
+    var isoBinViewEnabled = true; // on by default (opt-out via Settings) — draws the bin map / Bin Locator as an isometric rack (modules/iso-rack.js)
     var isoBinScope = 'rack';      // item page: 'rack' (one rack area, zoomed) or 'floor' (every rack area on the warehouse floor)
     var cameraScanSupported = true; // flipped off at startup if the browser has no camera API at all — see window.onload
     var manufacturerFilter = ''; // list-view filter — derived options, not a separate table
@@ -5952,11 +5985,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function renderWarehouseMeta() {
         const meta = getWarehouseMeta(currentWarehouseId);
         document.getElementById('wh-meta-container').innerHTML =
-            `<div class="wh-meta" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                <span>🏬 <strong${meta.mode === 'supabase' ? ` role="button" tabindex="0" style="cursor:pointer; text-decoration:underline;" onclick="openWarehouseView()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openWarehouseView();}"` : ''}>${escapeHtml(meta.name)}</strong> &nbsp;·&nbsp; ID ${escapeHtml(meta.l)} &nbsp;·&nbsp; ${escapeHtml(meta.address || '—')}${meta.phone ? ` &nbsp;·&nbsp; ${escapeHtml(meta.phone)}` : ''}${meta.contactEmail ? ` &nbsp;·&nbsp; ${escapeHtml(meta.contactEmail)}` : ''}</span>
-                ${meta.mode === 'supabase' && currentUserRole === 'admin' ? `<button class="secondary" onclick="openWarehouseEditModal()" style="padding:0.35rem 0.7rem; min-height:auto; font-size:0.8rem;">✏️ Edit Warehouse</button>` : ''}
-                <label for="warehouse-switcher" style="margin:0; font-size:0.85rem; color:var(--text-muted);">Switch:</label>
-                <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" style="width:auto; min-width:160px; margin:0; padding:6px 10px; font-size:0.85rem;">${visibleWarehouses().map(w => `<option value="${escapeHtml(w.l)}" ${w.l === currentWarehouseId ? 'selected' : ''}>${escapeHtml(w.name)}</option>`).join('')}</select>
+            `<div class="wh-meta" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <span>🏬 <strong${meta.mode === 'supabase' ? ` role="button" tabindex="0" style="cursor:pointer; text-decoration:underline;" onclick="openWarehouseView()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openWarehouseView();}"` : ''}>${escapeHtml(meta.name)}</strong> &nbsp;·&nbsp; ID ${escapeHtml(meta.l)}${meta.phone ? ` &nbsp;·&nbsp; ${escapeHtml(meta.phone)}` : ''}${meta.contactEmail ? ` &nbsp;·&nbsp; ${escapeHtml(meta.contactEmail)}` : ''}</span>
+                ${meta.mode === 'supabase' && currentUserRole === 'admin' ? `<button class="secondary" onclick="openWarehouseEditModal()" title="Edit warehouse details" style="padding:0.3rem 0.6rem; min-height:auto; font-size:0.8rem;">✏️ Edit</button>` : ''}
+                <select id="warehouse-switcher" onchange="switchWarehouse(this.value)" aria-label="Switch warehouse" style="width:auto; min-width:0; margin:0; padding:4px 8px; font-size:0.8rem;">${visibleWarehouses().map(w => `<option value="${escapeHtml(w.l)}" ${w.l === currentWarehouseId ? 'selected' : ''}>${escapeHtml(w.name)}</option>`).join('')}</select>
             </div>`;
 
         // Kits CSV / Warehouses CSV / full-database export still only operate on the local
@@ -6099,18 +6131,17 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (hideZeroQtyItems) filtered = filtered.filter(item => !isZero(item));
         filtered = sortItems(filtered);
         currentlyVisibleIds = filtered.map(i => i.BTKnumber);
-        // The show/hide switches live inline in this line rather than as their own toolbar controls —
-        // each only appears when there's actually something to hide or show, and costs no extra room
-        // in the (already crowded) sort/filter row above.
-        const negWord = `negative-stock item${negativeCount === 1 ? '' : 's'}`;
+        // A checkbox per filter, prefilled to whatever's actually in effect — ticked means "showing
+        // it," same sense as the checkbox itself reads — rather than a sentence with an embedded
+        // show/hide link, so the current state is visible at a glance instead of needing to be read.
+        // Each only appears when there's actually something for it to show or hide.
         const negToggle = negativeCount
-            ? ` · <button type="button" class="stats-link" onclick="toggleHideNegativeQty()">${hideNegativeQtyItems ? `${negativeCount} ${negWord} hidden — show` : `showing ${negativeCount} ${negWord} — hide`}</button>`
+            ? `<label class="list-stats-filter"><input type="checkbox" ${hideNegativeQtyItems ? '' : 'checked'} onchange="toggleHideNegativeQty()"> Negative stock (${negativeCount})</label>`
             : '';
-        const zeroWord = `zero-stock item${zeroCount === 1 ? '' : 's'}`;
         const zeroToggle = zeroCount
-            ? ` · <button type="button" class="stats-link" onclick="toggleHideZeroQty()">${hideZeroQtyItems ? `${zeroCount} ${zeroWord} hidden — show` : `showing ${zeroCount} ${zeroWord} — hide`}</button>`
+            ? `<label class="list-stats-filter"><input type="checkbox" ${hideZeroQtyItems ? '' : 'checked'} onchange="toggleHideZeroQty()"> Zero stock (${zeroCount})</label>`
             : '';
-        document.getElementById('list-stats').innerHTML = `Showing ${filtered.length} of ${globalInventory.length} items${negToggle}${zeroToggle}`;
+        document.getElementById('list-stats').innerHTML = `<span>Showing ${filtered.length} of ${globalInventory.length} items</span>${negToggle}${zeroToggle}`;
         renderList(filtered);
         syncSelectAllCheckbox();
     }
@@ -9059,10 +9090,14 @@ th { background: #eee; }
                 <button type="button" class="secondary" onclick="showLocationCodeInfo()" title="How this code works" aria-label="Explain bin location codes" style="min-height:22px; min-width:22px; width:22px; height:22px; padding:0; border-radius:50%; font-size:0.75rem;">ℹ️</button>
             </label>
             <p id="qe-loc-no-areas-hint" class="hidden" style="color:var(--text-muted); font-size:0.78rem; margin:-0.5rem 0 0.5rem;">No rack areas defined yet for this warehouse (set them up on the Warehouse page) — type a code by hand below.</p>
+            ${localStorage.getItem('seen-bincode-hint') === '1' ? '' : `<div class="location-code-hint">
+                💡 <span><strong>Example:</strong> <code>A 3-3 1-1</code> = Zone A, Depth 3, Level 3, Bin 1, Row 1. Pick from the dropdowns below, or type it directly.</span>
+                <button type="button" class="secondary location-code-hint-dismiss" onclick="dismissLocationCodeHint()">Got it</button>
+            </div>`}
             <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
-                <select id="qe-loc-zone" onchange="onLocationZoneChange('qe')" style="width:auto; flex:1; min-width:80px; margin:0;"><option value="">Zone…</option></select>
-                <select id="qe-loc-depth" onchange="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:90px; margin:0;"><option value="">Depth…</option></select>
-                <select id="qe-loc-level" onchange="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:80px; margin:0;"><option value="">Level…</option></select>
+                <select id="qe-loc-zone" onchange="onLocationZoneChange('qe')" style="width:auto; flex:1; min-width:100px; margin:0;"><option value="">Zone…</option></select>
+                <select id="qe-loc-depth" onchange="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:110px; margin:0;"><option value="">Depth…</option></select>
+                <select id="qe-loc-level" onchange="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:100px; margin:0;"><option value="">Level…</option></select>
                 <input type="number" id="qe-loc-bin" placeholder="Bin" min="1" oninput="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:70px; margin:0;">
                 <input type="number" id="qe-loc-binrow" placeholder="Row (deep)" min="1" title="How many bins back from the front of the shelf — leave blank if it's the front-most (or only) bin" oninput="syncLocationCodeFromPicker('qe')" style="width:auto; flex:1; min-width:70px; margin:0;">
             </div>
@@ -9502,6 +9537,15 @@ th { background: #eee; }
         populateLocationDepthLevel(prefix, parsed);
     }
 
+    // Dismissed once, from wherever it happened to be showing (Add Item or quick-edit) — the flag is
+    // shared, so it stays gone in the other place too rather than needing to be dismissed twice.
+    // Hidden, not removed: the Add Item modal's copy is static markup reused on every future open
+    // (openAddItemModal/openEditItemModal toggle this same hidden class from the flag), so deleting
+    // the element outright would leave nothing there for that toggle to find next time.
+    function dismissLocationCodeHint() {
+        localStorage.setItem('seen-bincode-hint', '1');
+        document.querySelectorAll('.location-code-hint').forEach(el => el.classList.add('hidden'));
+    }
     function showLocationCodeInfo() {
         alert(
             "Bin Location Code format: Zone Depth-Level Bin-Row\n\n" +
@@ -9718,7 +9762,7 @@ th { background: #eee; }
     var binLocatorSelectedDepth = null;
     var binLocatorSelectedLevel = null;
     var binLocatorSelectedBin = null; // which bin (on the currently selected shelf) is highlighted in the item list below
-    var binLocatorHeatmapEnabled = localStorage.getItem('bin-locator-heatmap') === '1';
+    var binLocatorHeatmapEnabled = localStorage.getItem('bin-locator-heatmap') !== '0'; // on by default (opt-out, remembered per device)
 
     // ── Dashboard — optional (off by default, Settings → 📊 Dashboard), purely additive: doesn't
     // change the default landing view or any existing navigation, just adds a reachable summary.
@@ -9780,6 +9824,8 @@ th { background: #eee; }
         const select = document.getElementById('bin-locator-zone-select');
         select.innerHTML = zones.map(z => `<option value="${escapeHtml(z)}" ${z === binLocatorZone ? 'selected' : ''}>Zone ${escapeHtml(z)}</option>`).join('');
         document.getElementById('bin-locator-heatmap-toggle').checked = binLocatorHeatmapEnabled;
+        document.getElementById('bin-locator-touchpad-toggle').checked = binLocatorTouchpadEnabled;
+        document.getElementById('bin-locator-touchpad-wrap').classList.toggle('hidden', !binLocatorTouchpadEnabled);
         document.getElementById('bin-locator-detail').classList.add('hidden');
         renderBinLocatorGrid();
     }
@@ -9965,15 +10011,24 @@ th { background: #eee; }
         showBinLocatorHover(el, items, label, document.getElementById('bin-locator-iso'));
     }
 
-    // ── Touch pad: an indirect stand-in for hover on touch devices (off by default, "👆 Touch
-    // Preview" checkbox) — dragging inside the circle maps proportionally onto whichever rack view
-    // is currently showing and re-uses the exact same per-cell hover already wired up below
-    // (cell.onmouseenter) or onBinLocatorIsoHover, via document.elementFromPoint at the mapped
-    // screen position, rather than duplicating the "what's at this spot" lookup a third time. ──
+    // ── Touch pad: an indirect stand-in for hover on touch devices ("👆 Touch Preview" checkbox) —
+    // dragging inside the circle maps proportionally onto whichever rack view is currently showing
+    // and re-uses the exact same per-cell hover already wired up below (cell.onmouseenter) or
+    // onBinLocatorIsoHover, via document.elementFromPoint at the mapped screen position, rather than
+    // duplicating the "what's at this spot" lookup a third time.
+    // Defaults on for a touch/coarse-pointer device (a finger, not a mouse, is exactly who needs a
+    // hover stand-in) and off otherwise, UNLESS the person has explicitly flipped it themselves —
+    // that choice is remembered from then on, on this device, regardless of what the auto-detect
+    // would otherwise pick. ──
+    function isTouchDevice() { return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); }
+    var binLocatorTouchpadEnabled = localStorage.getItem('bin-locator-touchpad') != null
+        ? localStorage.getItem('bin-locator-touchpad') === '1'
+        : isTouchDevice();
     function onBinLocatorTouchpadChange() {
-        const on = document.getElementById('bin-locator-touchpad-toggle').checked;
-        document.getElementById('bin-locator-touchpad-wrap').classList.toggle('hidden', !on);
-        if (!on) hideBinLocatorHover();
+        binLocatorTouchpadEnabled = document.getElementById('bin-locator-touchpad-toggle').checked;
+        localStorage.setItem('bin-locator-touchpad', binLocatorTouchpadEnabled ? '1' : '0');
+        document.getElementById('bin-locator-touchpad-wrap').classList.toggle('hidden', !binLocatorTouchpadEnabled);
+        if (!binLocatorTouchpadEnabled) hideBinLocatorHover();
     }
     function binLocatorActiveRackContainer() {
         const isoOn = isoBinViewEnabled && typeof window.buildIsoRackSVG === 'function';
@@ -10187,6 +10242,7 @@ th { background: #eee; }
             .forEach(id => { document.getElementById(id).value = ''; });
         document.getElementById('ai-unittype').value = 'st';
         populateLocationCodePicker('ai', '');
+        document.getElementById('ai-loc-hint').classList.toggle('hidden', localStorage.getItem('seen-bincode-hint') === '1');
         document.getElementById('add-item-modal').classList.add('open');
     }
 
@@ -10220,6 +10276,7 @@ th { background: #eee; }
         document.getElementById('ai-comments').value = item.Comments === 'None' ? '' : item.Comments;
         document.getElementById('ai-link').value = item.Link === 'None' ? '' : (item.Link || '');
         populateLocationCodePicker('ai', item.LocationCode);
+        document.getElementById('ai-loc-hint').classList.toggle('hidden', localStorage.getItem('seen-bincode-hint') === '1');
         document.getElementById('add-item-modal').classList.add('open');
     }
 
@@ -12159,7 +12216,7 @@ ${css}
         document.getElementById('dashboard-enabled').checked = dashboardEnabled;
         document.getElementById('btn-dashboard').classList.toggle('hidden', !dashboardEnabled);
 
-        isoBinViewEnabled = localStorage.getItem('iso-bin-view') === '1';
+        isoBinViewEnabled = localStorage.getItem('iso-bin-view') !== '0';
         document.getElementById('iso-bin-view-enabled').checked = isoBinViewEnabled;
 
         // The actual corsFetch() behavior is already applied at page load (see the module bridge
@@ -12223,6 +12280,11 @@ ${css}
         // Editor+ like the other stock tools: a sync only ever changes quantities and the baseline,
         // it never creates or deletes an item.
         document.getElementById('btn-visma-sync').classList.toggle('hidden', !(isSupa && canEditItems()));
+        // The section heading itself would otherwise show with nothing under it for a role/mode
+        // where every button inside it just got hidden above (a viewer, or static/offline mode).
+        const adminToolIds = ['btn-manage-users', 'btn-manage-warehouses', 'btn-activity-log', 'btn-backorder-report', 'btn-pack-order-history', 'btn-unassigned-images', 'btn-visma-sync'];
+        const anyAdminTool = adminToolIds.some(id => !document.getElementById(id).classList.contains('hidden'));
+        document.getElementById('settings-admin-tools-section').classList.toggle('hidden', !anyAdminTool);
         document.getElementById('display-name-row').classList.toggle('hidden', !isSupa);
         // Storage/database usage stats are admin-only — editors/maintainers/viewers don't need
         // (or, per the requested role model, shouldn't see) account-wide quota info.

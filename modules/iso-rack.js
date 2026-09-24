@@ -214,7 +214,7 @@ function makeScene(fs) {
 const STYLE = `<style>
 .iso-floor{fill:var(--border);fill-opacity:.3}
 .iso-grid{stroke:var(--text-muted);stroke-opacity:.18;stroke-width:1;vector-effect:non-scaling-stroke;fill:none}
-.iso-post{stroke:#3b5f8a;stroke-opacity:.72;stroke-width:2.5;vector-effect:non-scaling-stroke;fill:none}
+.iso-post{stroke:#3b5f8a;stroke-opacity:.95;stroke-width:2.5;vector-effect:non-scaling-stroke;fill:none}
 .iso-board-top{fill:var(--card-bg);fill-opacity:.32;stroke:var(--text-muted);stroke-opacity:.45;stroke-width:1;vector-effect:non-scaling-stroke}
 .iso-board-front{fill:var(--text-muted);fill-opacity:.3;stroke:var(--text-muted);stroke-opacity:.45;stroke-width:1;vector-effect:non-scaling-stroke}
 .iso-board-side{fill:var(--text-muted);fill-opacity:.42;stroke:var(--text-muted);stroke-opacity:.45;stroke-width:1;vector-effect:non-scaling-stroke}
