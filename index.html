@@ -51,6 +51,20 @@
             --focus-ring: rgba(59, 130, 246, 0.5);
         }
 
+        /* Scrollbars (and other browser-native chrome like default checkbox styling) otherwise stay
+           light even in dark mode, since they're drawn by the OS/browser rather than this stylesheet.
+           color-scheme is the standards mechanism that tells the browser which palette to draw its
+           own UI in; the explicit ::-webkit-scrollbar rules on top of it match this app's own
+           --border/--background tokens exactly, for browsers that honor them (Chrome/Edge/Safari) —
+           Firefox instead follows scrollbar-color, set to the same two tokens. */
+        html { color-scheme: light; }
+        [data-theme="dark"] { color-scheme: dark; }
+        * { scrollbar-color: var(--border) var(--background); scrollbar-width: thin; }
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: var(--background); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
         /* --- BASE RESET & ACCESSIBILITY --- */
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
         
@@ -65,6 +79,10 @@
         .header-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
         .icon-btn { background: none; border: none; font-size: 1.25rem; cursor: pointer; color: var(--text-main); padding: 6px; border-radius: 50%; transition: background 0.2s; min-width: 38px; min-height: 38px; display: flex; align-items: center; justify-content: center; }
         .badge-count { position: absolute; top: 2px; right: 2px; background: var(--danger); color: white; font-size: 0.62rem; font-weight: 700; border-radius: 50%; min-width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; padding: 0 3px; line-height: 1; }
+        .badge-count.badge-count-accent { background: var(--primary); }
+        /* Small ringed corner marker for #btn-incoming-orders, same shape as .profile-role-badge —
+           sits at the opposite corner from .badge-count's own count so the two never overlap. */
+        .icon-btn-corner-badge { position: absolute; bottom: -2px; left: -2px; width: 15px; height: 15px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 0.55rem; font-weight: 800; display: flex; align-items: center; justify-content: center; border: 2px solid var(--card-bg); line-height: 1; }
         .icon-btn:hover, .icon-btn:active { background: var(--border); }
         /* "⋯ More" — Stocktaking/Dashboard/Theme/Console used to sit as their own permanent header
            icons alongside Pack Order/Scan/Settings; on a narrow phone that's 7 icons plus the logo,
@@ -192,6 +210,20 @@
             text-overflow: ellipsis;
             line-height: 1.3;
         }
+        @media (max-width: 640px) {
+            /* One size step down from the clamp() above — still not enough on its own for a genuinely
+               long title, which is what the marquee loop below is for. */
+            .item-title { font-size: clamp(0.725rem, 2.5vw, 0.875rem); }
+        }
+        /* A title too long to fit even at the reduced mobile size (applyTitleMarquee(), triggered by
+           a MutationObserver — see initTitleMarquee()) loops right-to-left like a neon sign instead
+           of just showing "…". text-overflow/ellipsis have no effect once .marquee-inner is scrolling. */
+        .item-title.marquee { text-overflow: clip; }
+        .item-title .marquee-inner { display: inline-block; white-space: nowrap; will-change: transform; animation-name: item-title-marquee; animation-timing-function: linear; animation-iteration-count: infinite; }
+        @keyframes item-title-marquee {
+            0%, 15% { transform: translateX(0); }
+            85%, 100% { transform: translateX(var(--marquee-distance)); }
+        }
         .item-sub { font-size: 0.8rem; color: var(--text-muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
 
         /* Kit list rows */
@@ -207,6 +239,10 @@
         .kit-name { font-size: 1.05rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .kit-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
         .kit-qty-badge { background: var(--primary); color: white; border-radius: 8px; padding: 4px 10px; font-weight: 700; font-size: 0.8rem; flex-shrink: 0; }
+        /* A kit's dominant manufacturer (most of its items' own) shown as a solid "filled in" box on
+           its list row, distinct from .kit-tag's outlined pill — same idea as .low-stock-badge, just
+           neutral-coloured so it doesn't visually compete with the blue quantity badge next to it. */
+        .kit-manufacturer-badge { display: inline-block; background: var(--border); color: var(--text-main); font-size: 0.72rem; font-weight: 700; padding: 2px 9px; border-radius: 10px; white-space: nowrap; }
 
         /* Kit tags on item detail */
         .kit-tags { display: flex; gap: 8px; flex-wrap: wrap; margin: 1rem 0; }
@@ -229,6 +265,18 @@
         .fab-wrapper { background: var(--card-bg); padding: 6px; border-radius: 50px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2); display: flex; gap: 6px; pointer-events: auto; border: 1px solid var(--border); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); transform: translateY(calc(100% + 50px + 24px)); }
         .fab-wrapper.visible { transform: translateY(0); }
         .fab-btn { border-radius: 50px; padding: 0.75rem 1.5rem; margin: 0; }
+        /* On a narrow phone, up to 4-5 of these pills (✕ Clear, Label, Pack, Delete, Merge) never fit
+           at their normal padding — flexbox was shrinking each button below its own text's width,
+           wrapping "Create Labels (1)" mid-phrase onto a second line and making the whole bar tall
+           enough to reach up into the Assistant/camera FABs' raised position. Shrink padding/font and
+           keep every button's own text on one line; if it still doesn't all fit, it scrolls
+           horizontally rather than squeezing — but with the scrollbar itself hidden (still fully
+           scrollable by touch/drag, just without a visible track cluttering a small pill-shaped bar). */
+        @media (max-width: 640px) {
+            .fab-wrapper { max-width: calc(100vw - 2rem); overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+            .fab-wrapper::-webkit-scrollbar { display: none; }
+            .fab-btn, .fab-clear { flex-shrink: 0; white-space: nowrap; padding: 0.45rem 0.75rem; font-size: 0.78rem; }
+        }
         .fab-btn-pack { background: var(--success); }
         .fab-btn-pack:hover { background: #0d9c6f; }
         .fab-btn-danger { background: var(--danger); }
@@ -435,6 +483,17 @@
         .pack-remove-btn { flex-shrink: 0; width: 24px; height: 24px; min-height: unset; padding: 0; border-radius: 50%; background: var(--danger); color: white; font-weight: 700; font-size: 0.72rem; line-height: 1; display: grid; place-items: center; }
         .pack-remove-btn:hover { background: #dc2626; transform: none; }
 
+        /* --- PACK ORDER PICK ROUTE (where everything in the order actually is, zone by zone) --- */
+        .pick-route-zone { position: relative; margin-bottom: 1.5rem; }
+        .pick-route-lines-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+        .pick-route-line { stroke: var(--primary); stroke-opacity: 0.45; stroke-width: 1.5; }
+        .pick-route-line.active { stroke: var(--danger); stroke-opacity: 0.9; stroke-width: 2.5; }
+        .pick-route-num { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 0.72rem; font-weight: 800; flex-shrink: 0; }
+        .pick-route-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0.2rem; border-bottom: 1px solid var(--border); cursor: pointer; border-radius: 6px; }
+        .pick-route-row:last-child { border-bottom: none; }
+        .pick-route-row:hover, .pick-route-row.active { background: var(--primary-light); }
+        .pick-route-grid .map-cell { font-size: 0.7rem; }
+
         /* On a phone-width screen, .kit-row's normal single-line layout (qty + name/info +
            the ~108px-wide toggle button + the remove button, all fighting for one row) squeezed
            .kit-info down to ~90px — barely enough for the item name (which already ellipsizes),
@@ -546,7 +605,7 @@
             position: fixed; bottom: 20px; right: 20px; width: 56px; height: 56px; border-radius: 50%;
             background: var(--primary); color: #fff; border: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.35);
             font-size: 1.5rem; line-height: 1; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
-            transition: transform 0.15s;
+            transition: transform 0.15s, bottom 0.2s;
         }
         #ai-fab:hover { transform: scale(1.06); }
         .ai-fab-badge { position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--danger); border: 2px solid var(--card-bg); }
@@ -558,7 +617,7 @@
             position: fixed; bottom: 20px; right: 84px; width: 48px; height: 48px; border-radius: 50%;
             background: #6b7280; color: #fff; border: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.35);
             font-size: 1.25rem; line-height: 1; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
-            transition: transform 0.15s;
+            transition: transform 0.15s, bottom 0.2s;
         }
         #ai-fab-mic:hover { transform: scale(1.06); }
         #ai-fab-mic.hidden { display: none; }
@@ -569,13 +628,27 @@
            hides the instant the panel opens and takes over that same space, rather than only
            appearing once the panel's already open like the mic does. */
         #ai-fab-ocr {
-            position: fixed; bottom: 84px; right: 20px; width: 48px; height: 48px; border-radius: 50%;
+            position: fixed; bottom: 84px; right: 20px; width: 56px; height: 56px; border-radius: 50%;
             background: #9ca3af; color: #fff; border: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.35);
             font-size: 1.5rem; line-height: 1; cursor: pointer; z-index: 4000; display: flex; align-items: center; justify-content: center;
-            transition: transform 0.15s;
+            transition: transform 0.15s, bottom 0.2s;
         }
         #ai-fab-ocr:hover { transform: scale(1.06); }
         #ai-fab-ocr.hidden { display: none; }
+        /* On a narrow phone, the centered multi-select bar (.fab-wrapper, "Label"/"Pack"/"Delete")
+           and the quick-edit save/cancel bar (.floating-edit-bar) both float at the bottom of the
+           screen and can visually collide with these same-corner Assistant/mic/camera FABs — float
+           the FABs up out of the way whenever either bar is showing. :has() reacts automatically to
+           whatever already toggles .visible on either bar, so no JS call site needs to know about this. */
+        @media (max-width: 640px) {
+            body:has(.fab-wrapper.visible) #ai-fab, body:has(.floating-edit-bar.visible) #ai-fab,
+            body:has(.fab-wrapper.visible) #ai-fab-mic, body:has(.floating-edit-bar.visible) #ai-fab-mic {
+                bottom: 132px;
+            }
+            body:has(.fab-wrapper.visible) #ai-fab-ocr, body:has(.floating-edit-bar.visible) #ai-fab-ocr {
+                bottom: 196px;
+            }
+        }
         #ai-panel {
             position: fixed; bottom: 88px; right: 20px; width: 360px; max-width: calc(100vw - 2rem);
             max-height: min(70vh, 640px); background: var(--card-bg); border: 1px solid var(--border);
@@ -706,7 +779,7 @@
 <div class="modal-overlay" id="manage-users-modal" onclick="handleUsersModalOverlayClick(event)">
     <div class="modal-box" style="max-width:620px;">
         <h3>👥 Manage Users</h3>
-        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">The dropdown sets each person's global role, which applies in their home warehouse (from account setup). <strong>A person can work in several warehouses</strong>: tick as many as you like under "Add warehouses" and pick what they can do there — it starts as their global role, so an Editor gets Editor in each. Admins work in every warehouse. Changes take effect on that person's next action.</p>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">The dropdown sets each person's global role, which applies everywhere they don't have a more specific warehouse override. <strong>A person can work in several warehouses</strong>: tick as many as you like under "Add warehouses" (their own home warehouse can be ticked too, to give them a different role there without changing their global one) and pick what they can do there — the role dropdown next to the checkboxes starts pre-filled with their current global role, so double-check it actually says what you mean before adding: leaving it as-is just repeats access they already have. Admins work in every warehouse. Changes take effect on that person's next action (a page reload if they're already signed in).</p>
         <div id="users-list-container">Loading…</div>
         <div class="modal-actions">
             <button class="secondary full-width" onclick="closeManageUsersModal()">Close</button>
@@ -790,6 +863,39 @@
         <div id="pack-order-history-list-container" style="max-height:55vh; overflow-y:auto;">Loading…</div>
         <div class="modal-actions">
             <button class="secondary full-width" onclick="closePackOrderHistoryModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Incoming Orders — every open (unpacked) order across every warehouse this account can access,
+     whether assigned to a specific person or left open for anyone in that warehouse. The queue's
+     own multi-warehouse cache is separate from Pack Order History's single-warehouse one, since it
+     spans warehouses that one never queries. -->
+<div class="modal-overlay" id="incoming-orders-modal" onclick="handleIncomingOrdersModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:680px;">
+        <h3>📦→ Incoming Orders</h3>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem;">Every order still waiting to be packed, across every warehouse you work in. Pick one to start packing it.</p>
+        <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--text-muted); margin-bottom:0.75rem; cursor:pointer;">
+            <input type="checkbox" id="incoming-orders-mine-only" onchange="renderIncomingOrdersQueue()" style="width:auto; min-height:unset; margin:0;">
+            Assigned to me only
+        </label>
+        <div id="incoming-orders-list-container" style="max-height:55vh; overflow-y:auto;">Loading…</div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeIncomingOrdersModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Messages — lightweight direct messages between colleagues (see supabase/schema_messaging.sql).
+     One modal, two "screens" swapped by re-rendering #messages-modal-body: the inbox list (grouped
+     by other party) and a single conversation thread (also used for composing a brand-new one, with
+     a recipient picker instead of a fixed thread partner). -->
+<div class="modal-overlay" id="messages-modal" onclick="handleMessagesModalOverlayClick(event)">
+    <div class="modal-box" style="max-width:520px;">
+        <h3>✉️ Messages</h3>
+        <div id="messages-modal-body" style="max-height:60vh; overflow-y:auto;">Loading…</div>
+        <div class="modal-actions">
+            <button class="secondary full-width" onclick="closeMessagesModal()">Close</button>
         </div>
     </div>
 </div>
@@ -1344,8 +1450,18 @@
         <img src="logo.png" alt="Company Logo" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzI1NjNlYiIgcng9IjIwIi8+PHRleHQgeD0iNTAiIHk9IjU4IiBmb250LWZhbWlseT0ic3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjQ0IiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSIjZmZmZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5XVzwvdGV4dD48L3N2Zz4='" />
     </div>
     <div class="header-actions">
+        <button class="icon-btn hidden" id="btn-incoming-orders" onclick="openIncomingOrdersModal()" aria-label="Incoming Orders" title="Incoming Orders" style="position:relative;">
+            📦<span class="icon-btn-corner-badge" aria-hidden="true">→</span><span id="incoming-orders-badge" class="badge-count badge-count-accent">0</span>
+        </button>
         <button class="icon-btn hidden" id="btn-pack-order" onclick="openPackOrderView()" aria-label="View Pack Order" title="Pack Order" style="position:relative;">
             📦<span id="pack-order-badge" class="badge-count">0</span>
+        </button>
+        <!-- Permanent (isSupa-gated, not hidden-until-unread) — deliberately sits right next to
+             "⋯ More"/the profile avatar rather than being buried inside the dropdown, since Messages
+             is a general communication feature everyone should always be able to reach, not just
+             when something new has arrived. Only the count badge itself hides at zero. -->
+        <button class="icon-btn hidden" id="btn-messages" onclick="openMessagesModal()" aria-label="Messages" title="Messages" style="position:relative;">
+            ✉️<span id="messages-badge" class="badge-count hidden">0</span>
         </button>
         <div class="header-more-wrap">
             <button class="icon-btn" id="btn-header-more" onclick="toggleHeaderMoreMenu(event)" aria-label="More" aria-haspopup="true" title="More">
@@ -1461,6 +1577,16 @@
                 <button class="search-clear" onclick="clearKitSearch()" aria-label="Clear Search" tabindex="-1">✕</button>
             </div>
             <div class="list-stats" id="kit-list-stats"></div>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+                <label for="kit-sort-by" style="margin: 0; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Sort</label>
+                <select id="kit-sort-by" onchange="onKitSortChange()" style="margin: 0; width: auto; padding: 6px 10px; min-height: unset; font-size: 0.8rem;">
+                    <option value="name">Name (A–Z)</option>
+                    <option value="manufacturer">Manufacturer</option>
+                </select>
+                <select id="kit-manufacturer-filter" onchange="onKitManufacturerFilterChange()" style="margin: 0; width: auto; padding: 6px 10px; min-height: unset; font-size: 0.8rem;">
+                    <option value="">Manufacturers</option>
+                </select>
+            </div>
         </div>
 
         <div id="manufacturers-only-controls" class="hidden">
@@ -1688,6 +1814,17 @@
         <p id="pack-order-progress" style="color:var(--text-muted); margin-bottom:1rem;"></p>
         <div id="pack-order-items"></div>
 
+        <!-- Where everything in the order actually is, one mini bin-locator grid per zone involved —
+             every relevant shelf marked and numbered in the same pick order the list above uses, with
+             a line from each list row to its exact shelf so there's no doubt which is which. Always
+             shown (not hover-gated) since it's meant to be read as a whole picking route at a glance;
+             hovering a row still bolds its own line/cell for when several cross near each other. -->
+        <div id="pack-order-pick-route" class="hidden" style="margin-top:1.5rem; border-top:1px solid var(--border); padding-top:1rem;">
+            <strong style="color:var(--text-muted); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.5px;">📍 Pick Route</strong>
+            <p style="color:var(--text-muted); font-size:0.82rem; margin:0.35rem 0 1rem;">Numbered in the same order as the list above — tap a row or a shelf to jump to that item.</p>
+            <div id="pack-order-pick-route-zones"></div>
+        </div>
+
         <div style="text-align:center; margin:1.5rem 0 0.5rem; color:var(--text-muted); font-size:1.8rem;" aria-hidden="true">⬇️</div>
 
         <div class="setting-row">
@@ -1732,6 +1869,14 @@
                 <button type="button" class="secondary" onclick="document.getElementById('vcard-file-input').click()" style="padding:0.4rem 0.8rem; min-height:auto; font-size:0.8rem;">📥 Import .vcf</button>
                 <input type="file" id="vcard-file-input" accept=".vcf,text/vcard" class="hidden" onchange="handleVCardFileSelected(event)">
             </div>
+        </div>
+
+        <!-- Who this order is routed to — a specific colleague, or left unassigned so anyone with
+             access to this warehouse can pick it up from Incoming Orders. Purely informational: it
+             never restricts who can actually open/pack the order (see schema_order_assignment.sql). -->
+        <div class="setting-row hidden" id="pack-order-assign-section">
+            <label for="pack-order-assignee">Assign to</label>
+            <select id="pack-order-assignee" onchange="onPackOrderAssigneeChange()"></select>
         </div>
 
         <button class="full-width hidden" id="btn-save-pack-order" onclick="savePackOrder()" style="margin-top:0.5rem;">💾 Save Order</button>
@@ -1995,6 +2140,7 @@
             <button class="secondary full-width hidden" id="btn-activity-log" onclick="openActivityLogModal()" style="margin-bottom:1rem;">📜 Activity Log</button>
             <button class="secondary full-width hidden" id="btn-backorder-report" onclick="openBackorderReportModal()" style="margin-bottom:1rem;">📋 Backorder Report</button>
             <button class="secondary full-width hidden" id="btn-pack-order-history" onclick="openPackOrderHistoryModal()" style="margin-bottom:1rem;">🧾 Pack Order History</button>
+            <button class="secondary full-width hidden" id="btn-incoming-orders-settings" onclick="openIncomingOrdersModal()" style="margin-bottom:1rem;">📦→ Incoming Orders</button>
             <button class="secondary full-width hidden" id="btn-unassigned-images" onclick="openUnassignedImagesModal()" style="margin-bottom:1rem;">🗄️ Unassigned Images</button>
             <button class="secondary full-width hidden" id="btn-visma-sync" onclick="openVismaSyncModal()" style="margin-bottom:1rem;">🔄 Visma Sync</button>
         </div>
@@ -2080,12 +2226,12 @@
         <div class="fab-wrapper" id="fab-bar">
             <button class="fab-clear" onclick="clearSelection()" aria-label="Clear Selection">✕</button>
             <button class="fab-btn" onclick="generateLabelsPreview()">
-                🏷️ Create Labels (<span id="selected-count">0</span>)
+                🏷️ Label (<span id="selected-count">0</span>)
             </button>
             <button class="fab-btn fab-btn-pack" onclick="addSelectionToPackOrder()">
                 📦 Pack (<span id="selected-count-pack">0</span>)
             </button>
-            <button class="fab-btn fab-btn-danger hidden" id="btn-fab-remove" onclick="confirmRemoveSelectedItems()">🗑️ Remove</button>
+            <button class="fab-btn fab-btn-danger hidden" id="btn-fab-remove" onclick="confirmRemoveSelectedItems()">🗑️ Delete</button>
             <button class="fab-btn fab-btn-merge hidden" id="btn-fab-merge" onclick="openMergeView()">🔀 Merge</button>
         </div>
     </div>
@@ -2152,6 +2298,8 @@
     var isoBinScope = 'rack';      // item page: 'rack' (one rack area, zoomed) or 'floor' (every rack area on the warehouse floor)
     var cameraScanSupported = true; // flipped off at startup if the browser has no camera API at all — see window.onload
     var manufacturerFilter = ''; // list-view filter — derived options, not a separate table
+    var kitSortBy = 'name';
+    var kitManufacturerFilter = ''; // a kit "is" a manufacturer's if any of its items are — see kitManufacturers()
     // On by default (unlike other list-view toggles) — a negative stock number is essentially
     // always a data problem (an unreliable import figure, a stock-adjustment slip) rather than a
     // real "less than zero on the shelf" fact, so it's more useful hidden from the everyday list
@@ -2181,6 +2329,11 @@
     var packOrderBox = { preset: '', length: '', width: '', height: '', weight: '' };
     var packOrderRecipient = { name: '', address: '', email: '', orgNumber: '' }; // email/orgNumber: in-memory/local-only, never sent to the orders table — see savePackOrder()
     var packOrderSavedNumber = null; // set once savePackOrder() succeeds, e.g. "ORD000042"
+    var packOrderAssignedTo = null; // uuid of the colleague this order is routed to, or null = anyone in the warehouse
+    var incomingOrdersCache = []; // open orders across every warehouse this account can access — see renderIncomingOrdersQueue()
+    var messagesInboxCache = []; // every message this account has sent/received — see renderMessagesInbox()
+    var messagesActiveThreadUserId = null; // whose thread #messages-modal-body is currently showing, or null for the inbox/compose screen
+    var messagesColleaguesCache = null; // list_colleagues() result, cached per modal-open for the "New Message" recipient picker
     const PACK_BOX_PRESETS = {
         small:  { length: 200, width: 150, height: 100 },
         medium: { length: 300, width: 200, height: 150 },
@@ -3093,33 +3246,44 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         container.innerHTML = users.map(u => {
             const grants = manageUsersPermissions.filter(p => p.user_id === u.id);
             const isAdmin = u.role === 'admin';
-            // Where this person works: their home warehouse (from account setup; not editable here) plus every
-            // per-warehouse grant. The rows are the same thing as the "Add warehouses" below, just already added.
-            const homeRow = u.warehouse_id
+            const grantedIds = new Set(grants.map(g => g.warehouse_id));
+            // Where this person works: their home warehouse (from account setup; its ROLE isn't
+            // editable here, only via the global dropdown above — but see below, it CAN be
+            // overridden per-warehouse same as any other) plus every per-warehouse grant. A grant
+            // that happens to target their own home warehouse replaces this plain line instead of
+            // sitting alongside it — showing both would just be the same warehouse listed twice with
+            // two different roles, since this line always reads the global role, not the override.
+            const homeRow = (u.warehouse_id && !grantedIds.has(u.warehouse_id))
                 ? `<div style="display:flex; align-items:center; gap:8px; font-size:0.8rem; padding:2px 0;">
                     <span style="flex:1;">${escapeHtml(whName(u.warehouse_id))}: <strong style="text-transform:capitalize;">${escapeHtml(u.role === 'maintainer' ? 'viewer' : u.role)}</strong> <span style="color:var(--text-muted);">(home warehouse)</span></span>
                 </div>` : '';
             const grantRows = grants.map(g => `<div style="display:flex; align-items:center; gap:8px; font-size:0.8rem; padding:2px 0;">
-                    <span style="flex:1;">${escapeHtml(whName(g.warehouse_id))}: <strong style="text-transform:capitalize;">${escapeHtml(g.role)}</strong></span>
-                    <button class="secondary" data-user-id="${escapeHtml(u.id)}" data-wh-id="${escapeHtml(g.warehouse_id)}" onclick="revokeWarehousePermission(this.dataset.userId, this.dataset.whId)" title="Remove this warehouse" style="padding:2px 8px; min-height:auto; font-size:0.75rem; color:var(--danger);">✕</button>
+                    <span style="flex:1;">${escapeHtml(whName(g.warehouse_id))}: <strong style="text-transform:capitalize;">${escapeHtml(g.role)}</strong>${g.warehouse_id === u.warehouse_id ? ` <span style="color:var(--text-muted);">(home warehouse, overridden)</span>` : ''}</span>
+                    <button class="secondary" data-user-id="${escapeHtml(u.id)}" data-wh-id="${escapeHtml(g.warehouse_id)}" onclick="revokeWarehousePermission(this.dataset.userId, this.dataset.whId)" title="${g.warehouse_id === u.warehouse_id ? 'Remove the override — falls back to their global role here' : 'Remove this warehouse'}" style="padding:2px 8px; min-height:auto; font-size:0.75rem; color:var(--danger);">✕</button>
                 </div>`).join('');
             const worksIn = isAdmin
                 ? `<div style="font-size:0.78rem; color:var(--text-muted);">Admins work in every warehouse.</div>`
                 : (homeRow + grantRows) || `<div style="font-size:0.78rem; color:var(--text-muted);">Not assigned to any warehouse yet — add one below.</div>`;
-            // Warehouses they don't work in yet, as checkboxes so several can be added in one go.
-            const taken = new Set([u.warehouse_id, ...grants.map(g => g.warehouse_id)].filter(Boolean));
-            const available = manageUsersWarehouses.filter(w => !taken.has(w.l));
+            // Every warehouse without its own grant yet — including their home one: its "Works in"
+            // line above shows the global role, but nothing stopped a grant from targeting it too
+            // (computeEffectiveRole() checks a warehouse_permissions row before ever falling back to
+            // the global role, regardless of which warehouse it's for) except this list arbitrarily
+            // leaving it out. That's the fix for "gave a viewer editor in a warehouse and it didn't
+            // work" when the warehouse in question was their own home one: there was simply no way to
+            // grant a role there other than the global dropdown, which changes it EVERYWHERE, not
+            // just that one warehouse.
+            const available = manageUsersWarehouses.filter(w => !grantedIds.has(w.l));
             const defaultRole = ['viewer', 'editor', 'maintainer', 'admin'].includes(u.role) ? u.role : 'viewer';
             const roleOption = (value, label) => `<option value="${value}" ${defaultRole === value ? 'selected' : ''}>${label}</option>`;
             const addBox = isAdmin ? '' : (available.length ? `
                 <div id="grant-box-${u.id}" style="margin-top:6px;">
-                    <div style="font-size:0.78rem; color:var(--text-muted); margin-bottom:2px;">Add warehouses:</div>
+                    <div style="font-size:0.78rem; color:var(--text-muted); margin-bottom:2px;">Add warehouses (tick their home warehouse too to override just their role there, instead of changing the global dropdown above):</div>
                     <div style="display:flex; flex-wrap:wrap; gap:4px 14px; margin-bottom:6px;">
-                        ${available.map(w => `<label style="display:flex; align-items:center; gap:5px; font-size:0.82rem; margin:0; cursor:pointer;"><input type="checkbox" class="grant-wh-check" value="${escapeHtml(w.l)}" style="width:auto; margin:0;"> ${escapeHtml(w.name)}</label>`).join('')}
+                        ${available.map(w => `<label style="display:flex; align-items:center; gap:5px; font-size:0.82rem; margin:0; cursor:pointer;"><input type="checkbox" class="grant-wh-check" value="${escapeHtml(w.l)}" style="width:auto; margin:0;"> ${escapeHtml(w.name)}${w.l === u.warehouse_id ? ' <span style="color:var(--text-muted);">(home)</span>' : ''}</label>`).join('')}
                     </div>
                     <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                         <span style="font-size:0.78rem;">as</span>
-                        <select id="grant-role-${u.id}" title="What they can do in the ticked warehouses. Starts as their global role." style="width:auto; margin:0; padding:4px 8px; font-size:0.78rem;">
+                        <select id="grant-role-${u.id}" title="What they can do in the ticked warehouses. Starts as their global role — double check this if you mean to actually change what they can do, since leaving it as-is grants no more than they already have." style="width:auto; margin:0; padding:4px 8px; font-size:0.78rem;">
                             ${roleOption('viewer', 'Viewer')}${roleOption('editor', 'Editor')}${roleOption('maintainer', 'Maintainer')}${roleOption('admin', 'Admin')}
                         </select>
                         <button class="secondary" onclick="grantWarehousePermission('${u.id}')" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">+ Add ticked</button>
@@ -3436,19 +3600,28 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         }).join('');
     }
 
+    // Shared by reloadSavedOrderIntoPackOrder() (Pack Order History, one warehouse) and
+    // startPackingIncomingOrder() (Incoming Orders, spans every warehouse the account can access) —
+    // both end up with an order **row** in hand from their own differently-scoped cache/query, so
+    // this takes the row directly rather than looking it up itself.
+    function applyOrderRowToPackOrder(order) {
+        // backorder is carried over too — it used to be dropped here, so a reloaded order lost the
+        // "⚠ n backordered" note (and its column on the printed sheet).
+        packOrder = (order.items || []).map(l => ({ btk: l.btk, qty: l.qty, packed: !!l.packed, ...(l.backorder > 0 ? { backorder: l.backorder } : {}) }));
+        packOrderRecipient = { name: order.recipient_name || '', address: order.recipient_address || '', email: '', orgNumber: '' };
+        packOrderBox = { preset: '', length: order.box_length || '', width: order.box_width || '', height: order.box_height || '', weight: order.box_weight || '' };
+        packOrderSavedNumber = order.order_number;
+        packOrderFulfilled = order.status === 'fulfilled';
+        packOrderAssignedTo = order.assigned_to || null;
+        updatePackOrderBadge();
+    }
+
     function reloadSavedOrderIntoPackOrder(orderNumber) {
         const order = packOrderHistoryCache.find(o => o.order_number === orderNumber);
         if (!order) return;
         const doReload = () => {
-            // backorder is carried over too — it used to be dropped here, so a reloaded order lost the
-            // "⚠ n backordered" note (and its column on the printed sheet).
-            packOrder = (order.items || []).map(l => ({ btk: l.btk, qty: l.qty, packed: !!l.packed, ...(l.backorder > 0 ? { backorder: l.backorder } : {}) }));
-            packOrderRecipient = { name: order.recipient_name || '', address: order.recipient_address || '', email: '', orgNumber: '' };
-            packOrderBox = { preset: '', length: order.box_length || '', width: order.box_width || '', height: order.box_height || '', weight: order.box_weight || '' };
-            packOrderSavedNumber = order.order_number;
-            packOrderFulfilled = order.status === 'fulfilled';
+            applyOrderRowToPackOrder(order);
             closePackOrderHistoryModal();
-            updatePackOrderBadge();
             openPackOrderView();
             showToast(`Reloaded ${order.order_number} into Pack Order.`, "success");
         };
@@ -3462,6 +3635,123 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         } else {
             doReload();
         }
+    }
+
+    // ── Incoming Orders — every open (unpacked) order across every warehouse this account can
+    // access, whether routed to a specific colleague (order.assigned_to) or left open for anyone in
+    // that warehouse. Assignment is advisory only (see schema_order_assignment.sql) — this queue
+    // shows every open order regardless, with an optional client-side "mine only" filter, since
+    // visibility was never gated on it. Admin is special-cased the same way list_warehouse_permissions()/
+    // list_profiles_with_email() already are, since userWarehouseIds() only covers a home warehouse
+    // plus explicit grants and would under-count an admin with neither in some warehouse they can
+    // still see everything in via RLS.
+    function openIncomingOrdersModal() {
+        if (!canEditItems()) { showToast("Editor or admin only.", "warning"); return; }
+        document.getElementById('incoming-orders-modal').classList.add('open');
+        renderIncomingOrdersQueue();
+    }
+    function closeIncomingOrdersModal() { document.getElementById('incoming-orders-modal').classList.remove('open'); }
+    function handleIncomingOrdersModalOverlayClick(e) { if (e.target === document.getElementById('incoming-orders-modal')) closeIncomingOrdersModal(); }
+
+    async function renderIncomingOrdersQueue() {
+        const container = document.getElementById('incoming-orders-list-container');
+        container.innerHTML = 'Loading…';
+        const myId = await currentAuthUserId();
+        let query;
+        if (currentUserRole === 'admin') {
+            query = sb.from('orders').select('*').eq('status', 'open').order('created_at');
+        } else {
+            const { data: profile, error: profileError } = await sb.from('profiles').select('*').eq('id', myId).single();
+            if (profileError) { container.innerHTML = `<p style="color:var(--danger);">Could not load your profile: ${escapeHtml(profileError.message)}</p>`; return; }
+            const wids = userWarehouseIds(profile);
+            if (!wids.length) { container.innerHTML = `<p style="color:var(--text-muted);">You don't have access to any warehouse yet.</p>`; return; }
+            query = sb.from('orders').select('*').in('warehouse_id', wids).eq('status', 'open').order('created_at');
+        }
+        const { data, error } = await query;
+        if (error) { container.innerHTML = `<p style="color:var(--danger);">Could not load orders: ${escapeHtml(error.message)}</p>`; return; }
+        incomingOrdersCache = data || [];
+
+        const mineOnly = document.getElementById('incoming-orders-mine-only').checked;
+        const filtered = mineOnly ? incomingOrdersCache.filter(o => o.assigned_to === myId) : incomingOrdersCache;
+        if (!filtered.length) { container.innerHTML = `<p style="color:var(--text-muted);">${mineOnly ? 'Nothing assigned to you right now.' : 'Nothing waiting to be packed.'}</p>`; return; }
+
+        const assigneeIds = Array.from(new Set(filtered.map(o => o.assigned_to).filter(Boolean)));
+        const names = {};
+        await Promise.all(assigneeIds.map(async id => { names[id] = await resolveDisplayName(id); }));
+
+        container.innerHTML = filtered.map(order => {
+            const lines = order.items || [];
+            const meta = getWarehouseMeta(order.warehouse_id);
+            const assignee = order.assigned_to ? (names[order.assigned_to] || 'Someone') : 'Anyone in this warehouse';
+            const when = new Date(order.created_at).toLocaleString();
+            return `<div style="padding:10px 0; border-bottom:1px solid var(--border);">
+                <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start; flex-wrap:wrap;">
+                    <div>
+                        <div style="font-weight:700;">${escapeHtml(order.order_number)} <span style="color:var(--text-muted); font-weight:600; font-size:0.78rem;">· ${escapeHtml(meta.name)}</span></div>
+                        <div style="color:var(--text-muted); font-size:0.8rem; margin-top:2px;">${order.recipient_name ? escapeHtml(order.recipient_name) + ' · ' : ''}${lines.length} item${lines.length === 1 ? '' : 's'} · 👤 ${escapeHtml(assignee)} · ${when}</div>
+                    </div>
+                    <button class="success-btn" onclick="startPackingIncomingOrder(${order.id})" style="padding:4px 10px; min-height:auto; font-size:0.78rem; flex-shrink:0;">▶ Start Packing</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // Jumping into an order from a warehouse other than the currently open one needs no re-entered
+    // password for a Supabase warehouse (switchWarehouse() just needs the active session) — but it
+    // does silently clear any in-progress unsaved packOrder via resetPerWarehouseState(), previously
+    // only reachable via a deliberate switcher action. Warn explicitly before doing that as a side
+    // effect of a queue click, same confirm shape reloadSavedOrderIntoPackOrder() already uses.
+    async function startPackingIncomingOrder(orderId) {
+        const order = incomingOrdersCache.find(o => o.id === orderId);
+        if (!order) return;
+        const switchingWarehouse = order.warehouse_id !== currentWarehouseId;
+        const proceed = async () => {
+            if (switchingWarehouse) await switchWarehouse(order.warehouse_id);
+            applyOrderRowToPackOrder(order);
+            closeIncomingOrdersModal();
+            openPackOrderView();
+            showToast(`Started packing ${order.order_number}.`, "success");
+        };
+        if (packOrder.length && switchingWarehouse) {
+            showConfirmModal({
+                title: 'Switch warehouse and replace current Pack Order?',
+                body: `${order.order_number} belongs to ${getWarehouseMeta(order.warehouse_id).name}. Switching there clears the ${packOrder.length} item(s) currently in your Pack Order (they belong to ${getWarehouseMeta(currentWarehouseId).name}).`,
+                confirmLabel: '🔁 Switch & Start',
+                onConfirm: proceed
+            });
+        } else if (packOrder.length) {
+            showConfirmModal({
+                title: 'Replace current Pack Order?',
+                body: `This replaces the ${packOrder.length} item(s) currently in your Pack Order with ${order.order_number}'s ${(order.items || []).length} item(s).`,
+                confirmLabel: '🔁 Reload',
+                onConfirm: proceed
+            });
+        } else {
+            proceed();
+        }
+    }
+
+    async function refreshIncomingOrdersBadge() {
+        if (!currentActiveKey || getWarehouseMeta(currentWarehouseId).mode !== 'supabase' || !canEditItems()) {
+            document.getElementById('btn-incoming-orders').classList.add('hidden');
+            return;
+        }
+        const myId = await currentAuthUserId();
+        if (!myId) return;
+        let count = 0;
+        if (currentUserRole === 'admin') {
+            const { count: c } = await sb.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'open');
+            count = c || 0;
+        } else {
+            const { data: profile, error } = await sb.from('profiles').select('*').eq('id', myId).single();
+            if (error) return;
+            const wids = userWarehouseIds(profile);
+            if (!wids.length) { document.getElementById('btn-incoming-orders').classList.add('hidden'); return; }
+            const { count: c } = await sb.from('orders').select('id', { count: 'exact', head: true }).in('warehouse_id', wids).eq('status', 'open');
+            count = c || 0;
+        }
+        document.getElementById('incoming-orders-badge').innerText = count;
+        document.getElementById('btn-incoming-orders').classList.toggle('hidden', count === 0);
     }
 
     // "Last updated by" — resolves via get_display_name() (their own chosen name, or their
@@ -3521,6 +3811,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         await supabaseLoadWarehouseMeta(wid);
         await supabaseLoadAllWarehouses(); // so the switcher offers every Supabase warehouse, not just this one
         await supabaseLoadWarehouseZones(wid);
+        // Single chokepoint for "a Supabase session just became active" — covers login, page
+        // restore, warehouse switch, and shared-item-link entry alike, since all four call this.
+        refreshUnreadMessageBadge();
+        refreshIncomingOrdersBadge();
         return wid;
     }
 
@@ -3529,6 +3823,158 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function userWarehouseIds(profile) {
         return [...new Set([profile.warehouse_id, ...myWarehousePermissions.map(p => p.warehouse_id)].filter(Boolean))];
     }
+
+    // ── Messages — lightweight direct messages between colleagues (supabase/schema_messaging.sql).
+    // One modal, two "screens" swapped by re-rendering #messages-modal-body: the inbox (grouped by
+    // the other party) and a single thread view, also used for composing a brand-new message (with a
+    // recipient picker instead of a fixed thread partner). No realtime/polling anywhere in this app —
+    // refreshed on modal open, after your own sends/reads, and on window focus/visibility, extending
+    // the existing "fetch on open, refetch after your own mutation" idiom rather than introducing a
+    // new one.
+    function openMessagesModal() {
+        document.getElementById('messages-modal').classList.add('open');
+        renderMessagesInbox();
+    }
+    function closeMessagesModal() { document.getElementById('messages-modal').classList.remove('open'); }
+    function handleMessagesModalOverlayClick(e) { if (e.target === document.getElementById('messages-modal')) closeMessagesModal(); }
+
+    async function renderMessagesInbox() {
+        messagesActiveThreadUserId = null;
+        const body = document.getElementById('messages-modal-body');
+        body.innerHTML = 'Loading…';
+        const myId = await currentAuthUserId();
+        if (!myId) { body.innerHTML = `<p style="color:var(--text-muted);">Sign in to use Messages.</p>`; return; }
+        const { data, error } = await sb.from('messages').select('*').or(`sender_id.eq.${myId},recipient_id.eq.${myId}`).order('created_at', { ascending: false }).limit(500);
+        if (error) { body.innerHTML = `<p style="color:var(--danger);">Could not load messages: ${escapeHtml(error.message)}</p>`; return; }
+        messagesInboxCache = data || [];
+
+        // Bucket by "the other party" — latest message + unread count per person. The query above is
+        // already newest-first, so the first row seen per bucket is that conversation's latest.
+        const byOther = new Map();
+        messagesInboxCache.forEach(m => {
+            const otherId = m.sender_id === myId ? m.recipient_id : m.sender_id;
+            if (!byOther.has(otherId)) byOther.set(otherId, { latest: m, unread: 0 });
+            if (m.recipient_id === myId && !m.read_at) byOther.get(otherId).unread++;
+        });
+        const otherIds = [...byOther.keys()];
+        const names = {};
+        await Promise.all(otherIds.map(async id => { names[id] = await resolveDisplayName(id); }));
+
+        const composeBtn = `<button class="success-btn full-width" onclick="openNewMessageCompose()" style="margin-bottom:1rem;">✏️ New Message</button>`;
+        if (!otherIds.length) { body.innerHTML = composeBtn + `<p style="color:var(--text-muted);">No messages yet.</p>`; return; }
+
+        body.innerHTML = composeBtn + otherIds.map(id => {
+            const { latest, unread } = byOther.get(id);
+            const name = names[id] || 'Unknown';
+            const preview = latest.body.length > 60 ? latest.body.slice(0, 60) + '…' : latest.body;
+            const when = new Date(latest.created_at).toLocaleString();
+            return `<div class="kit-row" onclick="openConversationWith('${escapeHtml(id)}')" role="button" tabindex="0" style="cursor:pointer;">
+                <div class="kit-info" style="min-width:0;">
+                    <div class="item-title">${escapeHtml(name)}${unread ? ` <span class="badge-count" style="position:static; display:inline-flex; margin-left:4px;">${unread}</span>` : ''}</div>
+                    <div class="item-sub">${escapeHtml(preview)} · ${when}</div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    async function openConversationWith(userId) {
+        messagesActiveThreadUserId = userId;
+        const myId = await currentAuthUserId();
+        const name = await resolveDisplayName(userId);
+        const thread = messagesInboxCache
+            .filter(m => (m.sender_id === myId && m.recipient_id === userId) || (m.sender_id === userId && m.recipient_id === myId))
+            .slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        renderMessageThread(name || 'Unknown', thread, myId);
+        markConversationRead(userId);
+    }
+
+    function renderMessageThread(headingName, thread, myId) {
+        const body = document.getElementById('messages-modal-body');
+        const rows = thread.map(m => {
+            const mine = m.sender_id === myId;
+            return `<div style="display:flex; justify-content:${mine ? 'flex-end' : 'flex-start'}; margin-bottom:6px;">
+                <div style="max-width:80%; padding:0.5rem 0.75rem; border-radius:12px; background:${mine ? 'var(--primary)' : 'var(--border)'}; color:${mine ? '#fff' : 'var(--text-main)'}; font-size:0.88rem; white-space:pre-wrap;">${escapeHtml(m.body)}</div>
+            </div>`;
+        }).join('') || `<p style="color:var(--text-muted);">No messages with ${escapeHtml(headingName)} yet — say hello.</p>`;
+        body.innerHTML = `
+            <button class="secondary" onclick="renderMessagesInbox()" style="margin-bottom:0.75rem; padding:4px 10px; min-height:auto; font-size:0.8rem;">← Back</button>
+            <h4 style="margin-bottom:0.75rem;">${escapeHtml(headingName)}</h4>
+            <div>${rows}</div>
+            <textarea id="messages-compose-body" placeholder="Message ${escapeHtml(headingName)}..." style="width:100%; min-height:60px; margin-top:1rem;"></textarea>
+            <button class="success-btn full-width" onclick="sendMessageFromModal()" style="margin-top:0.5rem;">Send</button>
+        `;
+    }
+
+    async function openNewMessageCompose() {
+        const body = document.getElementById('messages-modal-body');
+        body.innerHTML = 'Loading colleagues…';
+        if (!messagesColleaguesCache) {
+            const { data, error } = await sb.rpc('list_colleagues');
+            if (error) { body.innerHTML = `<p style="color:var(--danger);">Could not load colleagues: ${escapeHtml(error.message)}</p>`; return; }
+            messagesColleaguesCache = data || [];
+        }
+        messagesActiveThreadUserId = null;
+        const backBtn = `<button class="secondary" onclick="renderMessagesInbox()" style="margin-bottom:0.75rem; padding:4px 10px; min-height:auto; font-size:0.8rem;">← Back</button>`;
+        if (!messagesColleaguesCache.length) {
+            body.innerHTML = backBtn + `<p style="color:var(--text-muted);">No colleagues to message yet.</p>`;
+            return;
+        }
+        const options = messagesColleaguesCache.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+        body.innerHTML = `
+            ${backBtn}
+            <label for="messages-compose-recipient" class="modal-label">To</label>
+            <select id="messages-compose-recipient">${options}</select>
+            <textarea id="messages-new-compose-body" placeholder="Your message..." style="width:100%; min-height:80px; margin-top:0.5rem;"></textarea>
+            <button class="success-btn full-width" onclick="sendMessageFromModal()" style="margin-top:0.5rem;">Send</button>
+        `;
+    }
+
+    async function sendMessageFromModal() {
+        // Whichever screen is currently showing — an existing thread's reply box, or the "New
+        // Message" compose box — only one of the two is ever in the DOM at a time.
+        const textarea = document.getElementById('messages-compose-body') || document.getElementById('messages-new-compose-body');
+        const bodyText = textarea.value.trim();
+        if (!bodyText) return;
+        const recipientSelect = document.getElementById('messages-compose-recipient');
+        const recipientId = messagesActiveThreadUserId || (recipientSelect && recipientSelect.value);
+        if (!recipientId) { showToast("Pick who to message.", "warning"); return; }
+        const myId = await currentAuthUserId();
+        const { error } = await sb.from('messages').insert({ sender_id: myId, recipient_id: recipientId, body: bodyText });
+        if (error) { showToast("Could not send message: " + error.message, "error"); return; }
+        await openConversationWith(recipientId);
+        refreshUnreadMessageBadge();
+    }
+
+    async function markConversationRead(otherUserId) {
+        const myId = await currentAuthUserId();
+        if (!myId) return;
+        const { error } = await sb.from('messages').update({ read_at: new Date().toISOString() }).eq('sender_id', otherUserId).eq('recipient_id', myId).is('read_at', null);
+        if (error) console.error("Could not mark messages read:", error);
+        refreshUnreadMessageBadge();
+    }
+
+    async function refreshUnreadMessageBadge() {
+        if (!currentActiveKey || getWarehouseMeta(currentWarehouseId).mode !== 'supabase') return;
+        const myId = await currentAuthUserId();
+        if (!myId) return;
+        const { count, error } = await sb.from('messages').select('id', { count: 'exact', head: true }).eq('recipient_id', myId).is('read_at', null);
+        if (error) { console.error("Could not refresh unread message count:", error); return; }
+        document.getElementById('messages-badge').innerText = count || 0;
+        document.getElementById('messages-badge').classList.toggle('hidden', !count);
+    }
+
+    // The one new refresh idiom this feature adds: neither realtime nor interval polling exist
+    // anywhere else in this app, so badges only catch up when the tab regains attention, in addition
+    // to right after your own actions. visibilitychange is paired with focus since mobile browsers/
+    // PWAs don't reliably fire focus alone when switching apps.
+    function refreshHeaderBadgesIfActive() {
+        if (currentActiveKey && getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
+            refreshUnreadMessageBadge();
+            refreshIncomingOrdersBadge();
+        }
+    }
+    window.addEventListener('focus', refreshHeaderBadgesIfActive);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshHeaderBadgesIfActive(); });
 
     // warehouses is public-read to any authenticated user, so this is safe for any signed-in role —
     // merges every row into WAREHOUSES (all mode: 'supabase'), including ones created after this
@@ -4696,6 +5142,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         initTheme();
         initSettings();
         initImageEditorHandlers();
+        initTitleMarquee();
         // No camera API at all (very old browser, or a non-secure context where getUserMedia is
         // unavailable) -> hide every entry point, including ai-fab-ocr (see toggleAiAssistant),
         // instead of offering a button that can only fail.
@@ -4810,6 +5257,61 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
     function updateMetaThemeColor(theme) {
         document.getElementById('meta-theme-color').content = theme === 'dark' ? '#0b1120' : '#f8fafc';
+    }
+
+    // ── Adaptive item titles on mobile: .item-title's own font-size already shrinks a bit via
+    // clamp() (see the CSS rule), and drops further still under the mobile media query — but a
+    // title long enough to still overflow after that just got a static "…" cutoff. This instead
+    // gives a still-overflowing title a slow right-to-left loop (like a neon "OPEN" sign) so the
+    // whole name is eventually readable without needing to open the item. Paced to a roughly
+    // constant reading speed regardless of title length (see MARQUEE_READING_SPEED_PX_PER_SEC)
+    // rather than however long the text happens to be, so a barely-overflowing title doesn't
+    // whip past unreadably fast and a very long one doesn't take forever either.
+    //
+    // A MutationObserver — not a call added into every one of this app's dozens of render
+    // functions — is what notices new .item-title elements as they appear, so nothing elsewhere
+    // needs to know this feature exists at all.
+    const MARQUEE_MAX_WIDTH = 640;
+    const MARQUEE_READING_SPEED_PX_PER_SEC = 40;
+    function applyTitleMarquee(el) {
+        if (window.innerWidth > MARQUEE_MAX_WIDTH || el.dataset.marqueeChecked) return;
+        el.dataset.marqueeChecked = '1';
+        const distance = el.scrollWidth - el.clientWidth;
+        if (distance <= 2) return; // fits (or the clamp()/mobile font-size already made it fit) — leave the plain "…" ellipsis alone
+        const inner = document.createElement('span');
+        inner.className = 'marquee-inner';
+        inner.innerHTML = el.innerHTML;
+        el.innerHTML = '';
+        el.appendChild(inner);
+        el.classList.add('marquee');
+        // 15%..85% of the animation is the actual scroll (see the @keyframes) — a fixed 3s of that
+        // is reserved for the pause-at-each-end regardless of length, on top of the reading-paced
+        // scroll itself, with a 4s floor so a barely-overflowing title doesn't loop distractingly fast.
+        inner.style.setProperty('--marquee-distance', `-${distance}px`);
+        inner.style.animationDuration = `${Math.max(4, 3 + distance / MARQUEE_READING_SPEED_PX_PER_SEC)}s`;
+    }
+    function resetTitleMarquee(el) {
+        const inner = el.querySelector(':scope > .marquee-inner');
+        if (inner) el.innerHTML = inner.innerHTML;
+        el.classList.remove('marquee');
+        delete el.dataset.marqueeChecked;
+    }
+    function scanForTitleMarquees(root) {
+        if (root.nodeType !== 1 && root.nodeType !== 9) return;
+        if (root.matches && root.matches('.item-title')) applyTitleMarquee(root);
+        else if (root.querySelectorAll) root.querySelectorAll('.item-title').forEach(applyTitleMarquee);
+    }
+    function initTitleMarquee() {
+        new MutationObserver(mutations => {
+            if (window.innerWidth > MARQUEE_MAX_WIDTH) return;
+            mutations.forEach(m => m.addedNodes.forEach(scanForTitleMarquees));
+        }).observe(document.body, { childList: true, subtree: true });
+        // A resize can change what's actually truncated (rotating a phone, leaving mobile width
+        // entirely) — re-check everything already on the page, not just newly-added titles.
+        window.addEventListener('resize', () => {
+            document.querySelectorAll('.item-title[data-marquee-checked]').forEach(resetTitleMarquee);
+            scanForTitleMarquees(document.body);
+        });
     }
 
     function switchView(viewId) {
@@ -6007,6 +6509,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('btn-batch-images').classList.toggle('hidden', !isSupa || currentUserRole === 'viewer');
         document.getElementById('btn-export-csv').classList.toggle('hidden', !isSupa);
         document.getElementById('seg-manufacturers').classList.toggle('hidden', !isSupa);
+        // Messaging has no other role gate — any signed-in Supabase account can send/receive.
+        document.getElementById('btn-messages').classList.toggle('hidden', !isSupa);
         // The Import button itself only makes sense if at least one option inside its dropdown is
         // actually visible (a Supabase viewer, for instance, has all three of its options hidden).
         const anyImportOption = ['btn-items-csv', 'btn-visma-import', 'btn-batch-images', 'btn-kits-csv', 'btn-warehouse-csv']
@@ -6251,28 +6755,66 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         renderManufacturersList();
     }
 
+    // A kit has no manufacturer of its own — it's whichever its actual items are. Every distinct,
+    // real (not blank/"None") manufacturer among the kit's items, most-represented first (ties
+    // broken alphabetically) so kitPrimaryManufacturer() below and the sort/filter/badge that all
+    // lean on this ordering agree on which one manufacturer "is" this kit's, when it has several.
+    function kitManufacturers(kit) {
+        const counts = new Map();
+        Object.keys(kit.items || {}).forEach(btk => {
+            const item = globalInventory.find(i => i.BTKnumber === btk);
+            const m = item && item.Manufacturer;
+            if (m && m !== 'None') counts.set(m, (counts.get(m) || 0) + 1);
+        });
+        return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name]) => name);
+    }
+    function kitPrimaryManufacturer(kit) { return kitManufacturers(kit)[0] || null; }
+
+    // Options are whichever manufacturers are actually represented in at least one kit right now —
+    // same "derived from what's loaded, no separate lookup" approach as the Items list's own filter.
+    function populateKitManufacturerFilter() {
+        const sel = document.getElementById('kit-manufacturer-filter');
+        const names = Array.from(new Set(globalKits.flatMap(kitManufacturers))).sort((a, b) => a.localeCompare(b));
+        const current = sel.value;
+        sel.innerHTML = '<option value="">Manufacturers</option>' + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+        if (names.includes(current)) sel.value = current;
+        else kitManufacturerFilter = '';
+    }
+    function onKitSortChange() { kitSortBy = document.getElementById('kit-sort-by').value; renderKitsList(); }
+    function onKitManufacturerFilterChange() { kitManufacturerFilter = document.getElementById('kit-manufacturer-filter').value; renderKitsList(); }
+
     function renderKitsList() {
+        populateKitManufacturerFilter();
         const container = document.getElementById('item-list-container');
         container.innerHTML = '';
         const query = document.getElementById('kit-search-box').value.toLowerCase().trim();
         let kits = globalKits;
         if (query) kits = kits.filter(k => (k.name || '').toLowerCase().includes(query) || (k.kitnumber || '').toLowerCase().includes(query));
+        if (kitManufacturerFilter) kits = kits.filter(k => kitManufacturers(k).includes(kitManufacturerFilter));
         document.getElementById('kit-list-stats').innerText = `Showing ${kits.length} of ${globalKits.length} kits`;
 
         if (kits.length === 0) {
             container.innerHTML = `<div class="empty-state"><h3>No kits found</h3><p>Import a Kit Matrix CSV (CSV A) to populate.</p></div>`;
             return;
         }
+        kits = [...kits];
+        if (kitSortBy === 'manufacturer') {
+            kits.sort((a, b) => (kitPrimaryManufacturer(a) || '').localeCompare(kitPrimaryManufacturer(b) || '') || (a.name || '').localeCompare(b.name || ''));
+        } else {
+            kits.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        }
         const frag = document.createDocumentFragment();
         kits.forEach(kit => {
             const count = Object.keys(kit.items || {}).length;
+            const mfrs = kitManufacturers(kit);
+            const mfrBadge = mfrs.length ? `<span class="kit-manufacturer-badge">${escapeHtml(mfrs[0])}${mfrs.length > 1 ? ` +${mfrs.length - 1}` : ''}</span>` : '';
             const div = document.createElement('div');
             div.className = 'kit-row';
             div.setAttribute('role', 'button'); div.tabIndex = 0;
             div.innerHTML = `
                 <div class="kit-info">
                     <div class="kit-name">${escapeHtml(kit.name || 'Unnamed Kit')}</div>
-                    <div class="kit-sub">${kit.kitnumber && kit.kitnumber !== 'None' ? 'Kit #' + escapeHtml(kit.kitnumber) + ' · ' : ''}${count} item(s)</div>
+                    <div class="kit-sub">${kit.kitnumber && kit.kitnumber !== 'None' ? 'Kit #' + escapeHtml(kit.kitnumber) + ' · ' : ''}${count} item(s)${mfrBadge ? ' · ' + mfrBadge : ''}</div>
                 </div>
                 <span class="kit-qty-badge">${count}</span>`;
             div.onclick = () => showKitDetail(kit.kitnumber, kit.name);
@@ -7893,8 +8435,28 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         // Saving an order needs a Supabase warehouse (and editor/admin) — nowhere else to save it.
         const canSaveOrder = getWarehouseMeta(currentWarehouseId).mode === 'supabase' && canEditItems();
         document.getElementById('pack-order-recipient-section').classList.toggle('hidden', !canSaveOrder);
+        document.getElementById('pack-order-assign-section').classList.toggle('hidden', !canSaveOrder);
         document.getElementById('btn-save-pack-order').classList.toggle('hidden', !canSaveOrder);
         document.getElementById('btn-finalize-pack-order').classList.toggle('hidden', !canEditItems() || packOrder.length === 0);
+        if (canSaveOrder) populatePackOrderAssigneeDropdown();
+    }
+
+    // "Anyone in [warehouse]" (null) plus every colleague list_warehouse_members() returns for the
+    // currently open warehouse — re-fetched each time the view opens so a recent Manage Users change
+    // (a new grant, a role change) is reflected without a page reload.
+    async function populatePackOrderAssigneeDropdown() {
+        const select = document.getElementById('pack-order-assignee');
+        const meta = getWarehouseMeta(currentWarehouseId);
+        select.innerHTML = `<option value="">Anyone in ${escapeHtml(meta.name)}</option>`;
+        const { data, error } = await sb.rpc('list_warehouse_members', { p_warehouse_id: currentWarehouseId });
+        if (error) { console.error("Could not load warehouse members:", error); return; }
+        (data || []).forEach(m => {
+            select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`);
+        });
+        select.value = packOrderAssignedTo || '';
+    }
+    function onPackOrderAssigneeChange() {
+        packOrderAssignedTo = document.getElementById('pack-order-assignee').value || null;
     }
 
     function closePackOrderView() { switchView(packOrderPreviousView || 'list-view'); }
@@ -7907,6 +8469,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         packOrderRecipient = { name: '', address: '', email: '', orgNumber: '' };
         packOrderSavedNumber = null;
         packOrderFulfilled = false;
+        packOrderAssignedTo = null;
         updatePackOrderBadge();
         renderPackOrderItems();
         syncPackOrderBoxInputs();
@@ -8198,6 +8761,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             box_width: packOrderBox.width || null,
             box_height: packOrderBox.height || null,
             box_weight: packOrderBox.weight || null,
+            assigned_to: packOrderAssignedTo || null,
             items: packOrder.map(({ deducted, ...line }) => line) // `deducted` is session bookkeeping, not part of the order
         };
         const { data, error } = await sb.from('orders').insert(row).select().single();
@@ -8205,6 +8769,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         packOrderSavedNumber = data.order_number;
         syncPackOrderRecipientInputs();
         showToast(`Order saved as ${data.order_number}.`, "success", 6000);
+        refreshIncomingOrdersBadge();
     }
 
     // ── Finalize — deducts every line's quantity from stock and (if the order was saved) marks it
@@ -8258,6 +8823,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             if (isSupa && packOrderSavedNumber && failures === 0) {
                 const { error } = await sb.from('orders').update({ status: 'fulfilled' }).eq('order_number', packOrderSavedNumber);
                 if (error) console.error("Could not mark order fulfilled:", error);
+                else refreshIncomingOrdersBadge(); // a fulfilled order drops out of the open queue
             }
             if (failures === 0) packOrderFulfilled = true;
             showToast(failures
@@ -8346,7 +8912,130 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             frag.appendChild(div);
         });
         container.appendChild(frag);
+        renderPackOrderPickRoute();
     }
+
+    // ── Pick Route: one mini bin-locator grid per zone the order actually touches, every relevant
+    // shelf numbered in pick order (the same order the list above is in) with a line from each list
+    // row to its exact shelf. Reuses parseLocationCode/getZoneBounds/depthWord — the same functions
+    // the Bin Locator itself is built on — so a zone reads identically in both places. ──
+    function renderPackOrderPickRoute() {
+        const wrap = document.getElementById('pack-order-pick-route');
+        const container = document.getElementById('pack-order-pick-route-zones');
+        // Pick order = the order the list above is already in — reordering that list (dragging isn't
+        // supported yet, but removing/re-adding is) reorders this too, so the two never disagree.
+        const withLoc = packOrder.map((line, idx) => {
+            const item = globalInventory.find(i => i.BTKnumber === line.btk);
+            const p = item ? parseLocationCode(item.LocationCode) : null;
+            return p ? { line, item, p, pickNum: idx + 1 } : null;
+        }).filter(Boolean);
+        if (!withLoc.length) { wrap.classList.add('hidden'); container.innerHTML = ''; return; }
+        wrap.classList.remove('hidden');
+        const zones = [...new Set(withLoc.map(w => w.p.zone))];
+        container.innerHTML = zones.map(zone => renderPickRouteZoneHtml(zone, withLoc.filter(w => w.p.zone === zone))).join('');
+        container.querySelectorAll('.pick-route-zone').forEach(zoneBlock => {
+            wirePickRouteZoneInteractions(zoneBlock);
+            drawPickRouteZoneLines(zoneBlock);
+        });
+    }
+
+    function renderPickRouteZoneHtml(zone, entries) {
+        const bounds = getZoneBounds(zone);
+        const thumb = item => item && item.imageThumbUrl
+            ? `<img src="${escapeHtml(item.imageThumbUrl)}" alt="" style="width:40px; height:40px; object-fit:cover; border-radius:6px; flex-shrink:0; pointer-events:none;">`
+            : `<div style="width:40px; height:40px; border-radius:6px; flex-shrink:0; background:var(--border); display:flex; align-items:center; justify-content:center; font-size:1.1rem; pointer-events:none;" aria-hidden="true">📦</div>`;
+        const heading = `<div style="font-weight:700; margin-bottom:0.4rem;">Zone ${escapeHtml(zone)} <span style="color:var(--text-muted); font-weight:400; font-size:0.85rem;">— ${entries.length} item(s) to pick</span></div>`;
+        if (!bounds) {
+            return `<div class="pick-route-zone">${heading}<p style="color:var(--text-muted); font-size:0.85rem;">No sized layout for Zone ${escapeHtml(zone)} yet.</p></div>`;
+        }
+        const byShelf = new Map();
+        entries.forEach(e => {
+            const key = `${e.p.depth}|${e.p.level}`;
+            if (!byShelf.has(key)) byShelf.set(key, []);
+            byShelf.get(key).push(e);
+        });
+        let cells = '';
+        for (let level = bounds.maxLevel; level >= 1; level--) {
+            for (let depth = 1; depth <= bounds.maxDepth; depth++) {
+                const here = byShelf.get(`${depth}|${level}`) || [];
+                const label = here.length === 1 ? here[0].pickNum : (here.length > 1 ? here.map(e => e.pickNum).join(',') : '');
+                const title = here.length ? here.map(e => `#${e.pickNum} ${escapeHtml(itemDisplayNamePlain(e.item))}`).join(', ') : `${depthWord(zone, depth)} · Level ${level} — empty`;
+                cells += `<div class="map-cell${here.length ? ' active' : ''}" data-depth="${depth}" data-level="${level}" title="${title}">${label}</div>`;
+            }
+        }
+        const grid = `<div class="warehouse-map pick-route-grid" style="grid-template-columns:repeat(${bounds.maxDepth},1fr); flex:0 0 auto; max-width:260px;">${cells}</div>`;
+        const rows = entries.slice().sort((a, b) => a.pickNum - b.pickNum).map(e => `
+            <div class="pick-route-row" data-pick-num="${e.pickNum}" data-pick-depth="${e.p.depth}" data-pick-level="${e.p.level}" data-pick-btk="${escapeHtml(e.line.btk)}" role="button" tabindex="0">
+                <span class="pick-route-num">${e.pickNum}</span>
+                ${thumb(e.item)}
+                <div class="kit-info" style="pointer-events:none;">
+                    <div class="item-title" style="font-size:0.88rem; font-weight:700;">${escapeHtml(itemDisplayNamePlain(e.item))}</div>
+                    <div class="item-sub" style="font-size:0.72rem; color:var(--text-muted);">${escapeHtml(formatBinCode(zone, e.p.depth, e.p.level, e.p.bin, e.p.binRow || 1))} · qty ${e.line.qty}</div>
+                </div>
+            </div>`).join('');
+        return `<div class="pick-route-zone">
+            <svg class="pick-route-lines-svg"></svg>
+            ${heading}
+            <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-start;">
+                ${grid}
+                <div style="flex:1; min-width:220px;">${rows}</div>
+            </div>
+        </div>`;
+    }
+
+    // item['itemname(english)'] with the usual fallbacks, but never escaped twice — every caller
+    // above already runs its own escapeHtml() on the result (a plain "attribute vs. innerHTML" split
+    // would be its own source of double/missed-escaping bugs, easier to just always return plain text).
+    function itemDisplayNamePlain(item) {
+        return item ? (item['itemname(english)'] || item['itemname(swedish)'] || item.BTKnumber) : 'Unknown item';
+    }
+
+    // Row -> its own shelf, both ways: hovering/clicking a row bolds its line and jumps to the item;
+    // hovering a shelf bolds every row that's actually on it (there can be more than one).
+    function wirePickRouteZoneInteractions(zoneBlock) {
+        const svg = zoneBlock.querySelector('.pick-route-lines-svg');
+        zoneBlock.querySelectorAll('.pick-route-row').forEach(row => {
+            const pickNum = row.dataset.pickNum;
+            const cell = zoneBlock.querySelector(`.map-cell[data-depth="${row.dataset.pickDepth}"][data-level="${row.dataset.pickLevel}"]`);
+            const line = svg.querySelector(`[data-pick="${pickNum}"]`);
+            const setActive = (on) => {
+                row.classList.toggle('active', on);
+                if (cell) cell.classList.toggle('bin-locator-bin-selected', on);
+                if (line) line.classList.toggle('active', on);
+            };
+            row.onmouseenter = () => setActive(true);
+            row.onmouseleave = () => setActive(false);
+            row.onclick = () => openItem(row.dataset.pickBtk, { type: 'pack-order' });
+            row.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } };
+        });
+    }
+
+    // Recomputed from live layout, not stored — the two endpoints (a list row, a grid cell) are
+    // ordinary flow content that can reflow (a longer item name wrapping, the window resizing), so
+    // anything cached would just as easily go stale as the old un-rotated/un-refreshed positions
+    // this same "measure the real DOM, don't assume" approach already fixed elsewhere in this file.
+    function drawPickRouteZoneLines(zoneBlock) {
+        const svg = zoneBlock.querySelector('.pick-route-lines-svg');
+        const blockRect = zoneBlock.getBoundingClientRect();
+        if (!blockRect.width || !blockRect.height) return;
+        const rows = [...zoneBlock.querySelectorAll('.pick-route-row')];
+        svg.innerHTML = rows.map(row => {
+            const cell = zoneBlock.querySelector(`.map-cell[data-depth="${row.dataset.pickDepth}"][data-level="${row.dataset.pickLevel}"]`);
+            if (!cell) return '';
+            const cellRect = cell.getBoundingClientRect(), rowRect = row.getBoundingClientRect();
+            const x1 = cellRect.left + cellRect.width / 2 - blockRect.left, y1 = cellRect.top + cellRect.height / 2 - blockRect.top;
+            const x2 = rowRect.left - blockRect.left, y2 = rowRect.top + rowRect.height / 2 - blockRect.top;
+            return `<line class="pick-route-line" data-pick="${row.dataset.pickNum}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
+        }).join('');
+    }
+
+    // Only the lines need redrawing on resize (a reflow can move either endpoint); the grid/list
+    // content itself reflows on its own via ordinary CSS. Scoped to when the Pack Order view is
+    // actually open so this isn't doing work on every resize for the rest of the app.
+    window.addEventListener('resize', () => {
+        if (activeView !== 'pack-order-view') return;
+        document.querySelectorAll('#pack-order-pick-route-zones .pick-route-zone').forEach(drawPickRouteZoneLines);
+    });
 
     // Shared by both quantity-edit entry points (clicking the big number, or the Edit Order mode
     // input) so the restock question applies consistently regardless of which one was used.
@@ -9873,8 +10562,16 @@ th { background: #eee; }
         document.getElementById('bin-locator-heatmap-toggle').checked = binLocatorHeatmapEnabled;
         document.getElementById('bin-locator-touchpad-toggle').checked = binLocatorTouchpadEnabled;
         document.getElementById('bin-locator-touchpad-wrap').classList.toggle('hidden', !binLocatorTouchpadEnabled);
+        updateBinLocatorTouchpadToggleVisibility();
         document.getElementById('bin-locator-detail').classList.add('hidden');
         renderBinLocatorGrid();
+    }
+    // Touch Preview only does anything in the 3D view now — the flat grid and shelf strip are
+    // click-only (no hover/preview card there at all), so the toggle would otherwise sit there
+    // doing nothing while Flat is selected.
+    function updateBinLocatorTouchpadToggleVisibility() {
+        document.getElementById('bin-locator-touchpad-toggle-wrap').classList.toggle('hidden', !isoBinViewEnabled);
+        if (!isoBinViewEnabled) document.getElementById('bin-locator-touchpad-wrap').classList.add('hidden');
     }
     function onBinLocatorHeatmapChange() {
         binLocatorHeatmapEnabled = document.getElementById('bin-locator-heatmap-toggle').checked;
@@ -9889,6 +10586,7 @@ th { background: #eee; }
         localStorage.setItem('iso-bin-view', iso ? '1' : '0');
         const settingsCheckbox = document.getElementById('iso-bin-view-enabled');
         if (settingsCheckbox) settingsCheckbox.checked = iso;
+        updateBinLocatorTouchpadToggleVisibility();
         renderBinLocatorGrid();
     }
     function onBinLocatorZoneChange() {
@@ -9956,11 +10654,12 @@ th { background: #eee; }
     }
 
     // ── Bin Locator hover preview: a dense card of what's stored at a shelf/bin, plus a line back to
-    // exactly what's under the cursor — for the flat grid, the isometric rack, the shelf strip, and
-    // the touch pad below alike (all four call showBinLocatorHover with their own anchor element and
-    // item list). Every row renders (the popover's own max-height/overflow-y scrolls the rest into
-    // view — nothing is truncated with a "+N more" stub that can't actually be reached), and each
-    // row jumps straight to that item on click/tap.
+    // exactly what's under the cursor — 3D/isometric only (and the touch pad, which stands in for
+    // hover there). The flat grid and shelf strip are click-only: selecting a cell already reveals
+    // what's stored there below, so no floating card is needed in that view. Every row renders (the
+    // popover's own max-height/overflow-y scrolls the rest into view — nothing is truncated with a
+    // "+N more" stub that can't actually be reached), and each row jumps straight to that item on
+    // click/tap.
     function binLocatorHoverRowsHtml(items) {
         return items.map(item => {
             const thumb = item.imageThumbUrl
@@ -10059,10 +10758,11 @@ th { background: #eee; }
     }
 
     // ── Touch pad: an indirect stand-in for hover on touch devices ("👆 Touch Preview" checkbox) —
-    // dragging inside the circle maps proportionally onto whichever rack view is currently showing
-    // and re-uses the exact same per-cell hover already wired up below (cell.onmouseenter) or
-    // onBinLocatorIsoHover, via document.elementFromPoint at the mapped screen position, rather than
-    // duplicating the "what's at this spot" lookup a third time.
+    // only meaningful for the isometric view now (the flat grid/shelf strip are click-only, so the
+    // toggle itself is hidden whenever Flat is selected — see updateBinLocatorTouchpadToggleVisibility).
+    // Dragging inside the circle maps proportionally onto the iso rack and calls onBinLocatorIsoHover
+    // via document.elementFromPoint at the mapped screen position, rather than duplicating the
+    // "what's at this spot" lookup a second time.
     // Defaults on for a touch/coarse-pointer device (a finger, not a mouse, is exactly who needs a
     // hover stand-in) and off otherwise, UNLESS the person has explicitly flipped it themselves —
     // that choice is remembered from then on, on this device, regardless of what the auto-detect
@@ -10168,11 +10868,10 @@ th { background: #eee; }
                     const style = binHeatmapStyle(count, maxCount);
                     if (style) { cell.style.background = style.background; cell.style.color = style.color; }
                 }
+                // Flat/2D cells are click-only — no hover preview card here (that's the isometric
+                // view's thing); clicking already reveals the shelf strip + item list below as the
+                // "preview", which is the point of selecting it in the first place.
                 cell.onclick = () => selectBinLocatorCell(depth, level);
-                if (count > 0) {
-                    cell.onmouseenter = () => showBinLocatorHover(cell, itemsAtLocation(binLocatorZone, depth, level), `${depthWord(binLocatorZone, depth)} · Level ${level}`, grid);
-                    cell.onmouseleave = hideBinLocatorHoverSoon;
-                }
                 grid.appendChild(cell);
             }
         }
@@ -10213,11 +10912,10 @@ th { background: #eee; }
             // More than one item shares this bin (stacked in different Rows) — no single item to jump
             // to, so instead light up exactly which rows below belong to this bin, clearing whichever
             // bin was lit before (never accumulating highlights across clicks).
+            // Same click-only rule as the flat grid above — no hover card in the shelf strip either;
+            // clicking a bin already selects it (jumps straight to the item, or highlights the
+            // matching rows below when several share the bin), which is the "preview" now.
             else if (itemsInBin.length > 1) cell.onclick = () => highlightBinLocatorBin(bin);
-            if (itemsInBin.length) {
-                cell.onmouseenter = () => showBinLocatorHover(cell, itemsInBin, `${depthLabel} · Level ${level} · Bin ${bin}`, shelf);
-                cell.onmouseleave = hideBinLocatorHoverSoon;
-            }
             shelf.appendChild(cell);
         }
         document.getElementById('bin-locator-shelf-note').textContent = bounds.maxBin
@@ -12323,13 +13021,14 @@ ${css}
         document.getElementById('btn-activity-log').classList.toggle('hidden', !(isSupa && isAdmin));
         document.getElementById('btn-backorder-report').classList.toggle('hidden', !(isSupa && canEditItems()));
         document.getElementById('btn-pack-order-history').classList.toggle('hidden', !(isSupa && canEditItems()));
+        document.getElementById('btn-incoming-orders-settings').classList.toggle('hidden', !(isSupa && canEditItems()));
         document.getElementById('btn-unassigned-images').classList.toggle('hidden', !(isSupa && canEditItems()));
         // Editor+ like the other stock tools: a sync only ever changes quantities and the baseline,
         // it never creates or deletes an item.
         document.getElementById('btn-visma-sync').classList.toggle('hidden', !(isSupa && canEditItems()));
         // The section heading itself would otherwise show with nothing under it for a role/mode
         // where every button inside it just got hidden above (a viewer, or static/offline mode).
-        const adminToolIds = ['btn-manage-users', 'btn-manage-warehouses', 'btn-activity-log', 'btn-backorder-report', 'btn-pack-order-history', 'btn-unassigned-images', 'btn-visma-sync'];
+        const adminToolIds = ['btn-manage-users', 'btn-manage-warehouses', 'btn-activity-log', 'btn-backorder-report', 'btn-pack-order-history', 'btn-incoming-orders-settings', 'btn-unassigned-images', 'btn-visma-sync'];
         const anyAdminTool = adminToolIds.some(id => !document.getElementById(id).classList.contains('hidden'));
         document.getElementById('settings-admin-tools-section').classList.toggle('hidden', !anyAdminTool);
         document.getElementById('display-name-row').classList.toggle('hidden', !isSupa);

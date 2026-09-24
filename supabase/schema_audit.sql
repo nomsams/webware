@@ -148,5 +148,11 @@ from (
   select 43, 'schema_llm_assistant_service_role_select.sql', 'service_role can select llm_api_keys',
     exists (select 1 from information_schema.role_table_grants
             where table_schema = 'public' and table_name = 'llm_api_keys' and grantee = 'service_role' and privilege_type = 'SELECT')
+  union all
+  select 44, 'schema_messaging.sql', 'messages table',
+    exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'messages')
+  union all
+  select 45, 'schema_order_assignment.sql', 'orders.assigned_to column',
+    exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'orders' and column_name = 'assigned_to')
 ) t
 order by t.n;
