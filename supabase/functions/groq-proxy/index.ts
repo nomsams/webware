@@ -93,6 +93,17 @@ async function loadActiveKeys(): Promise<string[]> {
     .eq("active", true)
     .eq("provider", "groq")
     .order("created_at", { ascending: true });
+  // Logged rather than silently swallowed into an indistinguishable-from-"really no key configured"
+  // empty array — this table's own key row existing (has_llm_api_key() confirms it, and it's a
+  // SECURITY DEFINER function, so it always could regardless of this) says nothing about whether
+  // THIS query, running as service_role, can actually read it: RLS bypass and the base table GRANT
+  // are two separate permission layers, and this table intentionally has no client-facing SELECT
+  // grant at all (see schema_llm_assistant.sql) — service_role needs its own explicit one
+  // (schema_llm_assistant_service_role_select.sql), and a fresh project or a role/grant reset can
+  // lose it just like schema_llm_assistant_grant_repair.sql found happened to authenticated's
+  // insert/delete grants. Visible in the function's own logs (Supabase dashboard -> Edge Functions
+  // -> groq-proxy -> Logs), not just this table's activity.
+  if (error) console.error("groq-proxy: loadActiveKeys query failed:", error);
   if (error || !data) return [];
   return data.map((row: { api_key: string }) => row.api_key).filter(Boolean);
 }

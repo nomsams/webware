@@ -141,5 +141,12 @@ from (
   union all
   select 42, 'schema_zone_grid_rotated.sql', 'warehouse_zones.grid_rotated column',
     exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'warehouse_zones' and column_name = 'grid_rotated')
+  union all
+  -- Unlike a missing column/policy, a missing grant shows up nowhere in the app's own UI —
+  -- has_llm_api_key()/Settings are SECURITY DEFINER and never subject to it, so they report a key
+  -- exists right up until the Edge Function's own read of it fails with "permission denied".
+  select 43, 'schema_llm_assistant_service_role_select.sql', 'service_role can select llm_api_keys',
+    exists (select 1 from information_schema.role_table_grants
+            where table_schema = 'public' and table_name = 'llm_api_keys' and grantee = 'service_role' and privilege_type = 'SELECT')
 ) t
 order by t.n;

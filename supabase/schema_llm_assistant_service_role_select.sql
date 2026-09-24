@@ -1,0 +1,21 @@
+-- Repairs "no Groq API key configured" from the AI Assistant even though Settings shows one saved
+-- and has_llm_api_key() itself returns true.
+--
+-- Root cause: schema_llm_assistant.sql's own comment assumed the groq-proxy Edge Function's
+-- service-role client could read llm_api_keys "because [service_role] bypasses RLS entirely" — but
+-- bypassing row-level security and holding the base table GRANT are two separate Postgres privilege
+-- layers. This table was built with NO select grant to anyone at all, deliberately, so no
+-- client-facing query could ever read a raw key back (see schema_llm_assistant.sql's own security
+-- note) — but that same absence also silently caught service_role, which was never given its own
+-- explicit grant. The result: has_llm_api_key()/count_llm_api_keys() (SECURITY DEFINER functions,
+-- which run as their owner and were never subject to this at all) correctly report a key exists,
+-- while the Edge Function's own admin.from('llm_api_keys').select(...) call — the one that actually
+-- fetches the key to call Groq with — fails with "permission denied for table llm_api_keys" and gets
+-- read back by the client as an indistinguishable "no key configured" error. Confirmed live via a
+-- temporary diagnostic added to groq-proxy/index.ts (removed again once this was found): the query
+-- error was exactly `permission denied for table llm_api_keys`, code 42501, with Postgres's own hint
+-- being this exact GRANT.
+--
+-- Run once in the Supabase SQL Editor. Safe to re-run.
+
+grant select on public.llm_api_keys to service_role;
