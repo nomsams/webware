@@ -3,12 +3,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseOrderRequest, parseJsonReply, looksLikeBtk, matchKnownItem, bestCandidateMatch, guessAddressLine, guessOrgNumber,
+  parseOrderRequest, parseJsonReply, looksLikeBtk, matchKnownItem, matchKnownColleague, bestCandidateMatch, guessAddressLine, guessOrgNumber,
 } from '../order-parser.js';
 
 const KNOWN_ITEMS = [
   { btk: 'BTK000001', name: 'Widget A' },
   { btk: 'BTK000002', name: 'Widget B' },
+];
+
+const KNOWN_COLLEAGUES = [
+  { id: 'user-1', name: 'Sam Andersson' },
+  { id: 'user-2', name: 'Jane Doe' },
 ];
 
 test('looksLikeBtk matches the BTK shape only', () => {
@@ -35,6 +40,20 @@ test('matchKnownItem does not throw on a non-string reference (the model can emi
   assert.equal(matchKnownItem(1, KNOWN_ITEMS).btk, 'BTK000001'); // the ordinal path still works numerically
   assert.equal(matchKnownItem(null, KNOWN_ITEMS), null);
   assert.equal(matchKnownItem(undefined, KNOWN_ITEMS), null);
+});
+
+test('matchKnownColleague resolves an exact name case-insensitively', () => {
+  assert.equal(matchKnownColleague('sam andersson', KNOWN_COLLEAGUES).id, 'user-1');
+});
+
+test('matchKnownColleague resolves a first-name-only mention by word overlap', () => {
+  assert.equal(matchKnownColleague('Sam', KNOWN_COLLEAGUES).id, 'user-1');
+});
+
+test('matchKnownColleague returns null when nothing matches closely enough', () => {
+  assert.equal(matchKnownColleague('Bob Nobody', KNOWN_COLLEAGUES), null);
+  assert.equal(matchKnownColleague('Sam', []), null);
+  assert.equal(matchKnownColleague(null, KNOWN_COLLEAGUES), null);
 });
 
 test('bestCandidateMatch short-circuits on an exact BTK match', () => {
@@ -414,4 +433,59 @@ test('parseOrderRequest marks not_found when the search never turns up an addres
 
 test('parseOrderRequest requires non-empty text', async () => {
   await assert.rejects(parseOrderRequest({ chat: async () => '{}' }, '   '), /text is required/);
+});
+
+test('parseOrderRequest resolves an assignee name against knownColleagues', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: 'item 1', quantity: 1 }],
+      recipientName: null, recipientAddressHint: null, needsAddressLookup: false,
+      assigneeName: 'Sam',
+    }),
+  };
+  const draft = await parseOrderRequest(fakeGroq, 'pack item 1 and assign it to Sam', {
+    knownItems: KNOWN_ITEMS, knownColleagues: KNOWN_COLLEAGUES,
+  });
+  assert.deepEqual(draft.assignee, { name: 'Sam', userId: 'user-1', matchedName: 'Sam Andersson' });
+});
+
+test('parseOrderRequest leaves assignee null when the text does not name one', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: 'item 1', quantity: 1 }],
+      recipientName: null, recipientAddressHint: null, needsAddressLookup: false,
+      assigneeName: null,
+    }),
+  };
+  const draft = await parseOrderRequest(fakeGroq, 'pack item 1', { knownItems: KNOWN_ITEMS, knownColleagues: KNOWN_COLLEAGUES });
+  assert.equal(draft.assignee, null);
+});
+
+test('parseOrderRequest keeps the extracted assignee name even when it matches no known colleague', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: 'item 1', quantity: 1 }],
+      recipientName: null, recipientAddressHint: null, needsAddressLookup: false,
+      assigneeName: 'Someone Unknown',
+    }),
+  };
+  const draft = await parseOrderRequest(fakeGroq, 'pack item 1 and assign it to Someone Unknown', {
+    knownItems: KNOWN_ITEMS, knownColleagues: KNOWN_COLLEAGUES,
+  });
+  assert.deepEqual(draft.assignee, { name: 'Someone Unknown', userId: null, matchedName: null });
+});
+
+test('parseOrderRequest does not confuse a named recipient for an assignee', async () => {
+  const fakeGroq = {
+    chat: async () => JSON.stringify({
+      items: [{ reference: 'item 1', quantity: 1 }],
+      recipientName: 'Sam Andersson', recipientAddressHint: null, needsAddressLookup: false,
+      assigneeName: null,
+    }),
+  };
+  const draft = await parseOrderRequest(fakeGroq, 'pack item 1 for Sam Andersson', {
+    knownItems: KNOWN_ITEMS, knownColleagues: KNOWN_COLLEAGUES,
+  });
+  assert.equal(draft.recipient.name, 'Sam Andersson');
+  assert.equal(draft.assignee, null);
 });

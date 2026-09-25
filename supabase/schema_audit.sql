@@ -154,5 +154,8 @@ from (
   union all
   select 45, 'schema_order_assignment.sql', 'orders.assigned_to column',
     exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'orders' and column_name = 'assigned_to')
+  union all
+  select 46, 'schema_messaging_broadcast.sql', 'message_reads table',
+    exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'message_reads')
 ) t
 order by t.n;

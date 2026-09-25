@@ -57,11 +57,13 @@
 //       .then(({ data }) => (data || []).map(r => ({ btk: r.BTK, name: r.Name, warehouseId: r.warehouse_id, quantity: r.numberofitems }))),
 //     webSearch, fetchPageText, // omit to skip address lookup entirely
 //     fromAddress: { name: warehouseName, address: warehouseAddress }, // the app's own known data, not inferred
+//     knownColleagues: members.map(m => ({ id: m.id, name: m.name })), // lets "assign it to Sam" resolve to a real user id
 //   });
 //   // draft: {
 //   //   items: [{ reference, quantity, btk, matchedName, elsewhere }],
 //   //   recipient: { name, address, orgNumber, confidence },
 //   //   from: { name, address } | null,
+//   //   assignee: { name, userId, matchedName } | null, // userId/matchedName are null if named but not resolved
 //   // }
 
 import { GROQ_MODELS } from './groq-client.js';
@@ -72,9 +74,10 @@ const EXTRACTION_SYSTEM_PROMPT = `You extract structured pack-order data from fr
   "items": [{ "reference": string, "quantity": number }],
   "recipientName": string | null,
   "recipientAddressHint": string | null,
-  "needsAddressLookup": boolean
+  "needsAddressLookup": boolean,
+  "assigneeName": string | null
 }
-"reference" is whatever the text used to identify an item (a BTK number, a name, or an ordinal like "item 1" — resolve ordinals against the numbered list of known items you're given, if one is provided). Always write "reference" as a quoted JSON STRING copied verbatim from the text, even when it looks like a plain number — an item number such as "784.020" must stay the exact text "784.020", not the bare JSON number 784.02, which loses the trailing zero and stops it matching the real item. "quantity" is a JSON number, defaulting to 1 when the text doesn't say one. "needsAddressLookup" is true when the text names a recipient but gives no address and asks (or implies) that one should be found.`;
+"reference" is whatever the text used to identify an item (a BTK number, a name, or an ordinal like "item 1" — resolve ordinals against the numbered list of known items you're given, if one is provided). Always write "reference" as a quoted JSON STRING copied verbatim from the text, even when it looks like a plain number — an item number such as "784.020" must stay the exact text "784.020", not the bare JSON number 784.02, which loses the trailing zero and stops it matching the real item. "quantity" is a JSON number, defaulting to 1 when the text doesn't say one. "needsAddressLookup" is true when the text names a recipient but gives no address and asks (or implies) that one should be found. "assigneeName" is the name of a COLLEAGUE (warehouse staff) the text says should pack/handle this order — never the external recipient it's being shipped to. Only set it from explicit staff-routing phrasing like "assign it to Sam", "let Sam handle this one", "have Sam pack this" — a plain "for Sam Andersson, look up her address" with no such phrasing means Sam is the recipient, not the assignee, so leave this null. Also null when the text says it's open to anyone/whoever's free, which is the default.`;
 
 export async function parseOrderRequest(groqClient, text, {
   knownItems = [],
@@ -83,6 +86,7 @@ export async function parseOrderRequest(groqClient, text, {
   webSearch,
   fetchPageText,
   fromAddress = null,
+  knownColleagues = [],
   model = GROQ_MODELS.MULTIMODAL,
   reasoningEffort = 'medium',
   // A reasoning model's own internal reasoning tokens count against max_completion_tokens same as
@@ -113,6 +117,7 @@ export async function parseOrderRequest(groqClient, text, {
 
   const extracted = parseJsonReply(reply);
   const items = await Promise.all(extracted.items.map((entry) => resolveItem(entry, knownItems, searchItemCandidates, searchOtherWarehouses)));
+  const assigneeMatch = extracted.assigneeName ? matchKnownColleague(extracted.assigneeName, knownColleagues) : null;
 
   const draft = {
     items,
@@ -123,6 +128,9 @@ export async function parseOrderRequest(groqClient, text, {
       confidence: extracted.recipientAddressHint ? 'given' : 'unknown',
     },
     from: fromAddress || null,
+    assignee: extracted.assigneeName
+      ? { name: extracted.assigneeName, userId: assigneeMatch ? assigneeMatch.id : null, matchedName: assigneeMatch ? assigneeMatch.name : null }
+      : null,
   };
 
   if (extracted.needsAddressLookup && extracted.recipientName && webSearch && fetchPageText) {
@@ -203,6 +211,25 @@ export function matchKnownItem(reference, knownItems) {
   const ordinal = ref.match(/^item\s*(\d+)$/) || ref.match(/^(\d+)$/);
   if (ordinal) return knownItems[Number(ordinal[1]) - 1] || null;
   return knownItems.find((it) => it.btk?.toLowerCase() === ref || it.name?.toLowerCase() === ref) || null;
+}
+
+// Resolves an extracted assignee name (e.g. "Sam") against the warehouse's real member list
+// ({id, name}, from list_warehouse_members() in the app) — exact match first, otherwise the same
+// word-overlap scoring bestCandidateMatch() uses for items, so "Sam" still matches a colleague
+// whose full display name is "Sam Andersson". Returns null (left for the user to fix by hand in
+// the confirm card) rather than guessing below the threshold, same policy as item resolution.
+export function matchKnownColleague(name, knownColleagues) {
+  if (!name || !knownColleagues || !knownColleagues.length) return null;
+  const ref = String(name).trim().toLowerCase();
+  const exact = knownColleagues.find((c) => (c.name || '').toLowerCase() === ref);
+  if (exact) return exact;
+  let best = null;
+  let bestScore = 0;
+  for (const candidate of knownColleagues) {
+    const score = nameSimilarity(ref, (candidate.name || '').toLowerCase());
+    if (score > bestScore) { bestScore = score; best = candidate; }
+  }
+  return bestScore >= 0.4 ? best : null;
 }
 
 // Picks the closest candidate (from a live items-table search) to a free-text reference, by a
