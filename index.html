@@ -1184,7 +1184,7 @@
         </div>
 
         <label class="modal-label" for="mfr-name">Name</label>
-        <input type="text" id="mfr-name" placeholder="e.g. HÄNY">
+        <input type="text" id="mfr-name" placeholder="e.g. Acme">
 
         <label class="modal-label" for="mfr-description">Description</label>
         <textarea id="mfr-description" placeholder="Optional notes about this manufacturer..."></textarea>
@@ -1276,7 +1276,7 @@
         </div>
 
         <label class="modal-label" for="ai-manufacturer">Manufacturer</label>
-        <input type="text" id="ai-manufacturer" placeholder="e.g. HÄNY" list="manufacturer-datalist">
+        <input type="text" id="ai-manufacturer" placeholder="e.g. Acme" list="manufacturer-datalist">
 
         <label class="modal-label" for="ai-btknumber">BTK Number <span style="color:var(--danger)">*</span></label>
         <input type="text" id="ai-btknumber" placeholder="e.g. BTK000024">
@@ -2468,8 +2468,6 @@
     var currentItemBTK = null;
     var modalMode = 'add';
     var editTargetBTK = null;
-    var DEMO_PASSPHRASE = 'varuhuset';
-    var DEMO_VERSION = 3;
     var labelPadLeft = 4, labelPadRight = 4, labelFontScale = 1;
     var labelMode = 'items';
     var labelPaperType = 'default'; // 'default' (29x90 Brother QL) | 'wide68' (68mm wide, custom length)
@@ -2771,10 +2769,14 @@
         return bufToB64(h);
     }
 
-    async function deriveKEK(passphrase, saltBuf) {
+    // The PBKDF2 cost is written into every new wrapped key (`iter`), so it can be raised later without locking anyone out of
+    // an envelope made earlier; a wrapped key from before that field existed was made with LEGACY_KDF_ITERATIONS.
+    const KDF_ITERATIONS = 150000;
+    const LEGACY_KDF_ITERATIONS = 150000;
+    async function deriveKEK(passphrase, saltBuf, iterations = KDF_ITERATIONS) {
         const baseKey = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
         return crypto.subtle.deriveKey(
-            { name: 'PBKDF2', salt: saltBuf, iterations: 150000, hash: 'SHA-256' },
+            { name: 'PBKDF2', salt: saltBuf, iterations, hash: 'SHA-256' },
             baseKey,
             { name: 'AES-GCM', length: 256 },
             false,
@@ -2804,8 +2806,11 @@
             const wrapped = await crypto.subtle.encrypt(
                 { name: 'AES-GCM', iv: wrapIv }, kek, rawCk
             );
+            // No key identifier: the old `keyId` was an UNSALTED SHA-256 of the passphrase stored next to the ciphertext — a
+            // fast offline guessing oracle that skipped the PBKDF2 stretching entirely. Decryption now simply tries each wrapped
+            // key; the AES-GCM tag already says whether the passphrase was right.
             wrappedKeys.push({
-                keyId: await sha256Hex(pass),
+                iter: KDF_ITERATIONS,
                 salt: bufToB64(salt),
                 wrapIv: bufToB64(wrapIv),
                 wrappedKey: bufToB64(wrapped)
@@ -2822,16 +2827,20 @@
 
     async function decryptEnvelope(env, passphrase) {
         if (!env || env.version !== 1) throw new Error("Unsupported envelope version");
-        const keyId = await sha256Hex(passphrase);
-        const wk = env.wrappedKeys.find(w => w.keyId === keyId);
-        if (!wk) throw new Error("Passphrase does not match any wrapped key");
-
-        const salt = b64ToBuf(wk.salt);
-        const kek = await deriveKEK(passphrase, salt);
-        const wrapIv = b64ToBuf(wk.wrapIv);
-        const wrapped = b64ToBuf(wk.wrappedKey);
-
-        const rawCk = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: wrapIv }, kek, wrapped);
+        // An envelope written before this change carries a keyId (unsalted SHA-256 of its passphrase): use it only to skip
+        // wrapped keys that cannot be ours — it is computed here, on the user's side, never trusted or relied on.
+        const legacyKeyId = env.wrappedKeys.some(w => w.keyId) ? await sha256Hex(passphrase) : null;
+        let rawCk = null;
+        for (const wk of env.wrappedKeys) {
+            if (wk.keyId && legacyKeyId && wk.keyId !== legacyKeyId) continue;
+            try {
+                const iterations = Number.isInteger(wk.iter) && wk.iter >= 100000 && wk.iter <= 5000000 ? wk.iter : LEGACY_KDF_ITERATIONS;
+                const kek = await deriveKEK(passphrase, b64ToBuf(wk.salt), iterations);
+                rawCk = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBuf(wk.wrapIv) }, kek, b64ToBuf(wk.wrappedKey));
+                break;
+            } catch (e) { /* not this wrapped key (wrong passphrase for it) — try the next */ }
+        }
+        if (!rawCk) throw new Error("Passphrase does not match any wrapped key");
         const contentKey = await crypto.subtle.importKey('raw', rawCk, 'AES-GCM', true, ['encrypt', 'decrypt']);
 
         const ct = b64ToBuf(env.ciphertext);
@@ -3021,23 +3030,6 @@
     function getWarehouseMeta(id) {
         return WAREHOUSES.find(w => w.l === String(id)) || { l: id, name: 'Warehouse ' + id, address: '—' };
     }
-
-    // Demo seed data (CSV B format) — used to bootstrap warehouse 1 on first run.
-    const DEMO_CSV_B = `Manufacturer,BTKnumber,itemnumber,itemname(english),itemname(swedish),itemnumber2,itemnumber3,Numberofitems,Inventorylocation,Comments,images
-HÄNY,BTK000001,None,IC310 inklusive Jean Lutz,,IC310,None,0,Best,None,
-HÄNY,BTK000002,955.248B,O-RING 102 X 4,,None,1001007,7,Best,None,
-HÄNY,BTK000003,None,KONTAKTKABEL JEAN Lutz,,None,101133010,1,Best,None,
-HÄNY,BTK000004,None,4/3 WAY SOLENOID VALVE,,None,1014485,2,Best,None,
-HÄNY,BTK000005,None,HYDRAULIC PLUNGER,2511-HK-11,None,None,0,Best,None,
-HÄNY,BTK000006,None,GUIDE BUSH - ZMP600,2511-FF-11,None,None,2,Best,None,
-HÄNY,BTK000007,359.061,LOCK WASHER M8,None,None,None,5,Best,None,
-HÄNY,BTK000008,613.034,IMPELLER DISC,2261-ED-11,None,None,3,Best,None,
-HÄNY,BTK000009,613.036,GREASE RING,None,None,None,11,Best,None,`;
-
-    // Demo seed data (CSV A format — Kit Matrix). Columns = BTKnumber.
-    const DEMO_CSV_A = `Spare-part-kit name,kitnumber,BTK000001,BTK000002,BTK000003,BTK000004,BTK000005,BTK000006,BTK000007,BTK000008,BTK000009
-SPARE PART KIT IC 310,None,None,None,None,None,None,None,1,1,1
-SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     // ═════════════════════════════════════════════════════════════════════════
     //  ID COMPRESSION (BTK000024 -> 24,  24 -> BTK000024)
@@ -4556,7 +4548,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     // Folds known Nordic-character ASCII transliterations (ä->ae, ö->oe, ü->ue, å->aa) plus
-    // case/whitespace/punctuation, so e.g. "HÄNY" and "haeny" resolve to the same manufacturer
+    // case/whitespace/punctuation, so e.g. "Müller" and "mueller" resolve to the same manufacturer
     // instead of silently creating a duplicate entry.
     function normalizeManufacturerKey(name) {
         return String(name || '').trim().toLowerCase()
@@ -4717,7 +4709,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // automatic write, so a looser match here is a convenience, not a risk.
     //
     // 444-prefixed itemnumbers are excluded entirely — see the no-hash-item-identity memory: those
-    // are synthetic per-row filler values (supabase/seed_items.sql), not real identity, so matching
+    // are synthetic per-row filler values (an artifact of how older catalogs were imported), not real identity, so matching
     // a filename against one would be matching against noise.
     function normalizeForImageMatch(s) {
         return (s || '').toString().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -4766,7 +4758,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // Solo entry:  { files: [file], candidates, candidateIndex, pairedItem: null }
     // Paired entry: { files: [file1, file2], matchInfo: [candidate1, candidate2], pairedItem: item }
     // A pair happens when two different files' own best (top) suggestion is the *same* item — a
-    // common real shape for this batch (e.g. a HÄNY part photographed from two angles, or a part
+    // common real shape for this batch (e.g. a part photographed from two angles, or a part
     // plus its label) — so both are reviewed and confirmed together instead of as two separate
     // steps. A third+ file sharing that same top pick becomes its own solo entry rather than being
     // silently dropped or crammed into one card. Files with no candidate at all, or whose top pick
@@ -5605,35 +5597,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             document.getElementById('btn-pack-order-scan').classList.add('hidden');
             document.getElementById('ai-fab-ocr').classList.add('hidden');
         }
-        await ensureDemoVault();
         window.addEventListener('hashchange', handleRoute);
         await handleRoute();
     };
 
-    async function ensureDemoVault() {
-        const vault = getEnvelopeVault();
-        const stored = parseInt(localStorage.getItem('webware_demo_version') || '0', 10);
-        const seeded = WAREHOUSES.every(w => vault[w.l]);
-        if (stored === DEMO_VERSION && seeded) return; // already up to date
-        try {
-            const items = parseCSVString(DEMO_CSV_B);
-            const kits = parseKitsCSVString(DEMO_CSV_A);
-            const env = await encryptEnvelope({ items, kits }, [DEMO_PASSPHRASE]);
-            // varuhuset can see every warehouse: seed all demo warehouses with the same data.
-            WAREHOUSES.forEach(w => { vault[w.l] = env; });
-            setEnvelopeVault(vault);
-            localStorage.setItem('webware_demo_version', String(DEMO_VERSION));
-            console.log("Demo vaults (re)seeded for all warehouses (items + kits).");
-        } catch (e) { console.error("Demo vault bootstrap failed:", e); }
-    }
-
     // ════════════════════════════════════════════════════════════════════════
     //  CSV PARSING -> JSON RUNTIME
     // ════════════════════════════════════════════════════════════════════════
-    function parseCSVString(csvText) {
-        const res = Papa.parse(csvText, CSV_IMPORT_OPTIONS);
-        return normalizeItems(res.data);
-    }
     // A BTK ends up in the URL fragment of every QR label (#<id>/<warehouse>), in Storage file names
     // and in HTML attributes, so it has to be a plain token: an editor importing a CSV whose BTK
     // column held quotes, slashes or markup would otherwise plant text that breaks label routing and
@@ -5682,8 +5652,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         overrides.forEach(o => map.set(keyOf(o), o));
         return Array.from(map.values());
     }
-    // A kit's kitnumber alone isn't an identity — many kits legitimately share 'None' (the demo data
-    // has two) — so merging a saved draft on it collapsed all of them into one. Number plus name.
+    // A kit's kitnumber alone isn't an identity — many kits legitimately share 'None' — so merging a saved draft on it collapsed all of them into one. Number plus name.
     const kitIdentity = k => JSON.stringify([k.kitnumber, k.name]);
 
     // ════════════════════════════════════════════════════════════════════════
@@ -5790,7 +5759,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // ════════════════════════════════════════════════════════════════════════
     //  ROUTING (URL FRAGMENTS — true alphanumeric, no = or &)
     //    Item Scan:  #<COMPRESSED_ID>/<WAREHOUSE_ID>     e.g. #24/1
-    //    Key Setup:  #<WAREHOUSE_ID>/KEY/<PASSPHRASE>     e.g. #1/KEY/varuhuset
+    //    Key Setup:  #<WAREHOUSE_ID>/KEY/<PASSPHRASE>     (offline vaults only)
     // ════════════════════════════════════════════════════════════════════════
     async function handleRoute() {
         const hash = window.location.hash;
@@ -5969,8 +5938,26 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const vault = getEnvelopeVault();
         const env = vault[wid];
         if (!env) {
-            document.getElementById('auth-error').style.display = 'block';
-            return showToast("No database found for this warehouse ID.", "error");
+            // Nothing is built in any more (there used to be a demo catalog behind a published passphrase). A new offline vault
+            // starts empty and is protected by the passphrase typed here — confirmed first, so a typo can't silently create one.
+            document.getElementById('auth-error').style.display = 'none';
+            if (key.length < 8) return showToast("No database exists for this warehouse on this device. To create a new empty one, choose a passphrase of at least 8 characters.", "warning", 8000);
+            showConfirmModal({
+                title: `Create a new empty database for warehouse ${wid}?`,
+                body: "Nothing is stored for this warehouse on this device yet. This creates an empty, encrypted one protected by the passphrase you typed — remember it: it cannot be recovered. (Typed it wrong? Cancel and try again.)",
+                confirmLabel: 'Create empty database',
+                onConfirm: async () => {
+                    try {
+                        const fresh = await encryptEnvelope({ items: [], kits: [] }, [key]);
+                        const v = getEnvelopeVault();
+                        if (v[wid]) return showToast("A database appeared meanwhile — try unlocking again.", "warning");
+                        v[wid] = fresh;
+                        setEnvelopeVault(v);
+                        attemptManualDecryption();
+                    } catch (e) { console.error("Vault creation failed:", e); showToast("Could not create the database.", "error"); }
+                }
+            });
+            return;
         }
 
         decryptEnvelope(env, key).then(data => {
@@ -9210,7 +9197,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!to) { showToast("Enter a recipient email first.", "warning"); return; }
         const subject = document.getElementById('compose-email-subject').value;
         const body = document.getElementById('compose-email-body').value;
-        window.open(window.buildMailtoLink({ to, subject, body }));
+        let link;
+        try { link = window.buildMailtoLink({ to, subject, body }); }
+        catch (e) { showToast("That doesn't look like a plain email address (several can be separated by commas).", "warning"); return; }
+        window.open(link);
     }
 
     // A second press while the first send is still in flight sent the same email twice.
@@ -13859,12 +13849,15 @@ th { background: #eee; }
             textDiv.className = 'label-text';
 
             // Warehouse key setup URL: #<WAREHOUSE_ID>/KEY/<PASSPHRASE>
+            // A label carries the key ONLY when this device actually holds one for that warehouse (an offline vault it has
+            // unlocked). It used to fall back to a built-in default passphrase, which put a publicly known "key" on every
+            // Supabase warehouse's label; now such a label just opens the app.
             const keys = getKeyVault();
-            const pass = keys[w.l] || DEMO_PASSPHRASE;
+            const pass = keys[w.l];
             // Only the base/path/tag is lowercased (denser QR) — the passphrase is case-sensitive, so
             // lowercasing it too made a label for any warehouse whose key has an uppercase letter
             // unlock nothing.
-            const targetUrl = `${BASE_URL}#${w.l}/KEY/`.toLowerCase() + pass;
+            const targetUrl = pass ? `${BASE_URL}#${w.l}/KEY/`.toLowerCase() + pass : BASE_URL;
 
             // The address rides on the small BTK style but is allowed to wrap, like the name.
             const textBlocks = [
@@ -14164,7 +14157,7 @@ ${css}
                 aiAssistantReady = true;
                 await aiRefreshKeyStatus();
                 aiAppendMessage('system', aiHasApiKey
-                    ? "Ask me things like \"find item 12345\", \"which items are from Bosch\", \"pack the grease sticks\", \"pack all the rings from the 310 kit\", \"what's in the 310 kit\", \"what needs reordering\", or a factual question like a company's address. I remember the last few things we talked about, so follow-ups like \"how many do we have\" work too. With an item open I can also change one of its fields. Type or tap 🎤 to speak, or 📷 to scan a label."
+                    ? "Ask me things like \"find item 12345\", \"which items are from Bosch\", \"pack the grease sticks\", \"pack all the rings from the overhaul kit\", \"what's in the overhaul kit\", \"what needs reordering\", or a factual question like a company's address. I remember the last few things we talked about, so follow-ups like \"how many do we have\" work too. With an item open I can also change one of its fields. Type or tap 🎤 to speak, or 📷 to scan a label."
                     : aiNoKeyMessage());
                 if (aiHasApiKey) aiRenderSuggestions();
             }
@@ -14495,10 +14488,10 @@ ${css}
 {"action":"chat","reply":string}
 Rules:
 - "search_item": user wants to find/open ONE specific item by name, number, or manufacturer.
-- "pack_kit": user wants to start/pack an order from a whole or partial named KIT (e.g. "pack the kit for HANY IC310", "pack all the rings from the 310 kit"). "multiplier" is how many times over to pack every included item — 1 by default, or the number they said (e.g. "pack twice of everything" -> 2, "triple the kit" -> 3, "pack 4x IC310" -> 4). "filter" (optional) narrows it to only the items in that kit whose name matches a word/phrase — e.g. "pack all the rings from the 310 kit" -> query "310", filter "rings"; omit filter to pack the whole kit. "assignee" (optional) is the name of a COLLEAGUE the text says should pack/handle this order — e.g. "pack the 310 kit and assign it to Sam", "have Sam pack this kit" — omit it when no specific person is named, which leaves it open to anyone in the warehouse (the default). If it's clearly just ONE item and not a kit (e.g. "pack the grease sticks"), use "pack_order" instead, not this.
+- "pack_kit": user wants to start/pack an order from a whole or partial named KIT (e.g. "pack the kit for the pump overhaul", "pack all the rings from the overhaul kit"). "multiplier" is how many times over to pack every included item — 1 by default, or the number they said (e.g. "pack twice of everything" -> 2, "triple the kit" -> 3, "pack 4x the overhaul kit" -> 4). "filter" (optional) narrows it to only the items in that kit whose name matches a word/phrase — e.g. "pack all the rings from the overhaul kit" -> query "overhaul", filter "rings"; omit filter to pack the whole kit. "assignee" (optional) is the name of a COLLEAGUE the text says should pack/handle this order — e.g. "pack the overhaul kit and assign it to Sam", "have Sam pack this kit" — omit it when no specific person is named, which leaves it open to anyone in the warehouse (the default). If it's clearly just ONE item and not a kit (e.g. "pack the grease sticks"), use "pack_order" instead, not this.
 - "pack_order": user describes a pack order as one or more individual items (not a whole/partial named kit) — by name, BTK, or "item N" — each with an optional quantity, optionally a recipient to send it to, and optionally a colleague to assign it to (e.g. "pack the grease sticks", "pack 2 bolts and 1 gasket for Anna Andersson", "send BTK000012 x3 to Acme AB, look up their address", "pack this for Anna Andersson and assign it to Sam"). "text" is the instruction verbatim — it's parsed separately (including which name is the recipient vs. the assignee), so just copy it exactly.
-- "list_items": user wants to SEE/LIST several items matching something — a manufacturer, keyword, or category (e.g. "which items are from Bosch", "list items with grease", "what do we have from HÄNY") — not open one specific item (search_item) and not pack anything.
-- "list_kit_items": user wants to see what's INSIDE a kit without packing it — e.g. "what's in the 310 kit", "show me what's in HANY IC310".
+- "list_items": user wants to SEE/LIST several items matching something — a manufacturer, keyword, or category (e.g. "which items are from Bosch", "list items with grease", "what do we have from Acme") — not open one specific item (search_item) and not pack anything.
+- "list_kit_items": user wants to see what's INSIDE a kit without packing it — e.g. "what's in the overhaul kit", "show me what's in the pump overhaul kit".
 - "low_stock_items": user asks what's low on stock or needs reordering — e.g. "what needs reordering", "what's running low", "anything low on stock". No query needed.
 - "edit_field": ONLY when clearly asking to change one specific field's value on the item that's currently open (e.g. "change the item name to Grease sticks" -> field "name_en", value "Grease sticks").
 - "web_search": user asks a factual question that needs looking something up on the web — including things like a company's address, phone number, or registration/org number.
@@ -14634,8 +14627,8 @@ Respond with ONLY the JSON object, nothing else.`;
         a = a.toLowerCase().trim(); b = b.toLowerCase().trim();
         if (a === b) return 1;
         if (b.includes(a) || a.includes(b)) return 0.8;
-        // Spacing/punctuation-blind containment check: a query like "IC310" shares no whole word
-        // with a kit/item name like "SPARE PART KIT IC 310" (the number is glued to the letters on
+        // Spacing/punctuation-blind containment check: a query like "AB310" shares no whole word
+        // with a kit/item name like "SPARE PART KIT AB 310" (the number is glued to the letters on
         // one side, split by a space on the other), so the plain substring and token-overlap checks
         // above both score it 0. Comparing alphanumeric-only versions of both strings catches this
         // and other spacing/hyphenation differences without needing a real fuzzy-match library.
@@ -14794,7 +14787,7 @@ Respond with ONLY the JSON object, nothing else.`;
             }
             const kit = match.kit;
             let btks = Object.keys(kit.items || {}).filter(b => kit.items[b] > 0);
-            // Optional "pack all the rings from the 310 kit" narrowing — only the items inside the
+            // Optional "pack all the rings from the overhaul kit" narrowing — only the items inside the
             // matched kit whose own name is a decent word-overlap match for the filter text.
             const filterText = (reply.filter || '').trim();
             if (filterText) {
@@ -14973,7 +14966,7 @@ Respond with ONLY the JSON object, nothing else.`;
         if (!kit) { showToast('Kit not found', 'error'); return; }
         const multiplier = action.multiplier > 1 ? action.multiplier : 1;
         Object.keys(kit.items || {}).forEach(btk => {
-            if (action.filterBtks && !action.filterBtks.includes(btk)) return; // e.g. "pack all the rings from the 310 kit" — skip items outside the filter
+            if (action.filterBtks && !action.filterBtks.includes(btk)) return; // e.g. "pack all the rings from the overhaul kit" — skip items outside the filter
             const qty = kit.items[btk];
             if (!qty || qty <= 0) return;
             const finalQty = qty * multiplier;
@@ -15079,7 +15072,7 @@ Respond with ONLY the JSON object, nothing else.`;
         aiRenderItemListMessage(`Found ${matches.length} item${matches.length === 1 ? '' : 's'} matching "${query}":`, entries);
     }
 
-    // "what's in the 310 kit" — see the recipe without starting a Pack Order from it.
+    // "what's in the overhaul kit" — see the recipe without starting a Pack Order from it.
     function aiHandleListKitItems(query) {
         if (!query || !query.trim()) { aiAppendMessage('assistant', "Which kit?"); return; }
         const match = aiFuzzyFindKit(query);

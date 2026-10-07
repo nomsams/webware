@@ -5,12 +5,21 @@ on:
     - cron: '0 6 * * 1,4'   # Mon & Thu — comfortable margin under the free-tier 7-day pause
   workflow_dispatch: {}
 
+# This job only needs to read; it must never be able to write to the repository.
+permissions: {}
+
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase REST API
+      # Calls public.keepalive() (supabase/schema_security_hardening_2.sql), a harmless function the PUBLIC anon key may run. The
+      # project URL and anon key are already published in index.html, so no repository secret is needed at all. The service-role
+      # key (full database access, bypasses RLS) is deliberately NOT used here any more: delete the SUPABASE_SERVICE_ROLE_KEY
+      # repository secret (and consider rotating that key).
+      - name: Ping Supabase
         run: |
-          curl -sf "${{ secrets.SUPABASE_URL }}/rest/v1/warehouses?select=l&limit=1" \
-            -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+          curl -sf -X POST "https://qagdbkvcgxurnqowlokx.supabase.co/rest/v1/rpc/keepalive" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFhZ2Ria3ZjZ3h1cm5xb3dsb2t4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4MTY0MDEsImV4cCI6MjEwMzM5MjQwMX0.tteGQHJTQ775oB0IllbS0oOIPlshngD9yqy_elVl5NU" \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFhZ2Ria3ZjZ3h1cm5xb3dsb2t4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4MTY0MDEsImV4cCI6MjEwMzM5MjQwMX0.tteGQHJTQ775oB0IllbS0oOIPlshngD9yqy_elVl5NU" \
+            -H "Content-Type: application/json" \
+            -d '{}'

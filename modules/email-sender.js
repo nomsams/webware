@@ -51,8 +51,20 @@ export function createEmailClient({ supabaseUrl, supabaseAnonKey, getAccessToken
 // No-backend fallback (or a deliberate "let the user review before sending" option): opens the
 // user's own mail client with everything prefilled. Works with zero deployment/configuration.
 // `to` is left unencoded so comma-separated multiple recipients still work as mailto expects.
+// One plain address: letters, digits and . _ % + ' - before the @, a dotted host after it. Deliberately has no ? & # = ; : < > " or
+// space — those are what let a crafted "address" add its own cc/bcc/body to a mailto: link or a second recipient to a send.
+const PLAIN_EMAIL_RE = /^[A-Za-z0-9._+'-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+export function isPlainEmail(value) {
+  return typeof value === 'string' && value.length <= 254 && PLAIN_EMAIL_RE.test(value);
+}
+
 export function buildMailtoLink({ to, subject = '', body = '' }) {
   if (!to) throw new Error('buildMailtoLink: to is required');
+  // Several comma-separated recipients stay supported, but every one of them must be a plain address — otherwise "a@b.se?bcc=x@y.se"
+  // would quietly add a hidden recipient to the compose window.
+  const recipients = String(to).split(',').map((r) => r.trim());
+  if (!recipients.every(isPlainEmail)) throw new Error('buildMailtoLink: to must be one or more plain email addresses');
+  to = recipients.join(',');
   const params = new URLSearchParams();
   if (subject) params.set('subject', subject);
   if (body) params.set('body', body);

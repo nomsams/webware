@@ -10,8 +10,8 @@ Add an `images` column to your CSV. Multiple images per item are supported, sepa
 
 ```csv
 Manufacturer,itemnumber,item name,itemnumber2,itemnumber3,Numberofitems,Inventorylocation,Comments,images
-HÄNY,955.248B,O-RING 102 X 4,None,1001007,7,Best,None,item-a3f8bc12.png
-HÄNY,613.034,IMPELLER DISC,2261-ED-11,None,3,Best,None,item-d7e2a091.png;item-f04c3b77.png
+Acme,955.248B,O-RING 102 X 4,None,1001007,7,Main,None,item-a3f8bc12.png
+Acme,613.034,IMPELLER DISC,2261-ED-11,None,3,Main,None,item-d7e2a091.png;item-f04c3b77.png
 ```
 
 ## Naming Convention

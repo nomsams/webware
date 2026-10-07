@@ -182,5 +182,16 @@ from (
   select 50, 'schema_security_hardening.sql', 'activity_log inserts bound to the caller (no forged user_id / revert rows)',
     exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'activity_log' and policyname = 'p_activity_log_insert'
             and with_check ilike '%user_id = auth.uid()%' and with_check ilike '%reverted_at is null%')
+  union all
+  -- A SELECT policy on storage.objects is what lets /storage/v1/object/list answer; "TO public" includes the anon role, so anyone
+  -- with the (public) anon key could enumerate every photo path — including the unguessable token that is the only thing keeping
+  -- a public bucket's files private. Public buckets serve their URLs without any policy, so nothing is lost by removing it.
+  select 51, 'schema_security_hardening_2.sql', 'storage buckets cannot be listed anonymously (no SELECT policy TO public)',
+    not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and cmd = 'SELECT'
+                and roles @> array['public'::name])
+  union all
+  select 52, 'schema_security_hardening_2.sql', 'signed-in users hold no TRUNCATE (RLS does not govern it)',
+    not has_table_privilege('authenticated', 'public.items', 'TRUNCATE')
+    and not has_table_privilege('authenticated', 'public.orders', 'TRUNCATE')
 ) t
 order by t.n;

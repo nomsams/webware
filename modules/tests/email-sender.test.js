@@ -97,3 +97,13 @@ test('sendEmail() requires a recipient and does not call fetch without one', asy
 test('createEmailClient requires its config', () => {
   assert.throws(() => createEmailClient({}), /required/);
 });
+
+test('buildMailtoLink refuses a "recipient" that would inject extra mailto parameters or recipients', () => {
+  for (const bad of ['a@b.se?bcc=evil@x.se', 'a@b.se&cc=evil@x.se', 'a@b.se#x', 'a b@c.se', '<a@b.se>', 'a@b.se;c@d.se', 'a@b.se,', 'nope', 'a@b.se,evil?x=1']) {
+    assert.throws(() => buildMailtoLink({ to: bad }), /plain email addresses/, bad);
+  }
+});
+
+test('buildMailtoLink still accepts several plain recipients (spaces after commas are trimmed)', () => {
+  assert.equal(buildMailtoLink({ to: 'a@example.com, b.c+d@example.se' }), 'mailto:a@example.com,b.c+d@example.se');
+});

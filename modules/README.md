@@ -81,7 +81,7 @@ node --test modules/tests/*.test.js
   same DuckDuckGo path the assistant's own `web_search` action uses — so a named recipient with no
   address gets one searched for automatically (`recipient.address`); the same lookup also tries to
   pick out an organization/registration number (`recipient.orgNumber`, e.g. Swedish
-  `556677-8899` — `guessOrgNumber()`, preferring a labeled line like "Org.nr:"/"VAT" over a bare
+  `123456-7890` — `guessOrgNumber()`, preferring a labeled line like "Org.nr:"/"VAT" over a bare
   number-shaped match so a stray invoice/phone number isn't mistaken for one) across up to 3
   search results, since an address and an org number often live on different pages of the same
   site. index.html threads `recipient.orgNumber` through to the confirm card, the applied pack
@@ -146,18 +146,19 @@ node --test modules/tests/*.test.js
   per-destination-warehouse item drafts, pure/dependency-injected/unit-tested like
   `order-parser.js`/`delivery-note-parser.js`, no Supabase/DOM access at all.
   `classifySuffix()`/`KNOWN_ARTICLE_SUFFIXES` route each row by its article number's trailing
-  company/city code (`MB`→Best, `BBD`/`GN`/`GJ`/`SN`→their own new warehouse, anything else — no
-  suffix, or an unrecognized one — into one shared `UNRECOGNIZED_SUFFIX` bucket, confirmed against
-  the real export rather than guessed).
+  company/city code (one suffix → the existing main warehouse, each other known suffix → its own new
+  warehouse, anything else — no suffix, or an unrecognized one — into one shared
+  `UNRECOGNIZED_SUFFIX` bucket rather than a guess). The table is plain data in that file: edit it
+  to match your own article-number scheme.
 
   **Manufacturer** (`inferManufacturer()`): the count file's own `Företag` column first, then a
   later ("v3") export's own `manufacturers` column when the row has one, then `KNOWN_BRAND_PREFIXES`
-  (brand names actually seen in this catalog, kept to ones frequent *and* distinctive enough to be
-  a safe prefix check — a generic word like "Superior" or "Flex", also seen in the data at 1-2 rows
-  each, is deliberately excluded), then a whitelisted model-code prefix (`CODE_PREFIX_MANUFACTURER`
-  — see below) for a row missing the brand word itself, then `extractHanyStyleCode()`'s three regex
-  shapes (HÄNY's own internal numbering turns up in names with or without the word "HÄNY" itself, so
-  a shape match alone is treated as HÄNY specifically — the one case worth inferring from a code
+  (a short curated list of brand names, kept to ones frequent *and* distinctive enough to be a safe
+  prefix check — a generic word is deliberately excluded), then a whitelisted model-code prefix
+  (`CODE_PREFIX_MANUFACTURER` — see below) for a row missing the brand word itself, then
+  `extractHanyStyleCode()`'s three regex shapes (one supplier's own internal numbering turns up in
+  names with or without the supplier's name itself, so a shape match alone is treated as that
+  supplier — the one case worth inferring from a code
   shape alone).
 
   **Item numbers** (`extractItemNumberCandidates()`, `firstTwoDistinctCodes()`): `artikelnr`
@@ -165,23 +166,21 @@ node --test modules/tests/*.test.js
   might have one and taking the first two genuinely distinct values, in priority order: the count
   file's own manually-verified `Artikelnummer` (wins outright), a still-later ("v6") export's own
   `article_code_1`/`article_code_2` columns (already extracted by whatever produced that file —
-  covering shapes this module's own regex whitelist doesn't, like `TE3549R25WS`/`CF2016PF`, for
-  roughly a third of rows), then up to two *distinct* codes pulled from the raw name itself for
+  covering shapes this module's own regex whitelist doesn't, for a good part of the rows), then up to two *distinct* codes pulled from the raw name itself for
   whatever a higher source didn't already cover — a dotted code (`794.035`, optional trailing
   letter), a letter-dash-digits code (`D-2728`), a digits-dash-letters-dash-digits code
   (`2261-CS-11`), a bare 6-8 digit part number (`1012785`), and a whitelisted "model-code prefix +
-  digits" shape (`REP 990`/`EXM 731` for Weber, `TE 726` for TEI, `IC 311`/`ZMP 725`/`MF 80` for
-  HÄNY). That last one is deliberately a curated whitelist rather than "any 2-5 letters" — checked
-  against the full real export, a generic version of it matches plenty of ordinary descriptive words
-  followed by a measurement or weight ("RING 142" from "O-RING 142,5 X...", "VIT 25" = "white, 25
-  kg", cement grade "LL 42", etc.), which would have been a wrong item number every time. A name
-  carrying two different shapes at once (common for HÄNY, e.g. `"793.539 HÄNY LUFTFILTER HPU6
-  H-5075"`) yields both, same as before — the v6 columns are additive, not a replacement for rows
-  that don't have them (roughly two-thirds of the real export still relies on this regex fallback).
+  digits" shape (e.g. `AB 990`, for a curated per-manufacturer list in the module). That last one is
+  deliberately a curated whitelist rather than "any 2-5 letters" — a generic version of it matches
+  plenty of ordinary descriptive words followed by a measurement or weight ("RING 142" from
+  "O-RING 142,5 X...", "VIT 25" = "white, 25 kg"), which would have been a wrong item number every
+  time. A name carrying two different shapes at once (e.g. `"793.539 ACME AIR FILTER H-5075"`)
+  yields both, same as before — the v6 columns are additive, not a replacement for rows that don't
+  have them (most of a real export still relies on this regex fallback).
 
   **Display name**: the same "v6" export's own `clean_name` column (the product description with
   the brand and any part numbers already stripped, e.g. `"KOMPLETT RESERVDELSLÅDA"` for a raw name
-  of `"TEI TE 726 KOMPLETT RESERVDELSLÅDA"`) is used as the item's name when a row has one, falling
+  of `"ACME AB 726 KOMPLETT RESERVDELSLÅDA"`) is used as the item's name when a row has one, falling
   back to the raw `artikelnamn` otherwise. Manufacturer inference and the regex item-number fallback
   above always run against the RAW name regardless — `clean_name` has the brand word deliberately
   removed, which is exactly the signal `inferManufacturer()`/`findBrandPrefix()` need, and running
@@ -205,7 +204,7 @@ node --test modules/tests/*.test.js
   can tell whether Visma has moved since; the corrected number would claim the two already agree.
 
   **Location** (`parsePlatsLocation()`): the count file's own `Plats` wins when a row matches one,
-  else a later export's own `location` column on the row itself (same values, same 62 Best rows) —
+  else a later export's own `location` column on the row itself (same values) —
   either way turned into a real `LocationCode` (confirmed field-by-field against the actual
   warehouse: Zone, Depth, Level, Bin, Row — see the README's "Bin Location Codes" section). The
   notation `A 3-3 1-1` *is* webware's code, so the result is the same text, only tidied (upper-case
@@ -224,10 +223,10 @@ node --test modules/tests/*.test.js
   of always assuming "whichever warehouse is currently open") specifically so one import run can
   create and populate several warehouses without needing its own duplicate copies of either
   function. A review table (every field editable, grouped by destination, new-warehouse names
-  editable or skippable) sits between parsing and any write; choosing to import into Best requires
-  typing a confirmation phrase, since it deletes every current Best item — photos included, via
+  editable or skippable) sits between parsing and any write; choosing to import into the main warehouse requires
+  typing a confirmation phrase, since it deletes every current item in it — photos included, via
   `storagePathFromPublicUrl()` same as `deleteItemPhotoRow()` — before adding the reviewed set.
-  Every write from the whole run (Best's deletions and every warehouse's new items) shares one
+  Every write from the whole run (the main warehouse's deletions and every warehouse's new items) shares one
   `activity_log` batch, reverting as a single `undoImportBatch()` call, unchanged from how a CSV
   import already uses it.
 - **`iso-rack.js`** — **wired in**, as the Settings-gated "🧊 Isometric bin locator" (off by
@@ -333,7 +332,7 @@ node --test modules/tests/*.test.js
 - **`addon-bridge.js`** — **wired in**, as Pack Order → 🚚 NTEX transport / 🧾 Visma quote and Settings → 🔌 Add-on bridge. Everything needed to hand work to the VismaScrap add-on's two modules, NTEX (book a transport) and Visma (quote drafts, new articles). Pure builders for the add-on's documented JSON — `buildNtexOrder`, `buildVismaQuote`, `buildAddArticles`, `parseAddress` (free-text Swedish address → street/postal code/city, blanks where unsure), `mmToMetres` — and validators that list in plain words what NTEX refuses without and what only warns (`ntexOrderProblems`, `quoteProblems`; a pallet needs no length/width since the add-on assumes 1.2 × 0.8 m, but always a height). `createAddonClient({baseUrl, token, fetchImpl})` is a dependency-injected client for the add-on's local **jobs API** (`/v1/jobs`: submit, long-poll `waitForJob` bounded by `maxPolls`, `confirmJob` which refuses without the preview hash you were shown, `cancelJob`), with errors classified (`unreachable`, `unauthorized`, `not_connected`, `refused`, `conflict`, …). Caveat from the add-on's own design: its localhost host sends no CORS headers and rejects requests carrying a browser `Origin`, so a page served from GitHub Pages can't call it directly yet — the client reports `unreachable` with an explanation, and the **paste route** (copy the JSON into the add-on's own box) is the one that works today. Tested in `tests/addon-bridge.test.js` with a fake `fetch`.
 - **`kit-relink.js`** — **wired in**, in the Visma import. `relinkKitLines(lines, items)` puts kit recipe
   lines back on items that were deleted and created again under new BTK numbers. Needed because
-  `kit_items.btk` is `ON DELETE CASCADE`: wiping Best's items empties every kit in it, and a BTK is a
+  `kit_items.btk` is `ON DELETE CASCADE`: wiping the main warehouse's items empties every kit in it, and a BTK is a
   label that is never reused for "the same" item afterwards. A line is matched by what the item IS — its
   item numbers, most stable first (#3 = Visma's article number, then #1, #2), each number looked up in
   any of the three slots, case-insensitively. If several new items share the number the manufacturer may
@@ -435,7 +434,7 @@ Prefer one of these over a client-embedded key for any future proxy this app add
 `cors-proxy.js`'s `chikibriki` default is a different case, worth understanding separately: crawly
 and timeline (two of the reference repos this was ported from — same author as webware) hardcode a
 fallback proxy key, `"chikibriki"`, in cleartext in their own public source, against a CORS-proxy
-Edge Function on Supabase project `onbkfqayveownervyktu` — that project's, not webware's own. That
+Edge Function on a different Supabase project — not webware's own. That
 value was never actually secret — it's a conventional gate value, the same way an API's public
 client ID isn't secret, and (being a shared public-utility function across that author's own
 projects) doesn't require a signed-in user of *that* project. `modules/cors-proxy.js` sends
