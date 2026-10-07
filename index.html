@@ -385,6 +385,35 @@
         .bin-locator-touchpad-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--primary); position: absolute; top: 50%; left: 50%; margin: -8px 0 0 -8px; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: background 0.15s; }
         .bin-locator-touchpad-dot.active { background: var(--danger); }
         .bin-locator-touchpad-hint { font-size: 0.78rem; color: var(--text-muted); text-align: center; max-width: 260px; }
+        /* The ring that shows WHERE the pad is pointing on the rack — fixed-position (placed from the rack
+           container's own rect, see positionBinLocatorReticle), so it works over the flat grid and the 3D
+           view alike. White halo + dark shadow so it reads on the blue bins and on the dark theme. */
+        .bin-locator-reticle {
+            position: fixed; z-index: 3998; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%;
+            border: 3px solid var(--danger); pointer-events: none;
+            background: radial-gradient(circle, var(--danger) 0 3px, transparent 4px);
+            box-shadow: 0 0 0 2px #fff, 0 0 0 5px rgba(0,0,0,0.25), 0 3px 12px rgba(0,0,0,0.45);
+            animation: bin-locator-reticle-pulse 1.6s ease-in-out infinite;
+        }
+        .bin-locator-reticle.hidden { display: none; }
+        @keyframes bin-locator-reticle-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.14); } }
+        @media (prefers-reduced-motion: reduce) { .bin-locator-reticle { animation: none; } }
+        .bin-locator-touchpad-select { padding: 0.45rem 1rem; min-height: 40px; font-size: 0.9rem; }
+        .bin-locator-touchpad-select .short { display: none; }
+        /* Phones: the pad floats in the bottom-LEFT corner (the assistant/camera/chat buttons own the
+           right side), so the rack and the pad are on screen together however far the page is scrolled —
+           a pad parked under a tall rack meant scrolling back and forth between steering and watching.
+           A bit bigger than on desktop (a 108px circle is hard to steer precisely), with a one-word button
+           under it so the whole thing stays narrow enough not to reach the buttons on the right. */
+        @media (max-width: 640px) {
+            .bin-locator-touchpad-wrap { position: fixed; left: 10px; bottom: 14px; z-index: 3990; margin: 0; gap: 0.35rem; background: var(--card-bg); border: 1px solid var(--border); border-radius: 18px; padding: 0.45rem; box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
+            .bin-locator-touchpad { width: 124px; height: 124px; }
+            .bin-locator-touchpad-hint { display: none; }
+            .bin-locator-touchpad-select { width: 100%; padding: 0.3rem 0.5rem; min-height: 40px; }
+            .bin-locator-touchpad-select .long { display: none; }
+            .bin-locator-touchpad-select .short { display: inline; }
+            #bin-locator-iso svg { max-height: 38vh; } /* leaves the corner pad clear of the rack */
+        }
         .dim-group { margin-bottom: 0.9rem; }
         .dim-group h4 { margin: 0 0 0.35rem; font-size: 0.85rem; }
         .dim-group h4 span { color: var(--text-muted); font-weight: 400; font-size: 0.78rem; }
@@ -498,6 +527,41 @@
         .pick-route-row:last-child { border-bottom: none; }
         .pick-route-row:hover, .pick-route-row.active { background: var(--primary-light); }
         .pick-route-grid .map-cell { font-size: 0.7rem; }
+
+        /* --- GUIDED PACK ("Pick Walk"): one item at a time, full screen, big targets, plain words --- */
+        #pick-walk-modal { z-index: 4500; padding: 0; background: var(--background); align-items: stretch; }
+        .pick-walk-box { width: 100%; max-width: 640px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; background: var(--background); padding: 0.75rem 1rem calc(1rem + env(safe-area-inset-bottom)); }
+        .pick-walk-top { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+        .pick-walk-top .secondary { min-height: 44px; padding: 0.5rem 0.9rem; }
+        .pick-walk-progress-text { font-weight: 800; font-size: 1.05rem; flex: 1; }
+        .pick-walk-bar { height: 10px; border-radius: 6px; background: var(--border); overflow: hidden; margin-bottom: 1rem; }
+        .pick-walk-bar > div { height: 100%; background: var(--success); width: 0; transition: width 0.3s; }
+        .pick-walk-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 18px; padding: 1rem; margin-bottom: 0.9rem; }
+        .pick-walk-move { color: var(--primary); font-weight: 700; font-size: 0.95rem; margin-bottom: 0.6rem; }
+        .pick-walk-card-top { display: flex; gap: 0.8rem; align-items: flex-start; }
+        .pick-walk-photo { width: 92px; height: 92px; flex-shrink: 0; object-fit: cover; border-radius: 12px; background: var(--border); display: block; }
+        .pick-walk-photo-ph { width: 92px; height: 92px; flex-shrink: 0; border-radius: 12px; background: var(--border); display: flex; align-items: center; justify-content: center; font-size: 2.4rem; }
+        .pick-walk-name { font-size: 1.35rem; font-weight: 800; line-height: 1.2; overflow-wrap: anywhere; }
+        .pick-walk-sub { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; overflow-wrap: anywhere; }
+        .pick-walk-take { display: flex; align-items: baseline; gap: 0.6rem; margin-top: 0.75rem; }
+        .pick-walk-take-qty { font-size: 3.2rem; font-weight: 900; color: var(--primary); line-height: 1; }
+        .pick-walk-take-unit { font-size: 1.15rem; font-weight: 700; color: var(--text-muted); }
+        .pick-walk-where { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+        .pick-walk-chip { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 64px; padding: 0.4rem 0.7rem; border-radius: 12px; background: var(--primary-light); border: 2px solid var(--primary); }
+        .pick-walk-chip small { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
+        .pick-walk-chip b { font-size: 1.55rem; font-weight: 900; color: var(--primary); line-height: 1.1; }
+        .pick-walk-code { font-family: monospace; font-weight: 700; color: var(--text-muted); font-size: 0.9rem; }
+        .pick-walk-warn { background: rgba(245, 158, 11, 0.14); border: 1px solid #f59e0b; border-radius: 12px; padding: 0.7rem 0.85rem; margin-bottom: 0.9rem; font-size: 0.92rem; }
+        .pick-walk-done-banner { background: rgba(16, 185, 129, 0.14); border: 1px solid var(--success); border-radius: 12px; padding: 0.7rem 0.85rem; margin-bottom: 0.9rem; font-weight: 700; }
+        .pick-walk-actions { margin-top: auto; display: flex; flex-direction: column; gap: 0.6rem; position: sticky; bottom: 0; background: var(--background); padding-top: 0.5rem; }
+        .pick-walk-actions .big { min-height: 64px; font-size: 1.3rem; border-radius: 16px; }
+        .pick-walk-actions .row { display: flex; gap: 0.6rem; }
+        .pick-walk-actions .row > button { flex: 1; min-height: 50px; }
+        .pick-walk-actions .row.small > button { min-height: 42px; font-size: 0.9rem; }
+        .pick-walk-next { color: var(--text-muted); font-size: 0.88rem; text-align: center; }
+        .pick-walk-summary-row { display: flex; gap: 0.6rem; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
+        .pick-walk-summary-row:last-child { border-bottom: none; }
+        .pick-walk-big-emoji { font-size: 3.5rem; text-align: center; }
 
         /* On a phone-width screen, .kit-row's normal single-line layout (qty + name/info +
            the ~108px-wide toggle button + the remove button, all fighting for one row) squeezed
@@ -1038,6 +1102,42 @@
             <button class="secondary full-width" id="btn-scanner-ocr" onclick="scannerCaptureAndOcr()" title="Read a label full of text instead of a barcode/QR code">📝 Scan Text (OCR)</button>
             <button class="secondary full-width" id="btn-scanner-delivery-note" onclick="scannerCaptureDeliveryNote()" title="Read a delivery note (följsedel) and update stock from it">🧾 Delivery Note</button>
             <button class="secondary full-width" onclick="closeBarcodeScanner()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Guided Pack ("Pick Walk"): the Pack Order one item at a time, in walking order — where to go, what to
+     take, then ✓ Packed (or 📷 scan the item to confirm it's the right one). Full screen, its own z-index
+     (under the scanner, so 📷 opens on top of it). Rendered by renderPickWalk(). -->
+<div class="modal-overlay" id="pick-walk-modal">
+    <div class="pick-walk-box" role="dialog" aria-modal="true" aria-label="Guided packing">
+        <div class="pick-walk-top">
+            <button type="button" class="secondary" onclick="closePickWalk()" aria-label="Close guided packing">✕ Close</button>
+            <div class="pick-walk-progress-text" id="pick-walk-progress-text"></div>
+        </div>
+        <div class="pick-walk-bar"><div id="pick-walk-bar-fill"></div></div>
+        <div id="pick-walk-body" style="display:flex; flex-direction:column; flex:1;"></div>
+    </div>
+</div>
+
+<!-- Shipping & Visma hand-off (Pack Order → 🚚 NTEX transport / 🧾 Visma quote): builds the JSON the
+     VismaScrap add-on understands (modules/addon-bridge.js), shows what's still missing, and either
+     copies it (paste it into the add-on's own box — works today) or sends it through the add-on's local
+     jobs API once that is reachable (Settings → 🔌 Add-on bridge). Nothing is booked or saved from here:
+     the add-on always shows its own review in the NTEX/Visma tab. -->
+<div class="modal-overlay" id="addon-modal" onclick="if (event.target === this) closeAddonModal()">
+    <div class="modal-box" style="max-width:560px;">
+        <h3 id="addon-modal-title">🚚 NTEX transport</h3>
+        <p class="setting-desc" id="addon-modal-intro" style="margin-bottom:0.75rem;"></p>
+        <div id="addon-modal-form"></div>
+        <div id="addon-modal-problems" style="margin:0.75rem 0;"></div>
+        <label class="modal-label" for="addon-modal-json">JSON for the add-on</label>
+        <textarea id="addon-modal-json" readonly rows="8" style="font-family:monospace; font-size:0.78rem; width:100%;"></textarea>
+        <p id="addon-modal-status" style="min-height:1.3em; font-size:0.88rem; margin-top:0.5rem;"></p>
+        <div class="modal-actions" style="flex-wrap:wrap;">
+            <button class="full-width" onclick="copyAddonJson()">📋 Copy JSON (paste into the add-on)</button>
+            <button class="secondary full-width hidden" id="btn-addon-send" onclick="sendAddonJob()">📨 Send to add-on</button>
+            <button class="secondary full-width" onclick="closeAddonModal()">Close</button>
         </div>
     </div>
 </div>
@@ -1857,6 +1957,11 @@
         </div>
         <h1 style="margin-bottom: 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.75rem; font-size: 1.6rem; color: var(--primary);">📦 Pack Order</h1>
         <p id="pack-order-progress" style="color:var(--text-muted); margin-bottom:1rem;"></p>
+        <!-- Guided Pack: walks the order one item at a time in route order (see openPickWalk). -->
+        <div id="pack-order-guided-bar" class="hidden" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:1rem;">
+            <button class="success-btn" onclick="openPickWalk()" style="flex:1 1 240px; min-height:56px; font-size:1.05rem;">▶ Guided Pack — one item at a time</button>
+            <button class="secondary" onclick="sortPackOrderByRoute()" title="Reorder the list into a sensible walking route through the warehouse" style="flex:0 0 auto;">🧭 Sort by route</button>
+        </div>
         <div id="pack-order-items"></div>
 
         <!-- Where everything in the order actually is, one mini bin-locator grid per zone involved —
@@ -1927,6 +2032,10 @@
         <button class="full-width hidden" id="btn-save-pack-order" onclick="savePackOrder()" style="margin-top:0.5rem;">💾 Save Order</button>
         <p id="pack-order-saved-note" class="hidden" style="color:var(--success); font-weight:600; margin-top:0.75rem;"></p>
         <button class="secondary full-width" id="btn-open-compose-email" onclick="openComposeEmailModal()" style="margin-top:0.5rem;">📧 Email Recipient</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:0.5rem;" id="pack-order-addon-buttons">
+            <button class="secondary" onclick="openAddonModal('ntex')" style="flex:1 1 200px;">🚚 NTEX transport…</button>
+            <button class="secondary" onclick="openAddonModal('visma')" style="flex:1 1 200px;">🧾 Visma quote…</button>
+        </div>
         <button class="success-btn full-width hidden" id="btn-finalize-pack-order" onclick="confirmFinalizePackOrder()" style="margin-top:0.75rem;">✅ Finalize Order (Deduct Stock)</button>
     </section>
 
@@ -2045,8 +2154,11 @@
                  onmousedown="onBinLocatorTouchpadMouseDown(event)">
                 <div id="bin-locator-touchpad-dot" class="bin-locator-touchpad-dot"></div>
             </div>
-            <p class="bin-locator-touchpad-hint">Drag inside the circle — the dot shows exactly where you are and stays put when you let go; it maps onto the rack above, so your finger previews a bin without covering it.</p>
+            <p class="bin-locator-touchpad-hint">Drag inside the circle — the dot shows exactly where you are and stays put when you let go; the red ring on the rack shows where it points, so your finger previews a bin without covering it.</p>
+            <button type="button" class="secondary bin-locator-touchpad-select" id="bin-locator-touchpad-select" onclick="selectBinLocatorAtReticle()" disabled title="Open the shelf the ring is on"><span class="long">👆 Open the spot under the ring</span><span class="short">👆 Open</span></button>
         </div>
+        <!-- The ring itself: where the pad is pointing, drawn on the rack (see positionBinLocatorReticle). -->
+        <div id="bin-locator-reticle" class="bin-locator-reticle hidden" aria-hidden="true"></div>
 
         <!-- Hover preview: hovering a shelf cell or bin (flat grid, iso rack, or the shelf strip
              below) shows what's stored there without needing to click first — a floating card plus
@@ -2188,6 +2300,23 @@
             <button class="secondary full-width hidden" id="btn-incoming-orders-settings" onclick="openIncomingOrdersModal()" style="margin-bottom:1rem;">📦→ Incoming Orders</button>
             <button class="secondary full-width hidden" id="btn-unassigned-images" onclick="openUnassignedImagesModal()" style="margin-bottom:1rem;">🗄️ Unassigned Images</button>
             <button class="secondary full-width hidden" id="btn-visma-sync" onclick="openVismaSyncModal()" style="margin-bottom:1rem;">🔄 Visma Sync</button>
+        </div>
+
+        <div class="settings-section-heading">Add-on bridge (Visma &amp; NTEX)</div>
+        <div class="setting-row">
+            <label for="addon-base-url">🔌 VismaScrap add-on — local API</label>
+            <p class="setting-desc">Optional. The Pack Order's <strong>🚚 NTEX transport</strong> and <strong>🧾 Visma quote</strong> buttons always work by copying JSON into the add-on's own box. This lets them also <em>send</em> it straight to the add-on's local jobs API. Heads-up: that API deliberately refuses calls from web pages, so <strong>Test connection</strong> will report "unreachable" until the add-on gains an allowed-origin option — nothing here breaks in the meantime.</p>
+            <div style="display:flex; gap:8px; margin-top:0.5rem; flex-wrap:wrap;">
+                <input type="text" id="addon-base-url" placeholder="http://127.0.0.1:8765" style="flex:1; min-width:180px; margin:0;" autocomplete="off">
+                <input type="password" id="addon-token" placeholder="Add-on token" style="flex:1; min-width:140px; margin:0;" autocomplete="off">
+            </div>
+            <div style="display:flex; gap:8px; margin-top:0.5rem; flex-wrap:wrap;">
+                <button class="secondary" onclick="saveAddonSettings()" style="min-height:auto; padding:0.4rem 1rem;">Save</button>
+                <button class="secondary" onclick="testAddonConnection()" style="min-height:auto; padding:0.4rem 1rem;">Test connection</button>
+                <button class="secondary" onclick="clearAddonSettings()" style="min-height:auto; padding:0.4rem 1rem; color:var(--danger);">Remove</button>
+            </div>
+            <p class="setting-desc" id="addon-settings-status" style="margin-top:0.5rem;"></p>
+            <p class="setting-desc">Stored only in this browser (<code>localStorage</code>) — never synced. The token is the add-on's own local password: treat it like one, and only use this on a device you control.</p>
         </div>
 
         <div class="settings-section-heading">AI Assistant</div>
@@ -2965,7 +3094,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         scannerMode = mode;
         scannerLastCode = null;
         scannerLastCodeAt = 0;
-        document.getElementById('scanner-modal-title').textContent = mode === 'pack' ? '📷 Scan to Add' : '📷 Scan';
+        document.getElementById('scanner-modal-title').textContent = mode === 'pack' ? '📷 Scan to Add' : mode === 'pickwalk' ? '📷 Scan the item you picked' : '📷 Scan';
+        // Text/delivery-note capture make no sense while confirming one picked item.
+        document.getElementById('btn-scanner-ocr').classList.toggle('hidden', mode === 'pickwalk');
+        document.getElementById('btn-scanner-delivery-note').classList.toggle('hidden', mode === 'pickwalk');
         scannerShowStatus('Starting camera…', false);
         document.getElementById('scanner-modal').classList.add('open');
         startScannerCamera();
@@ -3104,7 +3236,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const item = globalInventory.find(i => i.BTKnumber === btk);
         const name = item ? (item['itemname(english)'] || btk) : btk;
 
-        if (scannerMode === 'pack') {
+        if (scannerMode === 'pickwalk') {
+            pickWalkOnScanned(btk);
+        } else if (scannerMode === 'pack') {
             const existing = packOrder.find(o => o.btk === btk);
             if (existing) existing.qty += 1; else packOrder.push({ btk, qty: 1, packed: false });
             updatePackOrderBadge();
@@ -3825,7 +3959,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             applyOrderRowToPackOrder(order);
             closeIncomingOrdersModal();
             openPackOrderView();
-            showToast(`Started packing ${order.order_number}.`, "success");
+            showToast(`Started packing ${order.order_number}.`, "success", 9000, { label: '▶ Guided Pack', onClick: openPickWalk });
         };
         const proceedWithReplaceChecks = async () => {
             if (packOrder.length && switchingWarehouse) {
@@ -5624,6 +5758,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         activeView = viewId;
         window.scrollTo({ top: 0, behavior: 'smooth' });
         hideBinLocatorHover(); // a hover card left over from the Bin Locator shouldn't survive navigating away
+        hideBinLocatorReticle(); // ...and neither should its pointer ring
         // The one-time counterpart to loadSupabaseSession()'s own skipped-while-on-auth-view refresh
         // (see its comment) — fires exactly once, right when the Secure Unlock screen is actually
         // replaced by a real view, whether that's from an explicit login or a silently-restored
@@ -9186,6 +9321,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         editBtn.textContent = packOrderEditMode ? '✔ Done Editing' : '✏️ Edit Order';
         document.getElementById('btn-finalize-pack-order').classList.toggle('hidden', !canEditItems() || packOrder.length === 0);
         container.innerHTML = '';
+        document.getElementById('pack-order-guided-bar').classList.toggle('hidden', packOrder.length === 0);
         if (!packOrder.length) {
             progressEl.textContent = '';
             container.innerHTML = `<div class="empty-state"><h3>No items in this order yet</h3><p>Select items anywhere — the item list, a kit's items, or a manufacturer's items — then tap the green Pack button.</p></div>`;
@@ -9364,6 +9500,508 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (activeView !== 'pack-order-view') return;
         document.querySelectorAll('#pack-order-pick-route-zones .pick-route-zone').forEach(drawPickRouteZoneLines);
     });
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  GUIDED PACK ("Pick Walk") — the Pack Order one item at a time, in walking order, for someone who
+    //  just wants to be told what to do next: where to go, what to take, then ✓ Packed (or 📷 scan the
+    //  item to prove it's the right one). The order is first sorted into a walking route
+    //  (modules/pick-route.js) so the numbers on the Pack Order list and the walk agree. "Packed" is the
+    //  same `line.packed` flag the list's own toggle uses, so the two screens can never disagree.
+    // ════════════════════════════════════════════════════════════════════════
+    var pickWalk = null; // { idx, view: 'item' | 'done', skipped: Set<btk> } while the guided screen is open
+    var pickWalkWakeLock = null;
+
+    // A short buzz on a phone; silently nothing anywhere else (and on iOS, which has no vibration API).
+    function haptic(pattern) { try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) { /* purely a nicety */ } }
+
+    // id is the line's INDEX — the planner hands the same objects back in a new order, so the order's
+    // lines are re-found by position and nothing can be lost or duplicated by a stray BTK collision.
+    function packOrderStops() {
+        return packOrder.map((line, idx) => {
+            const item = globalInventory.find(i => i.BTKnumber === line.btk);
+            const p = item ? parseLocationCode(item.LocationCode) : null;
+            return p ? { id: idx, zone: p.zone, depth: p.depth, level: p.level, bin: p.bin, row: p.binRow } : { id: idx };
+        });
+    }
+    function zoneFloorGrid() {
+        const grid = {};
+        globalWarehouseZones.filter(isZonePlaced).forEach(z => { grid[z.zone] = { col: z.grid_col, row: z.grid_row }; });
+        return grid;
+    }
+    function sortPackOrderByRoute(quiet) {
+        if (packOrder.length < 2 || typeof window.planPickRoute !== 'function') return;
+        const route = window.planPickRoute(packOrderStops(), { zoneGrid: zoneFloorGrid() });
+        const before = packOrder;
+        packOrder = route.map(s => before[s.id]);
+        renderPackOrderItems();
+        if (quiet !== true) showToast('Sorted into a walking route — the numbers on the Pick Route below now follow it.', 'success', 5000);
+    }
+
+    function openPickWalk() {
+        if (!packOrder.length) { showToast("The order is empty — add some items first.", "warning"); return; }
+        sortPackOrderByRoute(true);
+        const first = packOrder.findIndex(l => !l.packed);
+        pickWalk = { idx: Math.max(0, first), view: first < 0 ? 'done' : 'item', skipped: new Set() };
+        document.getElementById('pick-walk-modal').classList.add('open');
+        renderPickWalk();
+        pickWalkKeepAwake(true);
+    }
+    function closePickWalk() {
+        pickWalk = null;
+        document.getElementById('pick-walk-modal').classList.remove('open');
+        pickWalkKeepAwake(false);
+        if (activeView === 'pack-order-view') renderPackOrderItems();
+    }
+    // Keeps the phone's screen on while someone is walking the aisles with it in one hand. Best effort:
+    // browsers without the Wake Lock API (or that refuse it) just let the screen time out as usual, and
+    // the lock is given back the moment the guided screen closes.
+    async function pickWalkKeepAwake(on) {
+        try {
+            if (on) {
+                if (!navigator.wakeLock || pickWalkWakeLock) return;
+                const lock = await navigator.wakeLock.request('screen');
+                if (!pickWalk) { await lock.release(); return; } // closed while the request was pending
+                pickWalkWakeLock = lock;
+                lock.addEventListener('release', () => { if (pickWalkWakeLock === lock) pickWalkWakeLock = null; });
+            } else if (pickWalkWakeLock) {
+                const lock = pickWalkWakeLock;
+                pickWalkWakeLock = null;
+                await lock.release();
+            }
+        } catch (e) { pickWalkWakeLock = null; }
+    }
+    // The browser drops the lock whenever the tab is hidden; take it again when the person comes back.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && pickWalk) pickWalkKeepAwake(true); });
+
+    // Next not-yet-packed line after `from`, wrapping round to the start (so a skipped item comes back
+    // once the rest are done). May return `from` itself when it is the only one left; -1 when none are.
+    function pickWalkNextIndex(from) {
+        const n = packOrder.length;
+        for (let k = 1; k <= n; k++) {
+            const j = (from + k) % n;
+            if (!packOrder[j].packed) return j;
+        }
+        return -1;
+    }
+    function pickWalkAdvance() {
+        const next = pickWalkNextIndex(pickWalk.idx);
+        if (next < 0) { pickWalk.view = 'done'; haptic([60, 40, 60]); } else pickWalk.idx = next;
+    }
+    function pickWalkMarkPacked() {
+        if (!pickWalk) return;
+        const line = packOrder[pickWalk.idx];
+        if (!line) return;
+        line.packed = true;
+        pickWalk.skipped.delete(line.btk);
+        haptic(35);
+        pickWalkAdvance();
+        renderPickWalk();
+    }
+    function pickWalkUnpack() {
+        if (!pickWalk) return;
+        const line = packOrder[pickWalk.idx];
+        if (line) line.packed = false;
+        renderPickWalk();
+    }
+    function pickWalkSkip() {
+        if (!pickWalk) return;
+        const next = pickWalkNextIndex(pickWalk.idx);
+        if (next < 0 || next === pickWalk.idx) { showToast("That's the last one left — nothing to skip to.", "info"); return; }
+        pickWalk.skipped.add(packOrder[pickWalk.idx].btk);
+        pickWalk.idx = next;
+        renderPickWalk();
+    }
+    function pickWalkBack() {
+        if (!pickWalk) return;
+        if (pickWalk.view === 'done') { pickWalk.view = 'item'; pickWalk.idx = packOrder.length - 1; }
+        else if (pickWalk.idx > 0) pickWalk.idx--;
+        renderPickWalk();
+    }
+    function pickWalkReviewOpen() {
+        if (!pickWalk) return;
+        const first = packOrder.findIndex(l => !l.packed);
+        if (first >= 0) { pickWalk.idx = first; pickWalk.view = 'item'; renderPickWalk(); }
+    }
+    // Fewer on the shelf than the order asks for: pack what there is, and record the rest as a
+    // backorder — the same bookkeeping the "lower the quantity" prompt on the list does, minus the
+    // question (the person has already seen the shortfall on this very screen).
+    function pickWalkPackWhatIsThere() {
+        if (!pickWalk) return;
+        const line = packOrder[pickWalk.idx];
+        const item = line && globalInventory.find(i => i.BTKnumber === line.btk);
+        if (!line || !item) return;
+        const have = Math.max(0, parseInt(item.Numberofitems, 10) || 0);
+        if (have >= line.qty) return;
+        line.backorder = (line.backorder || 0) + (line.qty - have);
+        line.qty = have;
+        if (have === 0) { pickWalkMarkPacked(); return; } // nothing to take — it is all backordered
+        renderPickWalk();
+    }
+    function pickWalkOpenItem() {
+        if (!pickWalk) return;
+        const line = packOrder[pickWalk.idx];
+        if (!line) return;
+        closePickWalk();
+        openItem(line.btk, { type: 'pack-order' });
+    }
+    function pickWalkScan() { openBarcodeScanner('pickwalk'); }
+    // Called by the scanner (scannerMode === 'pickwalk') with the BTK it resolved. Right item: it is
+    // packed at once. Another item of THIS order, or one that isn't in it: say so and keep scanning —
+    // never silently accept the wrong thing.
+    function pickWalkOnScanned(btk) {
+        if (!pickWalk || pickWalk.view !== 'item') { closeBarcodeScanner(); return; }
+        const line = packOrder[pickWalk.idx];
+        const scanned = globalInventory.find(i => i.BTKnumber === btk);
+        const scannedName = itemDisplayNamePlain(scanned);
+        if (line && line.btk === btk) {
+            closeBarcodeScanner();
+            showToast(`✓ Right one — ${scannedName}`, 'success', 2500);
+            pickWalkMarkPacked();
+            return;
+        }
+        haptic([120, 60, 120]);
+        const inOrder = packOrder.findIndex(l => l.btk === btk);
+        scannerShowStatus(inOrder >= 0
+            ? `That's "${scannedName}" — it is in this order, but it's not the one you're on. Scan the right one, or Close and use Skip.`
+            : `"${scannedName}" is NOT part of this order. Put it back and scan the right one.`, true);
+    }
+
+    function pickWalkLocationChips(p) {
+        const chip = (label, value) => `<div class="pick-walk-chip"><small>${label}</small><b>${escapeHtml(String(value))}</b></div>`;
+        return `<div class="pick-walk-where">
+            ${chip('Zone', p.zone)}${chip(isShelvingZone(p.zone) ? 'Section' : 'Rack', p.depth)}${chip('Level', p.level)}${chip('Bin', p.bin)}${p.binRow > 1 ? chip('Row', p.binRow) : ''}
+        </div>`;
+    }
+    // Where it is, as a picture: the rack with the one bin lit up (3D when that's switched on, else the
+    // flat shelf grid with the one cell lit) — the same drawings the item page and Bin Locator use.
+    function pickWalkMapHtml(p) {
+        const bounds = getZoneBounds(p.zone);
+        if (!bounds) return '';
+        if (isoBinViewEnabled && typeof window.buildIsoRackSVG === 'function') {
+            const zoneRow = globalWarehouseZones.find(z => z.zone === p.zone);
+            const geom = window.resolveRackGeometry(zoneRow ? { ...zoneRow } : { zone: p.zone }, bounds, { minBin: p.bin, minRows: p.binRow, minDepth: p.depth });
+            return `<div class="iso-canvas">${window.buildIsoRackSVG(geom, { highlight: { depth: p.depth, level: p.level, bin: p.bin, row: p.binRow }, ariaLabel: `Zone ${p.zone}, the bin to pick from is highlighted` })}</div>`;
+        }
+        let cells = '';
+        for (let level = bounds.maxLevel; level >= 1; level--) {
+            for (let depth = 1; depth <= bounds.maxDepth; depth++) {
+                const on = depth === p.depth && level === p.level;
+                cells += `<div class="map-cell${on ? ' active' : ''}">${on ? '📍' : ''}</div>`;
+            }
+        }
+        return `<div class="warehouse-map" style="grid-template-columns:repeat(${bounds.maxDepth}, 1fr); max-width:320px; margin:0 auto;">${cells}</div>`;
+    }
+
+    function renderPickWalk() {
+        if (!pickWalk) return;
+        const total = packOrder.length;
+        if (!total) { closePickWalk(); return; }
+        const done = packOrder.filter(l => l.packed).length;
+        document.getElementById('pick-walk-bar-fill').style.width = `${Math.round(done / total * 100)}%`;
+        const body = document.getElementById('pick-walk-body');
+        if (pickWalk.view === 'done') {
+            document.getElementById('pick-walk-progress-text').textContent = done === total ? '🎉 All packed' : `${done} of ${total} packed`;
+            body.innerHTML = renderPickWalkDoneHtml();
+            return;
+        }
+        document.getElementById('pick-walk-progress-text').textContent = `Item ${pickWalk.idx + 1} of ${total} · ${done} packed`;
+
+        const line = packOrder[pickWalk.idx];
+        const item = globalInventory.find(i => i.BTKnumber === line.btk);
+        const name = itemDisplayNamePlain(item);
+        const p = item ? parseLocationCode(item.LocationCode) : null;
+        const stops = packOrderStops();
+        const hint = typeof window.describeMove === 'function'
+            ? window.describeMove(pickWalk.idx > 0 ? stops[pickWalk.idx - 1] : null, stops[pickWalk.idx], { depthLabel: depthWord })
+            : '';
+        const num1 = (item && item.itemnumber && item.itemnumber !== 'None') ? item.itemnumber : '';
+        const mfr = (item && item.Manufacturer && item.Manufacturer !== 'None') ? item.Manufacturer : '';
+        const unit = (item && item.UnitType && item.UnitType !== 'None') ? item.UnitType : 'pcs';
+        const have = item ? Math.max(0, parseInt(item.Numberofitems, 10) || 0) : 0;
+        const photo = item && (item.imageFullUrl || item.imageThumbUrl);
+        const short = item && have < line.qty;
+        const nextIdx = pickWalkNextIndex(pickWalk.idx);
+        const nextLine = nextIdx >= 0 && nextIdx !== pickWalk.idx ? packOrder[nextIdx] : null;
+        const nextItem = nextLine && globalInventory.find(i => i.BTKnumber === nextLine.btk);
+
+        const locationHtml = p
+            ? `${pickWalkLocationChips(p)}<div class="pick-walk-code">${escapeHtml(formatBinCode(p.zone, p.depth, p.level, p.bin, p.binRow))} · level 1 is the bottom shelf</div>${pickWalkMapHtml(p)}`
+            : `<div class="pick-walk-warn" style="margin:0;">📍 No bin location on file${item && item.Inventorylocation && item.Inventorylocation !== 'None' ? ` — it says “${escapeHtml(item.Inventorylocation)}”` : ''}. Look for it, or ask someone — then you can still scan it to confirm.</div>`;
+
+        body.innerHTML = `
+            ${hint ? `<div class="pick-walk-move">👉 ${escapeHtml(hint)}</div>` : ''}
+            ${line.packed ? `<div class="pick-walk-done-banner">✅ Already packed</div>` : ''}
+            ${pickWalk.skipped.has(line.btk) && !line.packed ? `<div class="pick-walk-warn">⏭ You skipped this one earlier — here it is again.</div>` : ''}
+            <div class="pick-walk-card">
+                <div class="pick-walk-card-top">
+                    ${photo ? `<img class="pick-walk-photo" src="${escapeHtml(photo)}" alt="">` : `<div class="pick-walk-photo-ph" aria-hidden="true">📦</div>`}
+                    <div style="min-width:0; flex:1;">
+                        <div class="pick-walk-name">${escapeHtml(name)}</div>
+                        <div class="pick-walk-sub">${escapeHtml([mfr, num1, line.btk].filter(Boolean).join(' · '))}</div>
+                    </div>
+                </div>
+                <div class="pick-walk-take"><span style="font-weight:700;">Take</span><span class="pick-walk-take-qty">${line.qty}</span><span class="pick-walk-take-unit">${escapeHtml(unit)}</span></div>
+                ${line.backorder > 0 ? `<div class="pick-walk-sub" style="color:var(--danger); font-weight:700;">⚠ ${line.backorder} backordered</div>` : ''}
+            </div>
+            ${short ? `<div class="pick-walk-warn">⚠ The system says only <b>${have}</b> ${escapeHtml(unit)} in stock, but the order wants <b>${line.qty}</b>. Have a look on the shelf.
+                <button type="button" class="secondary" onclick="pickWalkPackWhatIsThere()" style="margin-top:0.5rem; width:100%; min-height:44px;">${have === 0 ? 'None here — backorder all of it & move on' : `Pack only ${have} — backorder the other ${line.qty - have}`}</button></div>` : ''}
+            <div class="pick-walk-card">${locationHtml}</div>
+            ${nextLine ? `<div class="pick-walk-next">Next: ${escapeHtml(itemDisplayNamePlain(nextItem))}</div>` : ''}
+            <div class="pick-walk-actions">
+                ${line.packed
+                    ? `<button type="button" class="success-btn big" onclick="pickWalkAdvanceOrFinish()">Next ▶</button>
+                       <button type="button" class="secondary" onclick="pickWalkUnpack()">↩ Not packed after all</button>`
+                    : `<button type="button" class="success-btn big" onclick="pickWalkMarkPacked()">✓ Packed</button>
+                       <div class="row">
+                           <button type="button" class="secondary" onclick="pickWalkScan()">📷 Scan it</button>
+                           <button type="button" class="secondary" onclick="pickWalkSkip()">⏭ Skip for now</button>
+                       </div>`}
+                <div class="row small">
+                    <button type="button" class="secondary" onclick="pickWalkBack()" ${pickWalk.idx === 0 ? 'disabled' : ''}>◀ Back</button>
+                    <button type="button" class="secondary" onclick="pickWalkOpenItem()">ℹ️ Item details</button>
+                </div>
+            </div>`;
+        // A long card scrolls inside the box — always start at the top of a new step.
+        document.getElementById('pick-walk-modal').scrollTop = 0;
+    }
+    function pickWalkAdvanceOrFinish() {
+        if (!pickWalk) return;
+        pickWalkAdvance();
+        renderPickWalk();
+    }
+
+    function renderPickWalkDoneHtml() {
+        const total = packOrder.length;
+        const open = packOrder.filter(l => !l.packed);
+        const rows = packOrder.map(line => {
+            const item = globalInventory.find(i => i.BTKnumber === line.btk);
+            const mark = line.packed ? '✅' : '⬜';
+            const back = line.backorder > 0 ? ` <span style="color:var(--danger); font-weight:700;">(${line.backorder} backordered)</span>` : '';
+            return `<div class="pick-walk-summary-row"><span>${mark}</span><span style="flex:1; overflow-wrap:anywhere;"><b>${line.qty} ×</b> ${escapeHtml(itemDisplayNamePlain(item))}${back}</span></div>`;
+        }).join('');
+        const canFinalize = canEditItems() && !open.length;
+        return `
+            <div class="pick-walk-card" style="text-align:center;">
+                <div class="pick-walk-big-emoji" aria-hidden="true">${open.length ? '📋' : '🎉'}</div>
+                <div class="pick-walk-name">${open.length ? `${open.length} of ${total} not packed yet` : 'Everything is packed'}</div>
+                <div class="pick-walk-sub">${open.length ? 'Go back for the rest, or close this and finish later.' : 'Next: stock is deducted when you finalize, then book the transport or make the quote.'}</div>
+            </div>
+            <div class="pick-walk-card">${rows}</div>
+            <div class="pick-walk-actions">
+                ${open.length ? `<button type="button" class="success-btn big" onclick="pickWalkReviewOpen()">◀ Go to the unpacked ones</button>` : ''}
+                ${canFinalize ? `<button type="button" class="success-btn big" onclick="confirmFinalizePackOrder()">✅ Finalize (deduct stock)</button>` : ''}
+                <div class="row">
+                    <button type="button" class="secondary" onclick="closePickWalk(); openAddonModal('ntex')">🚚 Transport…</button>
+                    <button type="button" class="secondary" onclick="printPackOrder()">🖨️ Print</button>
+                </div>
+                <div class="row">
+                    <button type="button" class="secondary" onclick="pickWalkBack()">◀ Back</button>
+                    <button type="button" class="secondary" onclick="closePickWalk()">Close</button>
+                </div>
+            </div>`;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  SHIPPING & VISMA HAND-OFF — the Pack Order's data, as JSON the VismaScrap add-on understands
+    //  (modules/addon-bridge.js): 🚚 an NTEX transport booking, 🧾 a Visma quote draft. The JSON is
+    //  always shown and copyable (paste it into the add-on's own box — works today); when an add-on
+    //  token is saved in Settings it can also be sent through the add-on's local jobs API. Nothing is
+    //  booked or saved from here: the add-on shows its own review in the NTEX/Visma tab and a person
+    //  presses the final button there.
+    // ════════════════════════════════════════════════════════════════════════
+    var addonDraft = null; // { kind: 'ntex' | 'visma', lines: [{ item, name, qty }] }
+    var addonJobAbort = null;
+    const ADDON_PACKAGE_TYPES = ['kolli', 'pall', 'halvpall', 'paket', 'bunt', 'kartong', 'IBC', 'fat', 'rulle', 'parti', 'Säck', 'sjöpall'];
+
+    function addonSavedSettings() {
+        return { baseUrl: localStorage.getItem('addon-bridge-url') || '', token: localStorage.getItem('addon-bridge-token') || '' };
+    }
+    function addonLastFromKey() { return `addon-bridge-from-${currentWarehouseId}`; }
+    function todayIso() { return new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
+    function addonVal(id) { const el = document.getElementById(id); return el ? el.value : ''; }
+    function addonInput(id, label, value, w) {
+        return `<label style="flex:${w || '1 1 140px'}; font-size:0.74rem; color:var(--text-muted); font-weight:700; margin:0;">${escapeHtml(label)}
+            <input id="${id}" type="text" value="${escapeHtml(value == null ? '' : String(value))}" oninput="refreshAddonJson()" autocomplete="off" style="margin:2px 0 0; width:100%;"></label>`;
+    }
+    function addonRow(inner) { return `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">${inner}</div>`; }
+    function addonParty(prefix, p) {
+        return addonRow(addonInput(`${prefix}-name`, 'Name', p.name, '2 1 200px') + addonInput(`${prefix}-contact`, 'Contact person', p.contactPerson))
+            + addonRow(addonInput(`${prefix}-street`, 'Street + number', p.street, '2 1 200px') + addonInput(`${prefix}-postal`, 'Postal code', p.postalCode, '0 1 100px') + addonInput(`${prefix}-city`, 'City', p.city))
+            + addonRow(addonInput(`${prefix}-phone`, 'Phone', p.phone));
+    }
+
+    function openAddonModal(kind) {
+        if (!packOrder.length) { showToast("The order is empty — add some items first.", "warning"); return; }
+        const A = window.AddonBridge;
+        if (!A) { showToast("The hand-off module hasn't loaded — reload the page.", "error"); return; }
+        const lines = packOrder.map(l => {
+            const item = globalInventory.find(i => i.BTKnumber === l.btk) || null;
+            return { item, name: itemDisplayNamePlain(item), qty: l.qty };
+        });
+        addonDraft = { kind, lines };
+        document.getElementById('addon-modal-title').textContent = kind === 'ntex' ? '🚚 NTEX transport' : '🧾 Visma quote (draft)';
+        document.getElementById('addon-modal-intro').textContent = kind === 'ntex'
+            ? "Fill in what NTEX needs. Copy the JSON into the add-on's panel on boka.ntexinrikes.se — it fills NTEX's form, shows you the price, and nothing is booked until you press Boka there."
+            : "Check the lines. Copy the JSON into the add-on's box on any Visma page — it builds the quote in Visma and saves it as a draft (utkast) for you to review.";
+        const form = document.getElementById('addon-modal-form');
+        if (kind === 'ntex') {
+            const meta = getWarehouseMeta(currentWarehouseId);
+            let saved = null;
+            try { saved = JSON.parse(localStorage.getItem(addonLastFromKey()) || 'null'); } catch (e) { saved = null; }
+            const myAddr = A.parseAddress(meta.address && meta.address !== '—' ? meta.address : '');
+            const from = saved || { name: meta.name, street: myAddr.street, postalCode: myAddr.postalCode, city: myAddr.city, phone: '', contactPerson: '' };
+            const toAddr = A.parseAddress(packOrderRecipient.address);
+            const to = { name: packOrderRecipient.name, street: toAddr.street, postalCode: toAddr.postalCode, city: toAddr.city, phone: '', contactPerson: '' };
+            const goods = lines.map(l => l.name).join(', ');
+            form.innerHTML = `
+                <div class="modal-label">Sender</div>${addonParty('addon-from', from)}
+                <div class="modal-label">Receiver</div>${addonParty('addon-to', to)}
+                <div class="modal-label">When &amp; reference</div>
+                ${addonRow(addonInput('addon-load-date', 'Load date (YYYY-MM-DD)', todayIso()) + addonInput('addon-delivery-date', 'Latest delivery (YYYY-MM-DD)', '') + addonInput('addon-invoice-ref', 'Invoice reference', packOrderSavedNumber || ''))}
+                <div class="modal-label">Package</div>
+                ${addonRow(addonInput('addon-pkg-qty', 'Number of packages', '1', '0 1 90px')
+                    + `<label style="flex:1 1 120px; font-size:0.74rem; color:var(--text-muted); font-weight:700; margin:0;">Type<select id="addon-pkg-type" onchange="refreshAddonJson()" style="margin:2px 0 0; width:100%;">${ADDON_PACKAGE_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select></label>`
+                    + addonInput('addon-pkg-goods', 'Goods', goods.length > 70 ? goods.slice(0, 69) + '…' : goods, '2 1 200px'))}
+                ${addonRow(addonInput('addon-pkg-weight', 'Weight (kg)', packOrderBox.weight || '', '1 1 90px') + addonInput('addon-pkg-length', 'Length (mm)', packOrderBox.length || '', '1 1 90px') + addonInput('addon-pkg-width', 'Width (mm)', packOrderBox.width || '', '1 1 90px') + addonInput('addon-pkg-height', 'Height (mm)', packOrderBox.height || '', '1 1 90px'))}`;
+        } else {
+            form.innerHTML = `
+                ${addonRow(addonInput('addon-v-customer', 'Customer (Visma customer number, or part of the name)', packOrderRecipient.name, '1 1 100%'))}
+                <div class="modal-label">Lines</div>
+                ${lines.map((l, i) => {
+                    const number = l.item ? A.vismaArticleNumber(l.item) : '';
+                    return addonRow(`<div style="flex:3 1 200px; font-size:0.88rem; align-self:center; overflow-wrap:anywhere;"><b>${escapeHtml(l.name)}</b><br><span style="color:${number ? 'var(--text-muted)' : 'var(--danger)'}; font-size:0.74rem;">${number ? 'Visma no. ' + escapeHtml(number) : 'no Visma article number — searched by name'}</span></div>`
+                        + addonInput(`addon-v-qty-${i}`, 'Qty', l.qty, '0 1 70px') + addonInput(`addon-v-price-${i}`, 'Price (blank = Visma\'s own)', '', '1 1 110px'));
+                }).join('')}
+                ${addonRow(addonInput('addon-v-freight', 'Freight text (blank = "Frakt tillkommer.")', '', '1 1 100%'))}
+                <label style="display:flex; gap:6px; align-items:center; font-size:0.85rem; margin:0 0 4px;"><input type="checkbox" id="addon-v-nofreight" onchange="refreshAddonJson()" style="width:auto; min-height:unset; margin:0;"> Leave the freight line out</label>`;
+        }
+        document.getElementById('addon-modal-status').textContent = '';
+        document.getElementById('btn-addon-send').classList.toggle('hidden', !addonSavedSettings().token);
+        document.getElementById('addon-modal').classList.add('open');
+        refreshAddonJson();
+    }
+    function closeAddonModal() {
+        if (addonJobAbort) { addonJobAbort.abort(); addonJobAbort = null; }
+        document.getElementById('addon-modal').classList.remove('open');
+        addonDraft = null;
+    }
+
+    // Reads the form back into the add-on's payload (never anything beyond what's on screen) and says,
+    // in plain words, what is still missing.
+    function buildAddonPayload() {
+        const A = window.AddonBridge;
+        if (addonDraft.kind === 'ntex') {
+            const party = (prefix) => ({ name: addonVal(`${prefix}-name`), contactPerson: addonVal(`${prefix}-contact`), street: addonVal(`${prefix}-street`), postalCode: addonVal(`${prefix}-postal`), city: addonVal(`${prefix}-city`), phone: addonVal(`${prefix}-phone`) });
+            const order = A.buildNtexOrder({
+                from: party('addon-from'), to: party('addon-to'),
+                loadDate: addonVal('addon-load-date'), deliveryDate: addonVal('addon-delivery-date'), invoiceReference: addonVal('addon-invoice-ref'),
+                packages: [{
+                    quantity: addonVal('addon-pkg-qty'), type: addonVal('addon-pkg-type'), goods: addonVal('addon-pkg-goods'), weightKg: addonVal('addon-pkg-weight'),
+                    lengthM: A.mmToMetres(addonVal('addon-pkg-length')), widthM: A.mmToMetres(addonVal('addon-pkg-width')), heightM: A.mmToMetres(addonVal('addon-pkg-height')),
+                }],
+            });
+            return { payload: order, problems: A.ntexOrderProblems(order), warnings: [], from: party('addon-from') };
+        }
+        const lines = addonDraft.lines.map((l, i) => ({ item: l.item, name: l.name, quantity: addonVal(`addon-v-qty-${i}`), price: addonVal(`addon-v-price-${i}`) }));
+        const freightText = document.getElementById('addon-v-nofreight').checked ? '' : (addonVal('addon-v-freight').trim() || undefined);
+        const { quote, warnings } = A.buildVismaQuote({ customer: addonVal('addon-v-customer'), lines, freightText });
+        return { payload: quote, problems: { required: A.quoteProblems(quote), recommended: [] }, warnings };
+    }
+    function refreshAddonJson() {
+        if (!addonDraft) return;
+        const { payload, problems, warnings } = buildAddonPayload();
+        document.getElementById('addon-modal-json').value = window.AddonBridge.toPasteJson(payload);
+        const box = (color, text) => `<div class="pick-walk-warn" style="border-color:${color}; margin-bottom:0.5rem;">${text}</div>`;
+        document.getElementById('addon-modal-problems').innerHTML =
+            (problems.required.length ? box('var(--danger)', `❌ Still needed: ${escapeHtml(problems.required.join(', '))}`) : '')
+            + (problems.recommended.length ? box('#f59e0b', `⚠ Worth adding: ${escapeHtml(problems.recommended.join(', '))}`) : '')
+            + warnings.map(w => box('#f59e0b', `⚠ ${escapeHtml(w)}`)).join('');
+    }
+    async function copyAddonJson() {
+        if (!addonDraft) return;
+        refreshAddonJson();
+        const text = document.getElementById('addon-modal-json').value;
+        try {
+            await navigator.clipboard.writeText(text);
+            showToast("JSON copied — paste it into the add-on's box.", "success", 5000);
+        } catch (e) {
+            const ta = document.getElementById('addon-modal-json');
+            ta.focus(); ta.select();
+            showToast("Couldn't copy automatically — the JSON is selected, press Ctrl+C.", "warning", 6000);
+        }
+        rememberAddonSender();
+    }
+    // The sender rarely changes between orders — keep the last one per warehouse (this device only).
+    function rememberAddonSender() {
+        if (!addonDraft || addonDraft.kind !== 'ntex') return;
+        const party = (prefix) => ({ name: addonVal(`${prefix}-name`), contactPerson: addonVal(`${prefix}-contact`), street: addonVal(`${prefix}-street`), postalCode: addonVal(`${prefix}-postal`), city: addonVal(`${prefix}-city`), phone: addonVal(`${prefix}-phone`) });
+        try { localStorage.setItem(addonLastFromKey(), JSON.stringify(party('addon-from'))); } catch (e) { /* storage full/blocked — only a convenience */ }
+    }
+
+    function addonClient() {
+        const s = addonSavedSettings();
+        return window.AddonBridge.createAddonClient({ baseUrl: s.baseUrl || window.AddonBridge.DEFAULT_BASE_URL, token: s.token });
+    }
+    async function sendAddonJob() {
+        if (!addonDraft) return;
+        const A = window.AddonBridge;
+        const { payload, problems } = buildAddonPayload();
+        const status = document.getElementById('addon-modal-status');
+        if (problems.required.length) { showToast(`Fill in what's missing first: ${problems.required.join(', ')}`, 'warning', 6000); return; }
+        rememberAddonSender();
+        if (addonJobAbort) addonJobAbort.abort();
+        const abort = addonJobAbort = new AbortController();
+        status.style.color = '';
+        status.textContent = 'Sending to the add-on…';
+        try {
+            const client = addonClient();
+            // confirm:'human' — the add-on shows its own review in the NTEX/Visma tab and a person
+            // clicks there. Booking on webware's say-so (confirm 'api'/'auto') needs the add-on's
+            // short-lived write lease and is deliberately not offered from here.
+            const job = await client.submitJob({ type: addonDraft.kind === 'ntex' ? A.JOB_TYPES.NTEX_ORDER : A.JOB_TYPES.CREATE_QUOTE, data: payload, confirm: 'human' });
+            const last = await client.waitForJob(job.id, { signal: abort.signal, onUpdate: (j) => { status.textContent = A.describeJob(j); } });
+            status.textContent = A.describeJob(last) + (last.result && last.result.orderId ? ` Order ${last.result.orderId}.` : '');
+        } catch (e) {
+            if (abort.signal.aborted) return;
+            status.style.color = 'var(--danger)';
+            status.textContent = e && e.message ? e.message : String(e);
+        }
+    }
+
+    // ── Settings → 🔌 Add-on bridge ──
+    function refreshAddonSettingsUI() {
+        const s = addonSavedSettings();
+        document.getElementById('addon-base-url').value = s.baseUrl;
+        document.getElementById('addon-token').value = s.token;
+    }
+    function saveAddonSettings() {
+        const url = document.getElementById('addon-base-url').value.trim();
+        const token = document.getElementById('addon-token').value.trim();
+        try {
+            if (url) localStorage.setItem('addon-bridge-url', url); else localStorage.removeItem('addon-bridge-url');
+            if (token) localStorage.setItem('addon-bridge-token', token); else localStorage.removeItem('addon-bridge-token');
+        } catch (e) { showToast("Couldn't save in this browser.", "error"); return; }
+        document.getElementById('addon-settings-status').textContent = token ? 'Saved. “Send to add-on” is now offered next to “Copy JSON”.' : 'Saved without a token — only “Copy JSON” is offered.';
+    }
+    function clearAddonSettings() {
+        localStorage.removeItem('addon-bridge-url');
+        localStorage.removeItem('addon-bridge-token');
+        refreshAddonSettingsUI();
+        document.getElementById('addon-settings-status').textContent = 'Removed.';
+    }
+    async function testAddonConnection() {
+        const status = document.getElementById('addon-settings-status');
+        saveAddonSettings();
+        status.style.color = '';
+        status.textContent = 'Testing…';
+        try {
+            const h = await addonClient().health();
+            status.textContent = h && h.nativeReady ? '✅ Connected — the add-on answered.' : 'The host answered, but the extension isn\'t connected to it yet (enable the application API in the add-on\'s popup).';
+        } catch (e) {
+            status.style.color = 'var(--danger)';
+            status.textContent = e && e.message ? e.message : String(e);
+        }
+    }
 
     // Shared by both quantity-edit entry points (clicking the big number, or the Edit Order mode
     // input) so the restock question applies consistently regardless of which one was used.
@@ -10899,7 +11537,9 @@ th { background: #eee; }
     // doing nothing while Flat is selected.
     function updateBinLocatorTouchpadToggleVisibility() {
         document.getElementById('bin-locator-touchpad-toggle-wrap').classList.toggle('hidden', !isoBinViewEnabled);
-        if (!isoBinViewEnabled) document.getElementById('bin-locator-touchpad-wrap').classList.add('hidden');
+        // Both ways: it used to only ever HIDE the pad, so Flat -> 3D left it gone until the checkbox
+        // was toggled off and on again.
+        document.getElementById('bin-locator-touchpad-wrap').classList.toggle('hidden', !(isoBinViewEnabled && binLocatorTouchpadEnabled));
     }
     function onBinLocatorHeatmapChange() {
         binLocatorHeatmapEnabled = document.getElementById('bin-locator-heatmap-toggle').checked;
@@ -11103,8 +11743,43 @@ th { background: #eee; }
         binLocatorTouchpadEnabled = document.getElementById('bin-locator-touchpad-toggle').checked;
         localStorage.setItem('bin-locator-touchpad', binLocatorTouchpadEnabled ? '1' : '0');
         document.getElementById('bin-locator-touchpad-wrap').classList.toggle('hidden', !binLocatorTouchpadEnabled);
-        if (!binLocatorTouchpadEnabled) hideBinLocatorHover();
+        if (!binLocatorTouchpadEnabled) { hideBinLocatorHover(); hideBinLocatorReticle(); }
     }
+    // ── The ring: shows where the pad currently points on the rack (normalised 0..1 across the active
+    // rack view, so it follows the rack when the page scrolls or the window resizes instead of staying
+    // glued to a screen position). `target` is whatever element was under it when the pad last moved —
+    // "Open the spot under the ring" acts on that, so a finger never has to land on a tiny bin itself. ──
+    var binLocatorReticle = { nx: null, ny: null, target: null };
+    function positionBinLocatorReticle() {
+        const ring = document.getElementById('bin-locator-reticle');
+        if (!ring) return;
+        if (!Number.isFinite(binLocatorReticle.nx) || !Number.isFinite(binLocatorReticle.ny) || activeView !== 'bin-locator-view') { ring.classList.add('hidden'); return; }
+        const rect = binLocatorActiveRackContainer().getBoundingClientRect();
+        if (!rect.width || !rect.height) { ring.classList.add('hidden'); return; }
+        ring.style.left = (rect.left + rect.width * binLocatorReticle.nx) + 'px';
+        ring.style.top = (rect.top + rect.height * binLocatorReticle.ny) + 'px';
+        ring.classList.remove('hidden');
+    }
+    function hideBinLocatorReticle() {
+        binLocatorReticle = { nx: null, ny: null, target: null };
+        const ring = document.getElementById('bin-locator-reticle');
+        if (ring) ring.classList.add('hidden');
+        const btn = document.getElementById('bin-locator-touchpad-select');
+        if (btn) btn.disabled = true;
+        const dot = document.getElementById('bin-locator-touchpad-dot');
+        if (dot) { dot.style.transform = ''; dot.classList.remove('active'); }
+    }
+    function selectBinLocatorAtReticle() {
+        const el = binLocatorReticle.target;
+        if (!el || !el.isConnected) { showToast("Drag the dot over the rack first.", "info"); return; }
+        const iso = el.closest('[data-depth][data-level]');
+        if (iso) { selectBinLocatorCell(parseInt(iso.dataset.depth, 10), parseInt(iso.dataset.level, 10)); return; }
+        const cell = el.closest('.map-cell');
+        if (cell && typeof cell.onclick === 'function') cell.onclick();
+    }
+    window.addEventListener('scroll', positionBinLocatorReticle, { passive: true });
+    window.addEventListener('resize', positionBinLocatorReticle);
+
     function binLocatorActiveRackContainer() {
         const isoOn = isoBinViewEnabled && typeof window.buildIsoRackSVG === 'function';
         return document.getElementById(isoOn ? 'bin-locator-iso' : 'bin-locator-grid');
@@ -11118,6 +11793,7 @@ th { background: #eee; }
     function updateBinLocatorTouchpad(e) {
         const pad = document.getElementById('bin-locator-touchpad');
         const rect = pad.getBoundingClientRect();
+        if (!rect.width) return; // the pad is hidden (Touch Preview off / Flat view) — nothing to map from
         const point = e.touches && e.touches[0] ? e.touches[0] : e;
         const r = rect.width / 2;
         const cx = rect.left + r, cy = rect.top + r;
@@ -11135,7 +11811,13 @@ th { background: #eee; }
         const nx = (dx / r + 1) / 2, ny = (dy / r + 1) / 2; // -1..1 -> 0..1
         const targetX = cRect.left + cRect.width * nx;
         const targetY = cRect.top + cRect.height * ny;
+        // The ring goes down BEFORE the lookup so it shows even over empty floor between bins; it has
+        // pointer-events:none, so elementFromPoint looks straight through it.
+        binLocatorReticle.nx = nx; binLocatorReticle.ny = ny;
+        positionBinLocatorReticle();
         const el = document.elementFromPoint(targetX, targetY);
+        binLocatorReticle.target = el;
+        document.getElementById('bin-locator-touchpad-select').disabled = !(el && el.closest('[data-depth][data-level], .map-cell'));
         if (!el) { hideBinLocatorHover(); return; }
         if (container.id === 'bin-locator-iso') { onBinLocatorIsoHover({ target: el }); return; }
         const cell = el.closest('.map-cell');
@@ -11161,6 +11843,7 @@ th { background: #eee; }
     }
 
     function renderBinLocatorGrid() {
+        hideBinLocatorReticle(); // the rack is about to be redrawn — the ring's target would be a stale element
         const grid = document.getElementById('bin-locator-grid');
         const caption = document.getElementById('bin-locator-grid-caption');
         const bounds = getZoneBounds(binLocatorZone);
@@ -13367,6 +14050,7 @@ ${css}
         if (isSupa) loadMyDisplayName();
         refreshPersonalGroqKeyUI();
         refreshAiKeySettingsUI();
+        refreshAddonSettingsUI();
     }
     function toggleSettings() {
         if (activeView === 'settings-view') { switchView(previousView); }
@@ -14973,6 +15657,11 @@ Respond with ONLY the JSON object, nothing else.`;
     import { buildVismaImportDraft, lookupEnhetUnitType } from './modules/visma-import.js';
     import { resolveRackGeometry, buildIsoRackSVG, buildIsoFloorSVG } from './modules/iso-rack.js';
     import { extractJsonObjects } from './modules/json-extract.js';
+    import { planPickRoute, describeMove } from './modules/pick-route.js';
+    window.planPickRoute = planPickRoute; // Pack Order → 🧭 Sort by route / ▶ Guided Pack
+    window.describeMove = describeMove;
+    import * as AddonBridge from './modules/addon-bridge.js';
+    window.AddonBridge = AddonBridge; // Pack Order → 🚚 NTEX transport / 🧾 Visma quote, Settings → 🔌 Add-on bridge
     import { relinkKitLines } from './modules/kit-relink.js';
     window.relinkKitLines = relinkKitLines; // the Visma import puts Best's kit lines back on the re-created items
     import { summarizeSyncStates, buildSyncExport, planAuditImport, planScrapeImport, syncStateFor } from './modules/visma-sync.js';
