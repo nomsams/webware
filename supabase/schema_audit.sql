@@ -167,5 +167,20 @@ from (
   select 47, 'schema_messaging_broadcast.sql', 'p_messages_insert_broadcast is warehouse-scoped (not just role-scoped)',
     exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'messages' and policyname = 'p_messages_insert_broadcast'
             and with_check ilike '%warehouse_id = messages.warehouse_id%')
+  union all
+  -- The most important security fix in the project: the admin-only RPCs used to be callable by anyone holding the
+  -- (public) anon key, because their `!= 'admin'` guard is NULL when nobody is signed in and the guard then never
+  -- fires. Checks both halves: the NULL-proof helper exists AND anon/PUBLIC can no longer execute the role-changing RPC.
+  select 48, 'schema_security_hardening.sql', 'admin RPCs not callable by anon/PUBLIC (is_app_admin + revoked EXECUTE)',
+    exists (select 1 from pg_proc where proname = 'is_app_admin' and pronamespace = 'public'::regnamespace)
+    and not has_function_privilege('anon', 'public.update_user_role(uuid, text)', 'execute')
+    and not has_function_privilege('anon', 'public.list_profiles_with_email()', 'execute')
+  union all
+  select 49, 'schema_security_hardening.sql', 'profiles has no table-wide UPDATE for signed-in users (column grant is real)',
+    not has_table_privilege('authenticated', 'public.profiles', 'UPDATE')
+  union all
+  select 50, 'schema_security_hardening.sql', 'activity_log inserts bound to the caller (no forged user_id / revert rows)',
+    exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'activity_log' and policyname = 'p_activity_log_insert'
+            and with_check ilike '%user_id = auth.uid()%' and with_check ilike '%reverted_at is null%')
 ) t
 order by t.n;

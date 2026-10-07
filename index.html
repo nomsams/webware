@@ -5,20 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#f8fafc" id="meta-theme-color">
     <title>Webware Inventory</title>
+    <!-- Security headers a static host (GitHub Pages) can't send, as the closest in-page equivalents:
+         - object-src/base-uri/form-action/frame-src: no plugins, no <base> hijack of every relative URL, no form posted
+           to another site, no embedded frames. (A script-src policy is deliberately NOT set: the app's own code is inline.)
+         - referrer: an item/warehouse deep link (#BTK/warehouse) never leaks to another site. -->
+    <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <!-- Clickjacking: another site can't frame this page (a headers-less host can't send frame-ancestors).
+         A framed copy hides itself and tries to take over the top window. -->
+    <script>if (window.top !== window.self) { document.documentElement.style.display = 'none'; try { window.top.location = window.self.location; } catch (e) { /* cross-origin top: staying hidden is the point */ } }</script>
     
     <!-- External Libraries (CryptoJS removed — native WebCrypto used instead) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" integrity="sha384-6kRQDsV2kVYRSENnw7WnekWKCx8/Lmv7rFKpDuR2AoIbjlBShlYcs3x0QlE3kuRh" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
     <!-- QR-only camera-scan fallback for browsers without the native BarcodeDetector API (Safari,
          Firefox) — see the SCANNER section for how the two are chosen between. Not on cdnjs, so
          served from jsDelivr's npm mirror instead (unlike the other libraries on this list). -->
-    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" integrity="sha384-b5Ya4Bq3qCyz39m2ISh+4DxjAIljdeFwK/BsXLuj9gugaNwAcj/ia15fxNZL9Nlx" crossorigin="anonymous"></script>
     <!-- OCR for the scanner's "Scan Text" capture (Swedish + English) — this script tag itself is
          a few hundred KB; the actual recognition engine (wasm) and per-language traineddata are
          fetched lazily by Tesseract.recognize() only the first time OCR is actually used. -->
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.min.js" integrity="sha384-dl/4LkSyQ4uEucc48NM6VDZLAjLLq9yMzZ5JLXumBq7Ld33XBof73hseOqPhO89+" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.2/dist/jszip.min.js" integrity="sha384-DdGlNq+wVXAn83gXqwyeFHB7iyXy6L0rLrNzgDmhKWPjiJLg9vj6qosYmZmkMfQ+" crossorigin="anonymous"></script>
 
     <style>
         /* --- THEME & VARIABLES --- */
@@ -2616,6 +2625,12 @@
     console.warn = (...a) => { _warn(...a); appLog('warn',  ...a); };
 
     // Escapes text for safe interpolation into both HTML content and quoted attribute values.
+    // A URL taken from the database and used as <img src>: https:, blob: or an inline data: image only — never a
+    // javascript: or file: location, and never a plain-http one that would downgrade the page.
+    function safeImageUrl(u) {
+        const s = String(u ?? '').trim();
+        return /^(https:\/\/|blob:|data:image\/(png|jpe?g|webp|gif);base64,)/i.test(s) ? s : '';
+    }
     function escapeHtml(s) {
         return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
@@ -3628,9 +3643,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     async function submitNewWarehouse() {
         const l = document.getElementById('new-wh-id').value.trim();
-        const name = document.getElementById('new-wh-name').value.trim();
-        const address = document.getElementById('new-wh-address').value.trim();
+        const name = window.cleanText(document.getElementById('new-wh-name').value, { max: 200 });
+        const address = window.cleanText(document.getElementById('new-wh-address').value, { max: 500 });
         if (!l || !name) { showToast("Warehouse ID and name are required.", "error"); return; }
+        // The id ends up in URLs (#<item>/<warehouse>), storage paths and HTML attributes — letters, digits, - and _ only.
+        if (!/^[A-Za-z0-9_-]{1,20}$/.test(l)) { showToast("Warehouse ID may only contain letters, digits, - and _ (max 20).", "error"); return; }
         if (WAREHOUSES.some(w => w.l === l)) { showToast(`Warehouse ID "${l}" is already in use.`, "error"); return; }
         const { error } = await sb.from('warehouses').insert({ l, name, address: address || null, type: 'database' });
         if (error) { showToast("Could not create warehouse: " + error.message, "error"); return; }
@@ -3791,8 +3808,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                         <div style="color:var(--text-muted); font-size:0.8rem; margin-top:2px;">👤 ${escapeHtml(assignee)}</div>
                     </div>
                     <div style="display:flex; gap:6px; flex-shrink:0;">
-                        <button class="secondary" onclick="openReassignOrderModal('${escapeHtml(order.order_number)}', '${escapeHtml(order.warehouse_id)}', ${order.assigned_to ? `'${escapeHtml(order.assigned_to)}'` : 'null'}, 'renderPackOrderHistoryList')" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">👤 Assign</button>
-                        <button class="secondary" onclick="reloadSavedOrderIntoPackOrder('${escapeHtml(order.order_number)}')" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">🔁 Reload</button>
+                        <button class="secondary" data-order="${escapeHtml(order.order_number)}" data-wh="${escapeHtml(order.warehouse_id)}" data-assignee="${escapeHtml(order.assigned_to || '')}" onclick="openReassignOrderModal(this.dataset.order, this.dataset.wh, this.dataset.assignee || null, 'renderPackOrderHistoryList')" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">👤 Assign</button>
+                        <button class="secondary" data-order="${escapeHtml(order.order_number)}" onclick="reloadSavedOrderIntoPackOrder(this.dataset.order)" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">🔁 Reload</button>
                     </div>
                 </div>
             </div>`;
@@ -3894,7 +3911,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
                         <div style="color:var(--text-muted); font-size:0.8rem; margin-top:2px;">${order.recipient_name ? escapeHtml(order.recipient_name) + ' · ' : ''}${lines.length} item${lines.length === 1 ? '' : 's'} · 👤 ${escapeHtml(assignee)} · ${when}</div>
                     </div>
                     <div style="display:flex; gap:6px; flex-shrink:0;">
-                        <button class="secondary" onclick="openReassignOrderModal('${escapeHtml(order.order_number)}', '${escapeHtml(order.warehouse_id)}', ${order.assigned_to ? `'${escapeHtml(order.assigned_to)}'` : 'null'}, 'renderIncomingOrdersQueue')" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">🔁</button>
+                        <button class="secondary" data-order="${escapeHtml(order.order_number)}" data-wh="${escapeHtml(order.warehouse_id)}" data-assignee="${escapeHtml(order.assigned_to || '')}" onclick="openReassignOrderModal(this.dataset.order, this.dataset.wh, this.dataset.assignee || null, 'renderIncomingOrdersQueue')" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">🔁</button>
                         <button class="success-btn" onclick="startPackingIncomingOrder(${order.id})" style="padding:4px 10px; min-height:auto; font-size:0.78rem;">▶ Start Packing</button>
                     </div>
                 </div>
@@ -4050,7 +4067,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     async function saveMyDisplayName() {
         const userId = await currentAuthUserId();
         if (!userId) return;
-        const val = document.getElementById('my-display-name').value.trim();
+        const val = window.cleanText(document.getElementById('my-display-name').value, { max: 60 });
         const { error } = await sb.from('profiles').update({ display_name: val || null }).eq('id', userId);
         if (error) { showToast("Could not save display name: " + error.message, "error"); return; }
         delete displayNameCache[userId]; // next lookup (e.g. re-opening an item you just edited) picks up the change
@@ -4200,8 +4217,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         body.innerHTML = composeBtns + entries.map(e => {
             const preview = e.latest.body.length > 60 ? e.latest.body.slice(0, 60) + '…' : e.latest.body;
             const when = new Date(e.latest.created_at).toLocaleString();
-            const onclick = e.kind === 'dm' ? `openConversationWith('${escapeHtml(e.id)}')` : `openBroadcastThread('${escapeHtml(e.id)}')`;
-            return `<div class="kit-row" onclick="${onclick}" role="button" tabindex="0" style="cursor:pointer;">
+            const openFn = e.kind === 'dm' ? 'openConversationWith' : 'openBroadcastThread'; // a fixed name; the id goes through data-*
+            return `<div class="kit-row" data-thread-id="${escapeHtml(e.id)}" onclick="${openFn}(this.dataset.threadId)" role="button" tabindex="0" style="cursor:pointer;">
                 <div class="kit-info" style="min-width:0;">
                     <div class="item-title">${escapeHtml(e.name)}${e.unread ? ` <span class="badge-count" style="position:static; display:inline-flex; margin-left:4px;">${e.unread}</span>` : ''}</div>
                     <div class="item-sub">${escapeHtml(preview)} · ${when}</div>
@@ -4306,7 +4323,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         // Whichever screen is currently showing — an existing thread's reply box, or the "New
         // Message" compose box — only one of the two is ever in the DOM at a time.
         const textarea = document.getElementById('messages-compose-body') || document.getElementById('messages-new-compose-body');
-        const bodyText = textarea.value.trim();
+        const bodyText = window.cleanText(textarea.value, { max: 2000, multiline: true });
         if (!bodyText) return;
         const myId = await currentAuthUserId();
         if (messagesActiveThreadWarehouseId) {
@@ -4550,6 +4567,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // Resolves a typed manufacturer name to an existing manufacturer (matched leniently, see
     // normalizeManufacturerKey) or creates a new one. Returns the canonical {id, name} to use.
     async function resolveManufacturer(name) {
+        name = window.cleanText(name, { max: 300 });
         if (!name || name === 'None') return { id: null, name: 'None' };
         const key = normalizeManufacturerKey(name);
         const existing = globalManufacturers.find(m => normalizeManufacturerKey(m.name) === key);
@@ -5613,7 +5631,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     //  CSV PARSING -> JSON RUNTIME
     // ════════════════════════════════════════════════════════════════════════
     function parseCSVString(csvText) {
-        const res = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+        const res = Papa.parse(csvText, CSV_IMPORT_OPTIONS);
         return normalizeItems(res.data);
     }
     // A BTK ends up in the URL fragment of every QR label (#<id>/<warehouse>), in Storage file names
@@ -5638,7 +5656,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     // CSV A: wide kit matrix. Returns [{ name, kitnumber, items:{BTK:qty} }]
     function parseKitsCSVString(csvText) {
-        const res = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+        const res = Papa.parse(csvText, CSV_IMPORT_OPTIONS);
         return res.data
             .filter(r => r && (r['Spare-part-kit name'] || '').trim() !== '')
             .map(r => {
@@ -6105,7 +6123,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     function beginItemsCSVImport(csvText, skipVismaCheck = false) {
         if (!csvText || !csvText.trim()) { showToast("Nothing to import — paste or choose a CSV first.", "error"); return; }
-        const parsed = Papa.parse(csvText.trim(), { header: true, skipEmptyLines: true });
+        const parsed = Papa.parse(csvText.trim(), CSV_IMPORT_OPTIONS);
         const rawHeaders = parsed.meta.fields || [];
         if (!rawHeaders.length || !parsed.data.length) { showToast("Couldn't find a header row and at least one data row in that CSV.", "error"); return; }
 
@@ -6416,7 +6434,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     function beginStockUpdateImport(csvText) {
         if (!csvText || !csvText.trim()) { showToast("Nothing to import — paste a CSV first.", "error"); return; }
-        const parsed = Papa.parse(csvText.trim(), { header: true, skipEmptyLines: true });
+        const parsed = Papa.parse(csvText.trim(), CSV_IMPORT_OPTIONS);
         const rawHeaders = parsed.meta.fields || [];
         if (!rawHeaders.length || !parsed.data.length) { showToast("Couldn't find a header row and at least one data row in that CSV.", "error"); return; }
 
@@ -6592,7 +6610,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const nameHeader = rawHeaders.find(h => KITS_NAME_ALIASES.includes(normalizeHeaderName(h)));
         if (!nameHeader) return csvText;
         const numberHeader = rawHeaders.find(h => h !== nameHeader && KITS_NUMBER_ALIASES.includes(normalizeHeaderName(h)));
-        const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+        const parsed = Papa.parse(csvText, CSV_IMPORT_OPTIONS);
         const renamedRows = parsed.data.map(row => {
             const out = {};
             Object.keys(row).forEach(h => {
@@ -6718,7 +6736,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     const WAREHOUSE_ADDRESS_ALIASES = ['address', 'location'];
     function beginWarehouseCSVImport(csvText) {
         if (!csvText || !csvText.trim()) { showToast("Nothing to import — paste or choose a CSV first.", "error"); return; }
-        const res = Papa.parse(csvText.trim(), { header: true, skipEmptyLines: true });
+        const res = Papa.parse(csvText.trim(), CSV_IMPORT_OPTIONS);
         const rawHeaders = res.meta.fields || [];
         if (!rawHeaders.length || !res.data.length) { showToast("Couldn't find a header row and at least one data row in that CSV.", "error"); return; }
         const idHeader = rawHeaders.find(h => WAREHOUSE_ID_ALIASES.includes(normalizeHeaderName(h)));
@@ -6784,12 +6802,19 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // so this is for reporting/offline reference — not a backup mechanism, so no encryption).
     function itemsToCSV(items) {
         const esc = v => {
-            const s = (v == null ? '' : String(v));
+            let s = (v == null ? '' : String(v));
+            if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // see unescapeCsvFormulaCell()
             return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
         };
         const rows = [COLUMNS_B.join(',')].concat(items.map(item => COLUMNS_B.map(c => esc(item[c])).join(',')));
         return rows.join('\r\n');
     }
+
+    // The inverse of the formula guard in itemsToCSV(): drop the apostrophe that guard put in front of a cell starting with = + - @.
+    function unescapeCsvFormulaCell(value) {
+        return typeof value === 'string' && /^'[=+\-@\t\r]/.test(value) ? value.slice(1) : value;
+    }
+    const CSV_IMPORT_OPTIONS = { header: true, skipEmptyLines: true, transform: unescapeCsvFormulaCell };
 
     function exportItemsCSV() {
         if (!globalInventory.length) return showToast("Nothing to export.", "warning");
@@ -7486,7 +7511,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             div.className = 'kit-row';
             div.setAttribute('role', 'button'); div.tabIndex = 0;
             const logoHtml = m.logo_url
-                ? `<img src="${escapeHtml(m.logo_url)}" alt="" style="width:40px;height:40px;object-fit:contain;border-radius:8px;background:var(--card-bg);border:1px solid var(--border);flex-shrink:0;">`
+                ? `<img src="${escapeHtml(safeImageUrl(m.logo_url))}" alt="" style="width:40px;height:40px;object-fit:contain;border-radius:8px;background:var(--card-bg);border:1px solid var(--border);flex-shrink:0;">`
                 : `<div style="width:40px;height:40px;border-radius:8px;background:var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:1.1rem;">🏭</div>`;
             div.innerHTML = `
                 ${logoHtml}
@@ -7580,13 +7605,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function handleManufacturerModalOverlayClick(e) { if (e.target === document.getElementById('manufacturer-edit-modal')) closeManufacturerEditModal(); }
 
     async function saveManufacturerEdit() {
-        const name = document.getElementById('mfr-name').value.trim();
+        const name = window.cleanText(document.getElementById('mfr-name').value, { max: 300 });
         if (!name) { showToast("Name is required.", "error"); return; }
         const row = {
             name,
-            description: document.getElementById('mfr-description').value.trim() || null,
-            contact_name: document.getElementById('mfr-contact').value.trim() || null,
-            email: document.getElementById('mfr-email').value.trim() || null
+            description: window.cleanText(document.getElementById('mfr-description').value, { max: 2000, multiline: true }) || null,
+            contact_name: window.cleanText(document.getElementById('mfr-contact').value, { max: 200 }) || null,
+            email: window.cleanText(document.getElementById('mfr-email').value, { max: 254 }) || null
         };
         const result = currentManufacturerId
             ? await sb.from('manufacturers').update(row).eq('id', currentManufacturerId).select().single()
@@ -7624,13 +7649,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     function handleWarehouseModalOverlayClick(e) { if (e.target === document.getElementById('warehouse-edit-modal')) closeWarehouseEditModal(); }
 
     async function saveWarehouseEdit() {
-        const name = document.getElementById('wh-edit-name').value.trim();
+        const name = window.cleanText(document.getElementById('wh-edit-name').value, { max: 200 });
         if (!name) { showToast("Name is required.", "error"); return; }
         const row = {
             name,
-            address: document.getElementById('wh-edit-address').value.trim() || null,
-            phone: document.getElementById('wh-edit-phone').value.trim() || null,
-            contact_email: document.getElementById('wh-edit-email').value.trim() || null
+            address: window.cleanText(document.getElementById('wh-edit-address').value, { max: 500 }) || null,
+            phone: window.cleanText(document.getElementById('wh-edit-phone').value, { max: 50 }) || null,
+            contact_email: window.cleanText(document.getElementById('wh-edit-email').value, { max: 254 }) || null
         };
         const { data, error } = await sb.from('warehouses').update(row).eq('l', currentWarehouseId).select().single();
         if (error) { showToast("Save blocked: " + error.message, "error"); return; }
@@ -8002,7 +8027,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const readOnly = currentUserRole === 'viewer';
         return `<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(90px, 1fr)); gap:8px; margin-top:0.5rem;">${photos.map(img => `
             <div class="rack-image-card">
-                <img src="${escapeHtml(img.image_url)}" alt="Zone ${escapeHtml(img.zone)} Aisle ${img.aisle} Rack ${img.rack}" onclick="openLightbox(this.src)" style="cursor:pointer;">
+                <img src="${escapeHtml(safeImageUrl(img.image_url))}" alt="Zone ${escapeHtml(img.zone)} Aisle ${img.aisle} Rack ${img.rack}" onclick="openLightbox(this.src)" style="cursor:pointer;">
                 <div class="rack-image-label">Aisle ${img.aisle} · Rack ${img.rack}${img.grid_overlay ? ' · <span title="Straightened">📐</span>' : ''}</div>
                 ${readOnly ? '' : `
                 <button class="rack-image-straighten" onclick="openRackWarpEditor(${img.id})" title="Straighten photo" aria-label="Straighten photo">📐</button>
@@ -8418,7 +8443,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!globalRackImages.length) { gallery.innerHTML = `<p style="color:var(--text-muted); font-size:0.85rem;">No photos uploaded yet.</p>`; return; }
         gallery.innerHTML = globalRackImages.map(img => `
             <div class="rack-image-card">
-                <img src="${escapeHtml(img.image_url)}" alt="Zone ${escapeHtml(img.zone)} Aisle ${img.aisle} Rack ${img.rack}" onclick="openLightbox(this.src)" style="cursor:pointer;">
+                <img src="${escapeHtml(safeImageUrl(img.image_url))}" alt="Zone ${escapeHtml(img.zone)} Aisle ${img.aisle} Rack ${img.rack}" onclick="openLightbox(this.src)" style="cursor:pointer;">
                 <div class="rack-image-label">Zone ${escapeHtml(img.zone)} · Aisle ${img.aisle} · Rack ${img.rack}${img.grid_overlay ? ' · <span title="Straightened">📐</span>' : ''}</div>
                 ${currentUserRole !== 'viewer' ? `
                 <button class="rack-image-straighten" onclick="openRackWarpEditor(${img.id})" title="Straighten photo" aria-label="Straighten photo">📐</button>
@@ -9213,17 +9238,22 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // Order numbers (ORDxxxxxx, same shape as BTK numbers) are generated server-side by a
     // sequence-backed column default — see supabase/schema_orders.sql — so there's no client-side
     // coordination or collision risk even with multiple people saving orders at once.
+    function nonNegativeNumberOrNull(v) {
+        const n = parseFloat(String(v ?? '').replace(',', '.'));
+        return Number.isFinite(n) && n >= 0 ? n : null;
+    }
     async function savePackOrder() {
         if (!packOrder.length) { showToast("Nothing to save — the pack order is empty.", "warning"); return; }
         if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') { showToast("Saving orders requires a Supabase warehouse.", "warning"); return; }
         const row = {
             warehouse_id: currentWarehouseId,
-            recipient_name: packOrderRecipient.name.trim() || null,
-            recipient_address: packOrderRecipient.address.trim() || null,
-            box_length: packOrderBox.length || null,
-            box_width: packOrderBox.width || null,
-            box_height: packOrderBox.height || null,
-            box_weight: packOrderBox.weight || null,
+            recipient_name: window.cleanText(packOrderRecipient.name, { max: 300 }) || null,
+            recipient_address: window.cleanText(packOrderRecipient.address, { max: 1500, multiline: true }) || null,
+            // a number >= 0, or nothing — never a negative size/weight and never text
+            box_length: nonNegativeNumberOrNull(packOrderBox.length),
+            box_width: nonNegativeNumberOrNull(packOrderBox.width),
+            box_height: nonNegativeNumberOrNull(packOrderBox.height),
+            box_weight: nonNegativeNumberOrNull(packOrderBox.weight),
             assigned_to: packOrderAssignedTo || null,
             items: packOrder.map(({ deducted, ...line }) => line) // `deducted` is session bookkeeping, not part of the order
         };
@@ -9940,7 +9970,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
 
     function addonClient() {
         const s = addonSavedSettings();
-        return window.AddonBridge.createAddonClient({ baseUrl: s.baseUrl || window.AddonBridge.DEFAULT_BASE_URL, token: s.token });
+        // re-checked on every use: a value planted in localStorage by anything else must not be able to redirect the token
+        const baseUrl = s.baseUrl ? window.safeBaseUrl(s.baseUrl) : window.AddonBridge.DEFAULT_BASE_URL;
+        if (!baseUrl) throw new Error("The saved add-on URL isn't allowed (https, or http to this computer only) — fix it in Settings → Add-on bridge.");
+        return window.AddonBridge.createAddonClient({ baseUrl, token: s.token });
     }
     async function sendAddonJob() {
         if (!addonDraft) return;
@@ -9975,8 +10008,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         document.getElementById('addon-token').value = s.token;
     }
     function saveAddonSettings() {
-        const url = document.getElementById('addon-base-url').value.trim();
-        const token = document.getElementById('addon-token').value.trim();
+        const urlText = document.getElementById('addon-base-url').value.trim();
+        const token = window.cleanText(document.getElementById('addon-token').value, { max: 200 });
+        // https anywhere, or plain http only to THIS computer — the token must never travel in the clear to another host
+        const url = urlText ? window.safeBaseUrl(urlText) : '';
+        if (urlText && !url) {
+            document.getElementById('addon-settings-status').textContent = 'The URL must be https://…, or http:// to this same computer (127.0.0.1 / localhost) — with no path, login or query in it.';
+            return;
+        }
         try {
             if (url) localStorage.setItem('addon-bridge-url', url); else localStorage.removeItem('addon-bridge-url');
             if (token) localStorage.setItem('addon-bridge-token', token); else localStorage.removeItem('addon-bridge-token');
@@ -12638,19 +12677,24 @@ th { background: #eee; }
     // Shared by Supabase-mode CSV import — same field mapping as submitItemForm()/duplicateItem()/
     // runMerge() use for their own Supabase writes, just pulled out since CSV import needs it once
     // per row instead of once per user action.
+    // Free text is cleaned on its way into the database (control and invisible/bidi-override characters out, Unicode
+    // normalised, length-capped to the database's own limits — modules/sanitize.js, supabase/schema_security_hardening.sql).
+    // undefined/null pass through untouched: they mean "this write does not carry that field", which is not the same as "".
+    const cleanField = (v, max, multiline) => (v === undefined || v === null) ? v : window.cleanText(v, { max, multiline: !!multiline });
     async function itemToSupabaseRow(item) {
-        const mfr = await resolveManufacturer(item.Manufacturer);
+        const mfr = await resolveManufacturer(cleanField(item.Manufacturer, 300));
         return {
-            manufacturer: mfr.name, manufacturer_id: mfr.id, itemnumber: item.itemnumber,
-            itemname_en: item['itemname(english)'], itemname_sv: item['itemname(swedish)'],
-            itemnumber2: item.itemnumber2, itemnumber3: item.itemnumber3,
-            numberofitems: parseInt(item.Numberofitems, 10) || 0,
+            manufacturer: mfr.name, manufacturer_id: mfr.id, itemnumber: cleanField(item.itemnumber, 300),
+            itemname_en: cleanField(item['itemname(english)'], 1000), itemname_sv: cleanField(item['itemname(swedish)'], 1000),
+            itemnumber2: cleanField(item.itemnumber2, 300), itemnumber3: cleanField(item.itemnumber3, 300),
+            numberofitems: window.cleanInt(item.Numberofitems, { min: 0, max: 2000000000, fallback: 0 }),
             unit_type: UNIT_TYPES.some(u => u.value === item.UnitType) ? item.UnitType : 'st',
             reorder_threshold: (item.ReorderThreshold === undefined || item.ReorderThreshold === '' || item.ReorderThreshold === null) ? null : parseInt(item.ReorderThreshold, 10),
             map_position: (!item.MapPosition || item.MapPosition === 'None') ? null : item.MapPosition,
             ...sanitizeLocationCodeForRow(item.LocationCode, item.Inventorylocation),
-            comments: (!item.Comments || item.Comments === 'None') ? null : item.Comments,
-            link: (!item.Link || item.Link === 'None') ? null : item.Link
+            comments: (!item.Comments || item.Comments === 'None') ? null : cleanField(item.Comments, 20000, true),
+            // http(s) only — a javascript:/data: link is dropped, never stored (and rendered as a clickable href later)
+            link: (!item.Link || item.Link === 'None') ? null : (window.cleanUrl(item.Link) || null)
         };
     }
 
@@ -13378,7 +13422,7 @@ th { background: #eee; }
         const fail = msg => { err.textContent = msg; err.classList.remove('hidden'); };
         err.classList.add('hidden');
         if (!csvText.trim()) { fail("That file is empty."); return; }
-        const parsed = Papa.parse(csvText.trim(), { header: true, skipEmptyLines: true });
+        const parsed = Papa.parse(csvText.trim(), CSV_IMPORT_OPTIONS);
         if (!parsed.meta.fields || !parsed.data.length) { fail("Couldn't find a header row and at least one data row in that CSV."); return; }
         const plan = kind === 'audit'
             ? window.planAuditImport(parsed.data, globalInventory)
@@ -15657,6 +15701,11 @@ Respond with ONLY the JSON object, nothing else.`;
     import { buildVismaImportDraft, lookupEnhetUnitType } from './modules/visma-import.js';
     import { resolveRackGeometry, buildIsoRackSVG, buildIsoFloorSVG } from './modules/iso-rack.js';
     import { extractJsonObjects } from './modules/json-extract.js';
+    import { cleanText, cleanUrl, cleanInt, safeBaseUrl } from './modules/sanitize.js';
+    window.cleanText = cleanText; // every free-text write is cleaned with these (itemToSupabaseRow, orders, messages, ...)
+    window.cleanUrl = cleanUrl;
+    window.cleanInt = cleanInt;
+    window.safeBaseUrl = safeBaseUrl;
     import { planPickRoute, describeMove } from './modules/pick-route.js';
     window.planPickRoute = planPickRoute; // Pack Order → 🧭 Sort by route / ▶ Guided Pack
     window.describeMove = describeMove;

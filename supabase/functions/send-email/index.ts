@@ -83,6 +83,23 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// Abuse limits — an editor account must not be a free mail relay.
+const MAX_SUBJECT_CHARS = 200;
+const MAX_BODY_CHARS = 20_000;
+const MAX_REQUEST_BYTES = 64 * 1024;
+const MAX_EMAILS_PER_HOUR = 20;
+// Best-effort per-user hourly window (isolates are short-lived, so this is a brake, not a guarantee).
+const recentSends = new Map<string, number[]>();
+function rateLimited(userId: string): boolean {
+  const now = Date.now();
+  const sends = (recentSends.get(userId) ?? []).filter((t) => t > now - 3_600_000);
+  if (sends.length >= MAX_EMAILS_PER_HOUR) { recentSends.set(userId, sends); return true; }
+  sends.push(now);
+  recentSends.set(userId, sends);
+  if (recentSends.size > 2000) recentSends.clear();
+  return false;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   // Wrapped for the same reason as groq-proxy/cors-proxy: an unhandled throw here would fall
@@ -132,23 +149,37 @@ Deno.serve(async (req) => {
 
     let body: { to?: string; subject?: string; text?: string };
     try {
-      body = await req.json();
+      const raw = await req.text();
+      if (raw.length > MAX_REQUEST_BYTES) return json({ error: "request too large" }, 413);
+      body = JSON.parse(raw);
     } catch {
       return json({ error: "invalid JSON body" }, 400);
     }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "invalid JSON body" }, 400);
     const { to, subject, text } = body;
     if (!to || typeof to !== "string") return json({ error: "to is required" }, 400);
 
-    // Basic shape check + CRLF rejection on the two header-bound fields — defense in depth against
-    // header injection (e.g. a smuggled extra "Bcc:" line) regardless of what denomailer itself
-    // guards against internally. `text` is the message body, not a header, so newlines there are
-    // expected and left alone.
-    const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
-    if (!EMAIL_RE.test(to) || /[\r\n]/.test(to)) {
+    // ONE plain address, no display name, no list. The old pattern ([^\s@<>]+) also accepted "," and ";" and
+    // quotes, so "a@b.se,c@d.se" passed as a single address and a mail library that splits recipients on commas
+    // would have delivered it to both — a relay for anyone with an editor account. This allows only the characters
+    // an everyday address actually uses, and caps the length (RFC 5321: 254).
+    const EMAIL_RE = /^[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+    if (to.length > 254 || !EMAIL_RE.test(to)) {
       return json({ error: "to must be a single, valid email address" }, 400);
     }
-    if (subject !== undefined && subject !== null && (typeof subject !== "string" || /[\r\n]/.test(subject))) {
-      return json({ error: "subject must not contain line breaks" }, 400);
+    // CRLF rejection on the header-bound field — defense in depth against header injection (a smuggled extra
+    // "Bcc:" line) regardless of what denomailer itself guards against. `text` is the body, where newlines are normal.
+    if (subject !== undefined && subject !== null && (typeof subject !== "string" || /[\r\n\0]/.test(subject) || subject.length > MAX_SUBJECT_CHARS)) {
+      return json({ error: `subject must be one line of at most ${MAX_SUBJECT_CHARS} characters` }, 400);
+    }
+    if (text !== undefined && text !== null && (typeof text !== "string" || text.length > MAX_BODY_CHARS || text.includes("\0"))) {
+      return json({ error: `text must be at most ${MAX_BODY_CHARS} characters` }, 400);
+    }
+
+    // Everything above is cheap; the SMTP connection below is not (and every message leaves from the
+    // organisation's own sender address) — so a hand-written loop of calls is slowed down first.
+    if (rateLimited(user.id)) {
+      return json({ error: "too many emails in the last hour — try again later" }, 429);
     }
 
     const client = new SMTPClient({
@@ -177,7 +208,7 @@ Deno.serve(async (req) => {
     return json({ sent: true });
   } catch (err) {
     console.error("send-email: unhandled error:", err);
-    return json({ error: err instanceof Error ? err.message : "internal error" }, 500);
+    return json({ error: "internal error" }, 500);
   }
 });
 

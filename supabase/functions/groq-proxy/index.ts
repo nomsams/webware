@@ -44,6 +44,63 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// ── Abuse limits ─────────────────────────────────────────────────────────────────────────────────────────
+// Any signed-in user spends the one shared Groq key, so everything a caller controls is bounded: how often,
+// how big, which roles, which parameters. (Nothing here is needed by the app's own calls.)
+const ALLOWED_EFFORTS = new Set(["low", "medium", "high"]);
+const MAX_MESSAGES = 60;
+const MAX_CHAT_BODY_BYTES = 6 * 1024 * 1024;        // a downscaled delivery-note photo as a data: URL fits easily
+const MAX_TRANSCRIBE_BYTES = 25 * 1024 * 1024;      // Groq's own ceiling for audio uploads
+const RATE_LIMIT_PER_MINUTE = 40;
+
+// Best-effort per-user sliding window. An Edge Function isolate is short-lived and there can be several, so
+// this is a brake, not a guarantee — but it turns "a script burns the whole free-tier quota in a minute" into
+// "a script is slowed to a trickle".
+const recentCalls = new Map<string, number[]>();
+function rateLimited(userId: string): boolean {
+  const now = Date.now();
+  const windowStart = now - 60_000;
+  const calls = (recentCalls.get(userId) ?? []).filter((t) => t > windowStart);
+  if (calls.length >= RATE_LIMIT_PER_MINUTE) { recentCalls.set(userId, calls); return true; }
+  calls.push(now);
+  recentCalls.set(userId, calls);
+  if (recentCalls.size > 5000) recentCalls.clear(); // never grows without bound
+  return false;
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}
+
+// Only plain chat turns: a role from the allow-list and either a string or text / data:-image parts. A part
+// carrying a remote image URL is refused — Groq would fetch it on this proxy's behalf — and every other key
+// on a message is dropped rather than forwarded.
+function sanitizeMessages(messages: unknown[]): { ok: true; messages: unknown[] } | { ok: false; error: string } {
+  if (messages.length > MAX_MESSAGES) return { ok: false, error: `at most ${MAX_MESSAGES} messages` };
+  const clean: unknown[] = [];
+  for (const m of messages) {
+    if (!m || typeof m !== "object") return { ok: false, error: "invalid message" };
+    const { role, content } = m as { role?: unknown; content?: unknown };
+    if (role !== "system" && role !== "user" && role !== "assistant") return { ok: false, error: "invalid message role" };
+    if (typeof content === "string") { clean.push({ role, content }); continue; }
+    if (!Array.isArray(content)) return { ok: false, error: "invalid message content" };
+    const parts: unknown[] = [];
+    for (const part of content) {
+      const p = part as { type?: unknown; text?: unknown; image_url?: { url?: unknown } } | null;
+      if (p && p.type === "text" && typeof p.text === "string") { parts.push({ type: "text", text: p.text }); continue; }
+      if (p && p.type === "image_url" && typeof p.image_url?.url === "string"
+          && /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/.test(p.image_url.url)) {
+        parts.push({ type: "image_url", image_url: { url: p.image_url.url } });
+        continue;
+      }
+      return { ok: false, error: "only text and data: images are accepted in message content" };
+    }
+    clean.push({ role, content: parts });
+  }
+  return { ok: true, messages: clean };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -67,6 +124,9 @@ Deno.serve(async (req) => {
     if (authError || !user) {
       return json({ error: "not authenticated" }, 401);
     }
+    if (rateLimited(user.id)) {
+      return json({ error: "too many requests — wait a moment and try again" }, 429);
+    }
 
     const keys = await loadActiveKeys();
     if (keys.length === 0) {
@@ -79,8 +139,10 @@ Deno.serve(async (req) => {
     }
     return await handleChat(req, keys);
   } catch (err) {
+    // The detail stays in the function's own logs; a caller only learns that it failed (a thrown message can
+    // carry a connection string, a table name, or part of a key).
     console.error("groq-proxy: unhandled error:", err);
-    return json({ error: err instanceof Error ? err.message : "internal error" }, 500);
+    return json({ error: "internal error" }, 500);
   }
 });
 
@@ -109,12 +171,17 @@ async function loadActiveKeys(): Promise<string[]> {
 }
 
 async function handleChat(req: Request, keys: string[]): Promise<Response> {
+  const declared = Number(req.headers.get("Content-Length"));
+  if (Number.isFinite(declared) && declared > MAX_CHAT_BODY_BYTES) return json({ error: "request too large" }, 413);
   let body: Record<string, unknown>;
   try {
-    body = await req.json();
+    const raw = await req.text();
+    if (raw.length > MAX_CHAT_BODY_BYTES) return json({ error: "request too large" }, 413);
+    body = JSON.parse(raw);
   } catch {
     return json({ error: "invalid JSON body" }, 400);
   }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "invalid JSON body" }, 400);
 
   const { model, messages, temperature, max_completion_tokens, top_p, reasoning_effort, stream } = body as {
     model?: string;
@@ -133,14 +200,20 @@ async function handleChat(req: Request, keys: string[]): Promise<Response> {
     return json({ error: "messages must be a non-empty array" }, 400);
   }
 
+  const checked = sanitizeMessages(messages);
+  if (!checked.ok) return json({ error: checked.error }, 400);
+  if (reasoning_effort !== undefined && reasoning_effort !== null && !ALLOWED_EFFORTS.has(String(reasoning_effort))) {
+    return json({ error: `reasoning_effort must be one of: ${[...ALLOWED_EFFORTS].join(", ")}` }, 400);
+  }
+
   const payload = JSON.stringify({
     model,
-    messages,
-    temperature: temperature ?? 1,
+    messages: checked.messages,
+    temperature: clampNumber(temperature, 0, 2, 1),
     max_completion_tokens: clampCompletionTokens(max_completion_tokens),
-    top_p: top_p ?? 1,
+    top_p: clampNumber(top_p, 0, 1, 1),
     reasoning_effort: reasoning_effort ?? "medium",
-    stream: !!stream,
+    stream: stream === true,
   });
 
   let lastRes: Response | null = null;
@@ -176,6 +249,10 @@ async function handleTranscription(req: Request, keys: string[]): Promise<Respon
   const file = form.get("file");
   if (!(file instanceof File)) {
     return json({ error: "file is required" }, 400);
+  }
+  if (file.size > MAX_TRANSCRIBE_BYTES) return json({ error: "audio file too large (25 MB max)" }, 413);
+  if (file.type && !file.type.startsWith("audio/") && file.type !== "video/webm") {
+    return json({ error: "file must be audio" }, 400);
   }
   const model = (form.get("model") as string) || "whisper-large-v3-turbo";
   if (!ALLOWED_TRANSCRIBE_MODELS.has(model)) {
