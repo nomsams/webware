@@ -157,5 +157,15 @@ from (
   union all
   select 46, 'schema_messaging_broadcast.sql', 'message_reads table',
     exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'message_reads')
+  union all
+  -- Distinct from #46 on purpose: the table existing only proves *some* version of the migration
+  -- ran, not that it's the security-patched one — the file's first version let any global editor/
+  -- maintainer broadcast to any warehouse (p_messages_insert_broadcast's role check wasn't scoped to
+  -- the target warehouse_id at all). This greps the policy's own with_check for the fix's specific
+  -- warehouse-scoped clause, the same way #25/#29 verify a policy's actual logic rather than just its
+  -- name existing.
+  select 47, 'schema_messaging_broadcast.sql', 'p_messages_insert_broadcast is warehouse-scoped (not just role-scoped)',
+    exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'messages' and policyname = 'p_messages_insert_broadcast'
+            and with_check ilike '%warehouse_id = messages.warehouse_id%')
 ) t
 order by t.n;

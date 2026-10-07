@@ -2509,6 +2509,18 @@
         return !isSupa || currentUserRole !== 'viewer';
     }
 
+    // canEditItems() reflects the role in currentWarehouseId only — right for gating an action ON
+    // that warehouse's own data, but wrong for gating a feature that spans every warehouse the
+    // account can reach (Incoming Orders): someone who's editor+ in Warehouse A via a grant, but
+    // currently has viewer-only Warehouse B open, would otherwise see the entire feature vanish even
+    // though real orders are waiting for them in A. Computed entirely from already-cached values
+    // (profile role + the grants list), no extra fetch.
+    function canEditItemsAnywhere() {
+        if (!currentActiveKey) return false;
+        if (currentProfileRole === 'admin' || (currentProfileRole && currentProfileRole !== 'viewer')) return true;
+        return myWarehousePermissions.some(p => p.role !== 'viewer');
+    }
+
     // Who may do what to items (enforced by the items RLS policies — supabase/schema_editor_add_items.sql):
     //   add / update   editor (in their warehouse), editor or maintainer grant, admin  -> canEditItems()
     //   delete         admin only (a global admin, or an admin grant for this warehouse) -> canDeleteItems()
@@ -3699,7 +3711,7 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     // plus explicit grants and would under-count an admin with neither in some warehouse they can
     // still see everything in via RLS.
     function openIncomingOrdersModal() {
-        if (!canEditItems()) { showToast("Editor or admin only.", "warning"); return; }
+        if (!canEditItemsAnywhere()) { showToast("Editor or admin only.", "warning"); return; }
         document.getElementById('incoming-orders-modal').classList.add('open');
         renderIncomingOrdersQueue();
     }
@@ -3711,7 +3723,11 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         container.innerHTML = 'Loading…';
         const myId = await currentAuthUserId();
         let query;
-        if (currentUserRole === 'admin') {
+        // currentProfileRole (the real, global profiles.role), not currentUserRole (the *effective*
+        // role in whichever warehouse happens to be open right now, which can read 'admin' from a
+        // per-warehouse grant alone) — this decides whether to query every warehouse in the whole
+        // deployment, so it needs the caller's actual global standing, not a scoped one.
+        if (currentProfileRole === 'admin') {
             query = sb.from('orders').select('*').eq('status', 'open').order('created_at');
         } else {
             const { data: profile, error: profileError } = await sb.from('profiles').select('*').eq('id', myId).single();
@@ -3855,14 +3871,14 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
     }
 
     async function refreshIncomingOrdersBadge() {
-        if (!currentActiveKey || getWarehouseMeta(currentWarehouseId).mode !== 'supabase' || !canEditItems()) {
+        if (!currentActiveKey || getWarehouseMeta(currentWarehouseId).mode !== 'supabase' || !canEditItemsAnywhere()) {
             document.getElementById('btn-incoming-orders').classList.add('hidden');
             return;
         }
         const myId = await currentAuthUserId();
         if (!myId) return;
         let count = 0;
-        if (currentUserRole === 'admin') {
+        if (currentProfileRole === 'admin') { // real global admin, not just an effective-admin grant on the currently open warehouse — see renderIncomingOrdersQueue()'s own comment
             const { count: c } = await sb.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'open');
             count = c || 0;
         } else {
@@ -3964,6 +3980,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         localStorage.setItem('messages-feature-seen', '1');
         document.getElementById('messages-new-dot').classList.add('hidden');
         document.getElementById('messages-modal').classList.add('open');
+        // Cleared here (not just left to populate once and never again, as it previously was) so a
+        // colleague who joined/was granted access since this modal was last opened actually shows up
+        // in the "New Message" picker — still cached for the duration of one modal-open, matching the
+        // variable's own stated intent, so bouncing between the inbox and compose screens within the
+        // same open doesn't re-fetch it needlessly.
+        messagesColleaguesCache = null;
         renderMessagesInbox();
     }
     function closeMessagesModal() { document.getElementById('messages-modal').classList.remove('open'); }
@@ -3990,14 +4012,18 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const myId = await currentAuthUserId();
         if (!myId) { body.innerHTML = `<p style="color:var(--text-muted);">Sign in to use Messages.</p>`; return; }
 
-        const { data: dmData, error: dmError } = await sb.from('messages').select('*').or(`sender_id.eq.${myId},recipient_id.eq.${myId}`).order('created_at', { ascending: false }).limit(500);
+        // is('warehouse_id', null) excludes a broadcast this account sent — sender_id.eq.myId alone
+        // would otherwise also match those (recipient_id is null on a broadcast row, but that's fine,
+        // the OR's other branch just never fires for it) and bucket them under a bogus "Unknown"
+        // conversation below (otherId computed as recipient_id, i.e. null, for a self-sent broadcast).
+        const { data: dmData, error: dmError } = await sb.from('messages').select('*').or(`sender_id.eq.${myId},recipient_id.eq.${myId}`).is('warehouse_id', null).order('created_at', { ascending: false }).limit(500);
         if (dmError) { body.innerHTML = `<p style="color:var(--danger);">Could not load messages: ${escapeHtml(dmError.message)}</p>`; return; }
         messagesInboxCache = dmData || [];
 
         const { data: profile } = await sb.from('profiles').select('*').eq('id', myId).single();
         const wids = profile ? userWarehouseIds(profile) : [];
         let broadcastQuery = null;
-        if (currentUserRole === 'admin') broadcastQuery = sb.from('messages').select('*').not('warehouse_id', 'is', null).order('created_at', { ascending: false }).limit(500);
+        if (currentProfileRole === 'admin') broadcastQuery = sb.from('messages').select('*').not('warehouse_id', 'is', null).order('created_at', { ascending: false }).limit(500);
         else if (wids.length) broadcastQuery = sb.from('messages').select('*').in('warehouse_id', wids).order('created_at', { ascending: false }).limit(500);
         const { data: broadcastData } = broadcastQuery ? await broadcastQuery : { data: [] };
         messagesBroadcastCache = broadcastData || [];
@@ -4150,8 +4176,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!bodyText) return;
         const myId = await currentAuthUserId();
         if (messagesActiveThreadWarehouseId) {
-            const { error } = await sb.from('messages').insert({ sender_id: myId, warehouse_id: messagesActiveThreadWarehouseId, body: bodyText });
+            // openBroadcastThread() below only re-filters the existing messagesBroadcastCache, which
+            // still predates this insert — without pushing the new row in first, the message you just
+            // sent wouldn't appear until "← Back" (which actually re-fetches) and reopening the thread.
+            const { data, error } = await sb.from('messages').insert({ sender_id: myId, warehouse_id: messagesActiveThreadWarehouseId, body: bodyText }).select().single();
             if (error) { showToast("Could not send message: " + error.message, "error"); return; }
+            messagesBroadcastCache.push(data);
             await openBroadcastThread(messagesActiveThreadWarehouseId);
             refreshUnreadMessageBadge();
             return;
@@ -4159,8 +4189,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         const recipientSelect = document.getElementById('messages-compose-recipient');
         const recipientId = messagesActiveThreadUserId || (recipientSelect && recipientSelect.value);
         if (!recipientId) { showToast("Pick who to message.", "warning"); return; }
-        const { error } = await sb.from('messages').insert({ sender_id: myId, recipient_id: recipientId, body: bodyText });
+        const { data, error } = await sb.from('messages').insert({ sender_id: myId, recipient_id: recipientId, body: bodyText }).select().single();
         if (error) { showToast("Could not send message: " + error.message, "error"); return; }
+        messagesInboxCache.push(data);
         await openConversationWith(recipientId);
         refreshUnreadMessageBadge();
     }
@@ -4171,8 +4202,9 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         if (!bodyText) return;
         const warehouseId = document.getElementById('messages-broadcast-warehouse').value;
         const myId = await currentAuthUserId();
-        const { error } = await sb.from('messages').insert({ sender_id: myId, warehouse_id: warehouseId, body: bodyText });
+        const { data, error } = await sb.from('messages').insert({ sender_id: myId, warehouse_id: warehouseId, body: bodyText }).select().single();
         if (error) { showToast("Could not send broadcast: " + error.message, "error"); return; }
+        messagesBroadcastCache.push(data);
         await openBroadcastThread(warehouseId);
         refreshUnreadMessageBadge();
     }
@@ -4211,8 +4243,8 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         let broadcastUnread = 0;
         const { data: profile } = await sb.from('profiles').select('*').eq('id', myId).single();
         if (profile) {
-            const wids = currentUserRole === 'admin' ? null : userWarehouseIds(profile);
-            if (currentUserRole === 'admin' || (wids && wids.length)) {
+            const wids = currentProfileRole === 'admin' ? null : userWarehouseIds(profile);
+            if (currentProfileRole === 'admin' || (wids && wids.length)) {
                 let q = sb.from('messages').select('id').not('warehouse_id', 'is', null).neq('sender_id', myId);
                 if (wids) q = q.in('warehouse_id', wids);
                 const [{ data: broadcastIds }, { data: readRows }] = await Promise.all([q, sb.from('message_reads').select('message_id').eq('user_id', myId)]);
@@ -6832,6 +6864,10 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         packOrderRecipient = { name: '', address: '', email: '', orgNumber: '' };
         packOrderSavedNumber = null;
         packOrderFulfilled = false;
+        // A colleague id from the warehouse just left behind is meaningless in the new one — left
+        // unreset, it would silently ride along onto the next order saved here (savePackOrder() reads
+        // this raw variable, not the dropdown's own DOM value) as if that person worked here too.
+        packOrderAssignedTo = null;
         inventeringItems = [];
         updatePackOrderBadge();
     }
@@ -8733,6 +8769,13 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
             select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`);
         });
         select.value = packOrderAssignedTo || '';
+        // Setting .value to an id that isn't one of the options just inserted (the assignee's grant
+        // was revoked, or they're not a member of this warehouse) is a silent no-op in HTML — the
+        // select falls back to showing "Anyone" while packOrderAssignedTo (what savePackOrder() and
+        // AI-assisted assignment both actually persist) still holds the stale id underneath. Resetting
+        // it here keeps what's saved matching what's shown, rather than saving an assignment the UI
+        // never displayed as selected.
+        if (select.value !== (packOrderAssignedTo || '')) packOrderAssignedTo = null;
     }
     function onPackOrderAssigneeChange() {
         packOrderAssignedTo = document.getElementById('pack-order-assignee').value || null;
@@ -8749,6 +8792,12 @@ SPARE PART KIT HYDRAULIC,None,1,1,None,None,1,None,None,None,None`;
         packOrderSavedNumber = null;
         packOrderFulfilled = false;
         packOrderAssignedTo = null;
+        // The view stays open after Clear (unlike Save/Reload, which re-enter via openPackOrderView()
+        // and so already get a fresh populatePackOrderAssigneeDropdown() call) — without resetting the
+        // select's own DOM value directly, it would keep showing the just-cleared assignee even though
+        // packOrderAssignedTo (what actually gets saved) is correctly null underneath it.
+        const assigneeSelect = document.getElementById('pack-order-assignee');
+        if (assigneeSelect) assigneeSelect.value = '';
         updatePackOrderBadge();
         renderPackOrderItems();
         syncPackOrderBoxInputs();
@@ -13300,7 +13349,7 @@ ${css}
         document.getElementById('btn-activity-log').classList.toggle('hidden', !(isSupa && isAdmin));
         document.getElementById('btn-backorder-report').classList.toggle('hidden', !(isSupa && canEditItems()));
         document.getElementById('btn-pack-order-history').classList.toggle('hidden', !(isSupa && canEditItems()));
-        document.getElementById('btn-incoming-orders-settings').classList.toggle('hidden', !(isSupa && canEditItems()));
+        document.getElementById('btn-incoming-orders-settings').classList.toggle('hidden', !(isSupa && canEditItemsAnywhere()));
         document.getElementById('btn-unassigned-images').classList.toggle('hidden', !(isSupa && canEditItems()));
         // Editor+ like the other stock tools: a sync only ever changes quantities and the baseline,
         // it never creates or deletes an item.
@@ -13742,9 +13791,14 @@ Respond with ONLY the JSON object, nothing else.`;
     async function aiGetColleagues() {
         if (getWarehouseMeta(currentWarehouseId).mode !== 'supabase') return [];
         if (aiColleaguesCache && aiColleaguesCache.warehouseId === currentWarehouseId) return aiColleaguesCache.list;
-        const { data, error } = await sb.rpc('list_warehouse_members', { p_warehouse_id: currentWarehouseId });
+        // Captured before the await, not read again after it: if the user switches warehouses while
+        // this RPC is in flight, tagging the cache with the (by-then-changed) currentWarehouseId would
+        // label the OLD warehouse's member list as belonging to the NEW one — defeating the cache's
+        // own staleness check instead of just returning it once, unmemoized, for this call.
+        const requestedWarehouseId = currentWarehouseId;
+        const { data, error } = await sb.rpc('list_warehouse_members', { p_warehouse_id: requestedWarehouseId });
         if (error) { console.error("Could not load colleagues for assignment:", error); return []; }
-        aiColleaguesCache = { warehouseId: currentWarehouseId, list: data || [] };
+        aiColleaguesCache = { warehouseId: requestedWarehouseId, list: data || [] };
         return aiColleaguesCache.list;
     }
 
