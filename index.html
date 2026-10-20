@@ -5831,9 +5831,30 @@
         }
     }
 
+    // What to tell someone when the database host doesn't answer at all (offline, or — on a free Supabase plan — the project was
+    // PAUSED after a week without activity, after which its address stops resolving and every request ends in "Failed to fetch").
+    const DB_UNREACHABLE_MESSAGE = "Can't reach the database. If you're online, a free Supabase project may have been paused after inactivity — open the Supabase dashboard and press 'Restore project'.";
+    function isNetworkFailure(err) {
+        return !!err && /failed to fetch|networkerror|load failed|fetch failed|AuthRetryableFetchError/i.test(`${err.name || ''} ${err.message || ''}`);
+    }
+
     async function startupRoute() {
         if (getWarehouseMeta(currentWarehouseId).mode === 'supabase') {
-            const { data: { session } } = await sb.auth.getSession();
+            // The right fields (email + password, not the offline-vault passphrase box the HTML shows by default) from the very first
+            // paint — this used to happen only AFTER the session lookup below returned, so with the database unreachable the sign-in
+            // screen sat there with the wrong form for as long as the network took to give up.
+            applyAuthFieldVisibility(currentWarehouseId);
+            // Bounded: a stored session is read locally, so anything slower than this means the host isn't answering.
+            const lookup = await Promise.race([
+                sb.auth.getSession().then(r => r, e => ({ data: { session: null }, error: e })),
+                new Promise(resolve => setTimeout(() => resolve({ timedOut: true }), 8000)),
+            ]);
+            if (lookup.timedOut || isNetworkFailure(lookup.error)) {
+                showAuth();
+                showToast(DB_UNREACHABLE_MESSAGE, "warning", 12000);
+                return;
+            }
+            const session = lookup.data && lookup.data.session;
             if (session) {
                 try {
                     const opened = await loadSupabaseSession(currentWarehouseId, { fallbackToAccessible: true });
@@ -5906,10 +5927,13 @@
             const password = document.getElementById('sb-password').value;
             if (!email || !password) return showToast("Please enter email and password", "error");
 
-            const { error } = await sb.auth.signInWithPassword({ email, password });
+            let signIn;
+            try { signIn = await sb.auth.signInWithPassword({ email, password }); }
+            catch (e) { signIn = { error: e }; }
+            const { error } = signIn;
             if (error) {
                 document.getElementById('auth-error').style.display = 'block';
-                return showToast("Login failed: " + error.message, "error");
+                return showToast(isNetworkFailure(error) ? DB_UNREACHABLE_MESSAGE : "Login failed: " + error.message, "error", isNetworkFailure(error) ? 12000 : undefined);
             }
             document.getElementById('auth-error').style.display = 'none';
             let opened;
