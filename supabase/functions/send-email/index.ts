@@ -38,8 +38,8 @@
 //
 // Deploy: supabase functions deploy send-email
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { SMTPClient } from "https://deno.land/x/denomailer/mod.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.3";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");

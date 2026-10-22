@@ -390,23 +390,25 @@
         .bin-locator-hover-row-qty { font-weight: 800; font-size: 0.78rem; color: var(--primary); flex-shrink: 0; }
         .bin-locator-touchpad-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; margin-top: 1rem; }
         .bin-locator-touchpad-wrap.hidden { display: none; }
-        .bin-locator-touchpad { width: 108px; height: 108px; border-radius: 50%; background: var(--border); border: 2px solid var(--primary); position: relative; touch-action: none; }
-        .bin-locator-touchpad-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--primary); position: absolute; top: 50%; left: 50%; margin: -8px 0 0 -8px; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: background 0.15s; }
-        .bin-locator-touchpad-dot.active { background: var(--danger); }
+        /* A trackpad: slide on it to push the red dot around the rack (see onBinLocatorPadMove) — it is a surface to slide on, not
+           a map of the rack, so it is a plain rounded pad with a faint dot grid. */
+        .bin-locator-touchpad { width: 160px; height: 112px; border-radius: 18px; background-color: var(--border); background-image: radial-gradient(circle, rgba(100,116,139,0.45) 1px, transparent 1.6px); background-size: 14px 14px; border: 2px solid var(--primary); position: relative; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; display: flex; align-items: center; justify-content: center; transition: border-color 0.12s; }
+        .bin-locator-touchpad.active { border-color: var(--danger); cursor: grabbing; }
+        .bin-locator-touchpad-label { pointer-events: none; font-size: 0.7rem; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-muted); }
         .bin-locator-touchpad-hint { font-size: 0.78rem; color: var(--text-muted); text-align: center; max-width: 260px; }
-        /* The ring that shows WHERE the pad is pointing on the rack — fixed-position (placed from the rack
-           container's own rect, see positionBinLocatorReticle), so it works over the flat grid and the 3D
-           view alike. White halo + dark shadow so it reads on the blue bins and on the dark theme. */
+        /* The pointer: a solid red dot with a white rim and a dark outline, so it reads on the blue bins, the grey floor and in the dark
+           theme alike, drawn on the rack and staying where it was left. Fixed-position, placed from the rack container's own rect
+           (see positionBinLocatorReticle). While a finger is on the pad a ring pulses round it ("being moved"). */
         .bin-locator-reticle {
-            position: fixed; z-index: 3998; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%;
-            border: 3px solid var(--danger); pointer-events: none;
-            background: radial-gradient(circle, var(--danger) 0 3px, transparent 4px);
-            box-shadow: 0 0 0 2px #fff, 0 0 0 5px rgba(0,0,0,0.25), 0 3px 12px rgba(0,0,0,0.45);
-            animation: bin-locator-reticle-pulse 1.6s ease-in-out infinite;
+            position: fixed; z-index: 3998; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%;
+            background: var(--danger); border: 3px solid #fff; pointer-events: none;
+            box-shadow: 0 0 0 2px rgba(0,0,0,0.6), 0 3px 10px rgba(0,0,0,0.55);
         }
+        .bin-locator-reticle::after { content: ''; position: absolute; inset: -15px; border-radius: 50%; border: 3px solid var(--danger); opacity: 0; box-shadow: 0 0 0 1px #fff; }
+        .bin-locator-reticle.active::after { opacity: 0.9; animation: bin-locator-reticle-pulse 0.9s ease-in-out infinite; }
         .bin-locator-reticle.hidden { display: none; }
-        @keyframes bin-locator-reticle-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.14); } }
-        @media (prefers-reduced-motion: reduce) { .bin-locator-reticle { animation: none; } }
+        @keyframes bin-locator-reticle-pulse { 0%, 100% { transform: scale(0.85); } 50% { transform: scale(1.1); } }
+        @media (prefers-reduced-motion: reduce) { .bin-locator-reticle.active::after { animation: none; } }
         .bin-locator-touchpad-select { padding: 0.45rem 1rem; min-height: 40px; font-size: 0.9rem; }
         .bin-locator-touchpad-select .short { display: none; }
         /* Phones: the pad floats in the bottom-LEFT corner (the assistant/camera/chat buttons own the
@@ -416,7 +418,7 @@
            under it so the whole thing stays narrow enough not to reach the buttons on the right. */
         @media (max-width: 640px) {
             .bin-locator-touchpad-wrap { position: fixed; left: 10px; bottom: 14px; z-index: 3990; margin: 0; gap: 0.35rem; background: var(--card-bg); border: 1px solid var(--border); border-radius: 18px; padding: 0.45rem; box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
-            .bin-locator-touchpad { width: 124px; height: 124px; }
+            .bin-locator-touchpad { width: 136px; height: 100px; }
             .bin-locator-touchpad-hint { display: none; }
             .bin-locator-touchpad-select { width: 100%; padding: 0.3rem 0.5rem; min-height: 40px; }
             .bin-locator-touchpad-select .long { display: none; }
@@ -2153,20 +2155,20 @@
         <div class="iso-canvas hidden" id="bin-locator-iso" onclick="onBinLocatorIsoClick(event)" onmouseover="onBinLocatorIsoHover(event)" onmouseleave="hideBinLocatorHoverSoon()"></div>
         <p id="bin-locator-grid-caption" style="color:var(--text-muted); font-size:0.82rem; margin-top:0.5rem;"></p>
 
-        <!-- Optional (off by default) touch-friendly stand-in for hover, since a finger dragged
-             straight over the rack would cover the very cell it's previewing — a separate circular
-             pad off to the side maps 1:1 onto whichever rack view is showing (flat or 3D), so the
-             preview updates as you drag without your finger ever blocking the picture. -->
+        <!-- Touch Preview: a trackpad for the 3D rack. Sliding on it moves a red dot over the rack from wherever the dot already is;
+             lifting the finger leaves it there (so you always know where you are) and the next slide carries on from that spot.
+             A finger dragged straight over the rack would cover the very bin it is previewing, which is why this is a separate
+             surface. Double-tap the pad, or press Open, to open the shelf under the dot. -->
         <div id="bin-locator-touchpad-wrap" class="bin-locator-touchpad-wrap hidden">
             <div id="bin-locator-touchpad" class="bin-locator-touchpad"
-                 ontouchstart="onBinLocatorTouchpadTouchMove(event)" ontouchmove="onBinLocatorTouchpadTouchMove(event)" ontouchend="onBinLocatorTouchpadEnd(event)"
-                 onmousedown="onBinLocatorTouchpadMouseDown(event)">
-                <div id="bin-locator-touchpad-dot" class="bin-locator-touchpad-dot"></div>
+                 ontouchstart="onBinLocatorPadStart(event)" ontouchmove="onBinLocatorPadMove(event)" ontouchend="onBinLocatorPadEnd(event)" ontouchcancel="onBinLocatorPadEnd(event)"
+                 onmousedown="onBinLocatorPadMouseDown(event)">
+                <span class="bin-locator-touchpad-label">⇆ slide</span>
             </div>
-            <p class="bin-locator-touchpad-hint">Drag inside the circle — the dot shows exactly where you are and stays put when you let go; the red ring on the rack shows where it points, so your finger previews a bin without covering it.</p>
-            <button type="button" class="secondary bin-locator-touchpad-select" id="bin-locator-touchpad-select" onclick="selectBinLocatorAtReticle()" disabled title="Open the shelf the ring is on"><span class="long">👆 Open the spot under the ring</span><span class="short">👆 Open</span></button>
+            <p class="bin-locator-touchpad-hint">Slide on the pad to move the red dot over the rack. It stays where you leave it — slide again to carry on from there. Double-tap the pad (or press Open) to open that shelf.</p>
+            <button type="button" class="secondary bin-locator-touchpad-select" id="bin-locator-touchpad-select" onclick="selectBinLocatorAtReticle()" disabled title="Open the shelf the dot is on"><span class="long">👆 Open the spot under the dot</span><span class="short">👆 Open</span></button>
         </div>
-        <!-- The ring itself: where the pad is pointing, drawn on the rack (see positionBinLocatorReticle). -->
+        <!-- The pointer dot itself, drawn over the rack (see positionBinLocatorReticle). -->
         <div id="bin-locator-reticle" class="bin-locator-reticle hidden" aria-hidden="true"></div>
 
         <!-- Hover preview: hovering a shelf cell or bin (flat grid, iso rack, or the shelf strip
@@ -11612,6 +11614,7 @@ th { background: #eee; }
     }
     function onBinLocatorZoneChange() {
         binLocatorZone = document.getElementById('bin-locator-zone-select').value;
+        binLocatorReticle.nx = null; binLocatorReticle.ny = null; // another rack: start in its middle again
         binLocatorSelectedDepth = null;
         binLocatorSelectedLevel = null;
         document.getElementById('bin-locator-detail').classList.add('hidden');
@@ -11797,34 +11800,76 @@ th { background: #eee; }
         localStorage.setItem('bin-locator-touchpad', binLocatorTouchpadEnabled ? '1' : '0');
         document.getElementById('bin-locator-touchpad-wrap').classList.toggle('hidden', !binLocatorTouchpadEnabled);
         if (!binLocatorTouchpadEnabled) { hideBinLocatorHover(); hideBinLocatorReticle(); }
+        else refreshBinLocatorReticle(); // switched on: the dot appears (middle of the rack the first time) straight away
     }
-    // ── The ring: shows where the pad currently points on the rack (normalised 0..1 across the active
-    // rack view, so it follows the rack when the page scrolls or the window resizes instead of staying
-    // glued to a screen position). `target` is whatever element was under it when the pad last moved —
-    // "Open the spot under the ring" acts on that, so a finger never has to land on a tiny bin itself. ──
+    // ── The pointer: a red dot drawn on the rack that stays exactly where you leave it ──────────────────────────
+    // Works like a laptop's TrackPoint/trackpad, not like a mini-map: sliding a finger on the pad NUDGES the dot from where it
+    // already is (so it can be moved a little, or a long way, and always carries on from its last position — nothing jumps),
+    // and lifting the finger leaves it there. The old pad mapped the finger's ABSOLUTE spot inside a small circle onto the
+    // whole rack: the corners of the rack were unreachable, and a 2 px wobble of the thumb moved the pointer by ~5 px.
+    //
+    // Position is kept as 0..1 across the active rack view (not as pixels), so the dot follows the rack when the page scrolls or
+    // the window resizes and survives a redraw. `target` is whatever element lies under the dot — "Open" / a double-tap acts
+    // on that, so a finger never has to land on a tiny bin itself.
     var binLocatorReticle = { nx: null, ny: null, target: null };
+    // pad gesture bookkeeping: last finger position, time/distance for tap detection, time of the previous tap
+    var binLocatorPad = { lastX: 0, lastY: 0, startT: 0, moved: 0, lastTapT: 0, down: false };
+
+    function binLocatorActiveRackContainer() {
+        const isoOn = isoBinViewEnabled && typeof window.buildIsoRackSVG === 'function';
+        return document.getElementById(isoOn ? 'bin-locator-iso' : 'bin-locator-grid');
+    }
+    // The dot exists only while the pad does (Touch Preview on, 3D view, Bin Locator open).
+    function binLocatorPadVisible() {
+        const wrap = document.getElementById('bin-locator-touchpad-wrap');
+        return !!wrap && !wrap.classList.contains('hidden') && activeView === 'bin-locator-view';
+    }
     function positionBinLocatorReticle() {
-        const ring = document.getElementById('bin-locator-reticle');
-        if (!ring) return;
-        if (!Number.isFinite(binLocatorReticle.nx) || !Number.isFinite(binLocatorReticle.ny) || activeView !== 'bin-locator-view') { ring.classList.add('hidden'); return; }
+        const dot = document.getElementById('bin-locator-reticle');
+        if (!dot) return;
+        if (!binLocatorPadVisible() || !Number.isFinite(binLocatorReticle.nx) || !Number.isFinite(binLocatorReticle.ny)) { dot.classList.add('hidden'); return; }
         const rect = binLocatorActiveRackContainer().getBoundingClientRect();
-        if (!rect.width || !rect.height) { ring.classList.add('hidden'); return; }
-        ring.style.left = (rect.left + rect.width * binLocatorReticle.nx) + 'px';
-        ring.style.top = (rect.top + rect.height * binLocatorReticle.ny) + 'px';
-        ring.classList.remove('hidden');
+        if (!rect.width || !rect.height) { dot.classList.add('hidden'); return; }
+        dot.style.left = (rect.left + rect.width * binLocatorReticle.nx) + 'px';
+        dot.style.top = (rect.top + rect.height * binLocatorReticle.ny) + 'px';
+        dot.classList.remove('hidden');
     }
     function hideBinLocatorReticle() {
         binLocatorReticle = { nx: null, ny: null, target: null };
-        const ring = document.getElementById('bin-locator-reticle');
-        if (ring) ring.classList.add('hidden');
+        binLocatorPad.down = false;
+        const dot = document.getElementById('bin-locator-reticle');
+        if (dot) { dot.classList.add('hidden'); dot.classList.remove('active'); }
         const btn = document.getElementById('bin-locator-touchpad-select');
         if (btn) btn.disabled = true;
-        const dot = document.getElementById('bin-locator-touchpad-dot');
-        if (dot) { dot.style.transform = ''; dot.classList.remove('active'); }
+    }
+    // Finds what is under the dot (and, when asked, shows that spot's preview card — only after the person has moved it, so
+    // merely opening the screen doesn't throw a card up).
+    function updateBinLocatorReticleTarget(showPreview) {
+        const container = binLocatorActiveRackContainer();
+        const rect = container.getBoundingClientRect();
+        const select = document.getElementById('bin-locator-touchpad-select');
+        if (!rect.width || !rect.height || !Number.isFinite(binLocatorReticle.nx)) { binLocatorReticle.target = null; if (select) select.disabled = true; return; }
+        // elementFromPoint ignores the dot itself (pointer-events:none), so it sees the rack underneath
+        const el = document.elementFromPoint(rect.left + rect.width * binLocatorReticle.nx, rect.top + rect.height * binLocatorReticle.ny);
+        binLocatorReticle.target = el;
+        if (select) select.disabled = !(el && el.closest('[data-depth][data-level], .map-cell'));
+        if (!showPreview) return;
+        if (!el) { hideBinLocatorHover(); return; }
+        if (container.id === 'bin-locator-iso') { onBinLocatorIsoHover({ target: el }); return; }
+        const cell = el.closest('.map-cell');
+        if (cell && typeof cell.onmouseenter === 'function') cell.onmouseenter(); else hideBinLocatorHover();
+    }
+    // After the rack is (re)drawn, when Touch Preview is switched on, or the pad is shown: make sure the dot is visible — starting
+    // in the middle the first time — and keeps whatever position it already had.
+    function refreshBinLocatorReticle() {
+        if (!binLocatorPadVisible()) { hideBinLocatorReticle(); return; }
+        if (!Number.isFinite(binLocatorReticle.nx) || !Number.isFinite(binLocatorReticle.ny)) { binLocatorReticle.nx = 0.5; binLocatorReticle.ny = 0.5; }
+        positionBinLocatorReticle();
+        updateBinLocatorReticleTarget(false);
     }
     function selectBinLocatorAtReticle() {
         const el = binLocatorReticle.target;
-        if (!el || !el.isConnected) { showToast("Drag the dot over the rack first.", "info"); return; }
+        if (!el || !el.isConnected) { showToast("Slide on the pad to put the dot over the rack first.", "info"); return; }
         const iso = el.closest('[data-depth][data-level]');
         if (iso) { selectBinLocatorCell(parseInt(iso.dataset.depth, 10), parseInt(iso.dataset.level, 10)); return; }
         const cell = el.closest('.map-cell');
@@ -11833,70 +11878,75 @@ th { background: #eee; }
     window.addEventListener('scroll', positionBinLocatorReticle, { passive: true });
     window.addEventListener('resize', positionBinLocatorReticle);
 
-    function binLocatorActiveRackContainer() {
-        const isoOn = isoBinViewEnabled && typeof window.buildIsoRackSVG === 'function';
-        return document.getElementById(isoOn ? 'bin-locator-iso' : 'bin-locator-grid');
-    }
-    // Moves the dot to wherever the finger/pointer is right now (clamped to the circle) and maps
-    // that same spot onto the rack. Shared by the touch path (ontouchstart/ontouchmove, which keep
-    // firing on the pad itself no matter where within it the finger drifts) and the mouse path
-    // (mousedown + window-level mousemove/mouseup below — a single mousedown alone only ever fires
-    // once, so a held-down drag needs the window listeners to keep tracking it, same pattern as the
-    // Layout Designer's own drag handlers use).
-    function updateBinLocatorTouchpad(e) {
-        const pad = document.getElementById('bin-locator-touchpad');
-        const rect = pad.getBoundingClientRect();
-        if (!rect.width) return; // the pad is hidden (Touch Preview off / Flat view) — nothing to map from
-        const point = e.touches && e.touches[0] ? e.touches[0] : e;
-        const r = rect.width / 2;
-        const cx = rect.left + r, cy = rect.top + r;
-        let dx = point.clientX - cx, dy = point.clientY - cy;
-        const dist = Math.hypot(dx, dy);
-        if (dist > r) { dx = dx / dist * r; dy = dy / dist * r; }
-
-        const dot = document.getElementById('bin-locator-touchpad-dot');
-        dot.style.transform = `translate(${dx}px, ${dy}px)`;
-        dot.classList.add('active');
-
-        const container = binLocatorActiveRackContainer();
-        const cRect = container.getBoundingClientRect();
-        if (!cRect.width || !cRect.height) return;
-        const nx = (dx / r + 1) / 2, ny = (dy / r + 1) / 2; // -1..1 -> 0..1
-        const targetX = cRect.left + cRect.width * nx;
-        const targetY = cRect.top + cRect.height * ny;
-        // The ring goes down BEFORE the lookup so it shows even over empty floor between bins; it has
-        // pointer-events:none, so elementFromPoint looks straight through it.
-        binLocatorReticle.nx = nx; binLocatorReticle.ny = ny;
+    // Moves the dot by a finger movement of (dxPx, dyPx). Slow, careful strokes are nearly 1:1 with a little extra reach (fine
+    // control over a single bin); quick strokes accelerate up to ~4x so crossing the whole rack takes one flick. Clamped to the
+    // rack, so the dot can never be lost off its edge — and since it is positioned in rack units, every corner is reachable.
+    function moveBinLocatorReticleBy(dxPx, dyPx) {
+        const rect = binLocatorActiveRackContainer().getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        if (!Number.isFinite(binLocatorReticle.nx)) { binLocatorReticle.nx = 0.5; binLocatorReticle.ny = 0.5; }
+        const gain = 1.3 + Math.min(2.7, Math.hypot(dxPx, dyPx) / 5);
+        binLocatorReticle.nx = Math.min(1, Math.max(0, binLocatorReticle.nx + dxPx * gain / rect.width));
+        binLocatorReticle.ny = Math.min(1, Math.max(0, binLocatorReticle.ny + dyPx * gain / rect.height));
         positionBinLocatorReticle();
-        const el = document.elementFromPoint(targetX, targetY);
-        binLocatorReticle.target = el;
-        document.getElementById('bin-locator-touchpad-select').disabled = !(el && el.closest('[data-depth][data-level], .map-cell'));
-        if (!el) { hideBinLocatorHover(); return; }
-        if (container.id === 'bin-locator-iso') { onBinLocatorIsoHover({ target: el }); return; }
-        const cell = el.closest('.map-cell');
-        if (cell && typeof cell.onmouseenter === 'function') cell.onmouseenter(); else hideBinLocatorHover();
-    }
-    function onBinLocatorTouchpadTouchMove(e) { e.preventDefault(); updateBinLocatorTouchpad(e); }
-    function onBinLocatorTouchpadMouseDown(e) {
-        e.preventDefault();
-        updateBinLocatorTouchpad(e);
-        window.addEventListener('mousemove', updateBinLocatorTouchpad);
-        window.addEventListener('mouseup', onBinLocatorTouchpadMouseUp);
-    }
-    function onBinLocatorTouchpadMouseUp() {
-        window.removeEventListener('mousemove', updateBinLocatorTouchpad);
-        window.removeEventListener('mouseup', onBinLocatorTouchpadMouseUp);
-        document.getElementById('bin-locator-touchpad-dot').classList.remove('active');
-    }
-    function onBinLocatorTouchpadEnd() {
-        // The dot deliberately stays exactly where the last drag left it, and the card stays open —
-        // its whole job is showing "where we are right now," not springing back to the centre the
-        // instant the finger lifts. It only moves again on the next drag.
-        document.getElementById('bin-locator-touchpad-dot').classList.remove('active');
+        updateBinLocatorReticleTarget(true);
     }
 
+    function binLocatorPadPoint(e) { return e.touches && e.touches[0] ? e.touches[0] : (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0] : e); }
+    function onBinLocatorPadStart(e) {
+        if (e.cancelable) e.preventDefault(); // no page scroll / emulated mouse events while using the pad
+        const p = binLocatorPadPoint(e);
+        binLocatorPad = { ...binLocatorPad, lastX: p.clientX, lastY: p.clientY, startT: Date.now(), moved: 0, down: true };
+        const dot = document.getElementById('bin-locator-reticle');
+        if (dot) dot.classList.add('active');
+        document.getElementById('bin-locator-touchpad').classList.add('active');
+        refreshBinLocatorReticle(); // a first touch always has a dot to push around
+    }
+    function onBinLocatorPadMove(e) {
+        if (!binLocatorPad.down) return;
+        if (e.cancelable) e.preventDefault();
+        const p = binLocatorPadPoint(e);
+        const dx = p.clientX - binLocatorPad.lastX, dy = p.clientY - binLocatorPad.lastY;
+        binLocatorPad.lastX = p.clientX; binLocatorPad.lastY = p.clientY;
+        binLocatorPad.moved += Math.abs(dx) + Math.abs(dy);
+        if (dx || dy) moveBinLocatorReticleBy(dx, dy);
+    }
+    // Lifting the finger deliberately does nothing to the dot or the card: they stay put ("this is where we are") until the
+    // next slide moves them. A quick, still touch is a TAP; two taps in a row open the shelf under the dot.
+    function onBinLocatorPadEnd(e) {
+        if (!binLocatorPad.down) return;
+        binLocatorPad.down = false;
+        const dot = document.getElementById('bin-locator-reticle');
+        if (dot) dot.classList.remove('active');
+        document.getElementById('bin-locator-touchpad').classList.remove('active');
+        const now = Date.now();
+        if (e && e.type !== 'touchcancel' && now - binLocatorPad.startT < 300 && binLocatorPad.moved < 8) {
+            if (now - binLocatorPad.lastTapT < 400) { binLocatorPad.lastTapT = 0; selectBinLocatorAtReticle(); }
+            else binLocatorPad.lastTapT = now;
+        }
+    }
+    // Mouse: a held-down drag needs window-level move/up listeners (a single mousedown fires once), same pattern the Layout
+    // Designer's own drags use.
+    function onBinLocatorPadMouseDown(e) {
+        if (e.button !== undefined && e.button !== 0) return;
+        onBinLocatorPadStart(e);
+        window.addEventListener('mousemove', onBinLocatorPadMove);
+        window.addEventListener('mouseup', onBinLocatorPadMouseUp);
+    }
+    function onBinLocatorPadMouseUp(e) {
+        window.removeEventListener('mousemove', onBinLocatorPadMove);
+        window.removeEventListener('mouseup', onBinLocatorPadMouseUp);
+        onBinLocatorPadEnd(e);
+    }
+
+    // Draws the rack, then puts the pointer dot back exactly where it was: a redraw (opening a shelf, switching heatmap) must neither
+    // move nor lose it.
     function renderBinLocatorGrid() {
-        hideBinLocatorReticle(); // the rack is about to be redrawn — the ring's target would be a stale element
+        binLocatorReticle.target = null; // the element it pointed at is about to be replaced
+        renderBinLocatorGridCore();
+        refreshBinLocatorReticle();
+    }
+    function renderBinLocatorGridCore() {
         const grid = document.getElementById('bin-locator-grid');
         const caption = document.getElementById('bin-locator-grid-caption');
         const bounds = getZoneBounds(binLocatorZone);
